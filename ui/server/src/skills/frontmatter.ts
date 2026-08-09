@@ -169,6 +169,12 @@ export function parseSkillDocument(raw: string, filePath: string): ParsedSkillDo
     )
   }
   const { frontmatter, body } = splitFrontmatter(raw, filePath)
+  const metadata =
+    frontmatter.metadata && typeof frontmatter.metadata === 'object' && !Array.isArray(frontmatter.metadata)
+      ? frontmatter.metadata as Frontmatter
+      : undefined
+  const valueForWithMetadata = (...names: string[]): unknown =>
+    valueFor(frontmatter, ...names) ?? (metadata ? valueFor(metadata, ...names) : undefined)
   const name = optionalString(frontmatter.name)
   if (!name) {
     throw new SkillParseError(
@@ -178,7 +184,7 @@ export function parseSkillDocument(raw: string, filePath: string): ParsedSkillDo
     )
   }
 
-  const mediaModes = stringList(valueFor(frontmatter, 'mediaModes', 'media_modes', 'media-modes')).filter(
+  const mediaModes = stringList(valueForWithMetadata('mediaModes', 'media_modes', 'media-modes')).filter(
     (mode): mode is CanvasMediaMode => MEDIA_MODES.has(mode as CanvasMediaMode),
   )
   const requestedCompatibility = optionalString(frontmatter.compatibility) as SkillCompatibility | undefined
@@ -199,7 +205,7 @@ export function parseSkillDocument(raw: string, filePath: string): ParsedSkillDo
       valueFor(frontmatter, 'userInvocable', 'user_invocable', 'user-invocable'),
       true,
     ),
-    triggerWords: stringList(valueFor(frontmatter, 'triggerWords', 'trigger_words', 'trigger-words')),
+    triggerWords: stringList(valueForWithMetadata('triggerWords', 'trigger_words', 'trigger-words')),
     mediaModes,
     compatibility,
     compatibilityReason: optionalString(

@@ -61,6 +61,15 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     expect(manifest.body).toBe('Before\n---\nAfter')
   })
 
+  test('reads trigger words and media modes from nested metadata', () => {
+    const parsed = parseSkillDocument(
+      '---\nname: nested-fields\ndescription: test\nmetadata:\n  trigger-words: [cinematic, animate]\n  media_modes: [text_to_video]\n---\nbody',
+      '/packs/demo/skills/nested-fields/SKILL.md',
+    )
+    expect(parsed.manifest.triggerWords).toEqual(['cinematic', 'animate'])
+    expect(parsed.manifest.mediaModes).toEqual(['text_to_video'])
+  })
+
   test('fails with typed errors for missing or malformed frontmatter', () => {
     expect(() => parseSkillDocument('# no delimiter', '/tmp/skills/x/SKILL.md')).toThrow(
       expect.objectContaining({ code: 'SKILL_FRONTMATTER_MISSING' }),
@@ -91,6 +100,14 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     expect(() => parseSkillDocument(raw, '/tmp/skills/too-large/SKILL.md')).toThrow(
       expect.objectContaining({ code: 'SKILL_FILE_TOO_LARGE' }),
     )
+  })
+
+  test('accepts a SKILL.md whose complete UTF-8 document is exactly 256 KiB', () => {
+    const header = '---\nname: exact-size\ndescription: test\n---\n'
+    const targetBytes = 256 * 1024
+    const raw = header + 'x'.repeat(targetBytes - Buffer.byteLength(header, 'utf8'))
+    expect(Buffer.byteLength(raw, 'utf8')).toBe(targetBytes)
+    expect(parseSkillDocument(raw, '/tmp/skills/exact-size/SKILL.md').manifest.name).toBe('exact-size')
   })
 
   test('parses and loads only the explicit references in the H3 fixture', async () => {
