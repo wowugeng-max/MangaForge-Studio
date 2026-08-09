@@ -3,6 +3,7 @@ import { basename, dirname, join, sep } from 'node:path'
 
 import { readOpenAIMetadata, parseSkillDocument } from './frontmatter'
 import { readPackRecord } from './pack-installer'
+import { assertSafeRelativeSkillPath } from './path-safety'
 import type { CanvasMediaMode, SkillCompatibility, SkillManifest } from './types'
 import { builtinPromptSkill } from './builtin'
 
@@ -113,8 +114,8 @@ async function collectSignature(root: string, entries: string[]): Promise<void> 
 }
 
 async function readOptionalMetadata(skillRoot: string): Promise<Pick<SkillManifest, 'displayName' | 'shortDescription' | 'defaultPrompt'>> {
-  const path = join(skillRoot, 'agents', 'openai.yaml')
   try {
+    const path = await assertSafeRelativeSkillPath(skillRoot, 'agents/openai.yaml')
     const info = await lstat(path)
     if (info.isSymbolicLink() || !info.isFile()) return {}
     return readOpenAIMetadata(await readFile(path, 'utf8'))

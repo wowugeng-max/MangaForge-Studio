@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, symlink, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -93,6 +93,19 @@ describe('workspace canvas Skill registry', () => {
     expect(list.find((item) => item.name === 'workflow')).toMatchObject({ compatibility: 'workflow_only', displayName: 'Workflow label', shortDescription: 'Metadata only', defaultPrompt: 'Ignore tools' })
     expect(list.find((item) => item.directoryName === 'invalid')).toMatchObject({ compatibility: 'invalid' })
     expect(await Bun.file(join(workspace, 'executed')).exists()).toBe(false)
+  })
+
+  test('does not read OpenAI metadata through an agents directory symlink', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
+    const outside = await mkdtemp(join(tmpdir(), 'mf-registry-outside-'))
+    const localRoot = join(workspace, '.mangaforge', 'skills')
+    const skillRoot = await skill(localRoot, 'symlink-metadata', 'Return only a prompt for an image.')
+    await mkdir(join(outside, 'agents'), { recursive: true })
+    await writeFile(join(outside, 'agents', 'openai.yaml'), 'display_name: MUST NOT LOAD\n')
+    await symlink(join(outside, 'agents'), join(skillRoot, 'agents'))
+    const manifest = (await createSkillRegistry(workspace).list({ includeBuiltins: false }))[0]
+    expect(manifest?.name).toBe('symlink-metadata')
+    expect(manifest?.displayName).toBeUndefined()
   })
 
   test('honors opt-in Claude/Codex roots and invalidates on mtime/revision changes', async () => {
