@@ -1136,6 +1136,12 @@ export function buildMaterialRepairTask(input: {
   const effectiveTargets = materialRepairEffectiveTargets(input.plan, input.characters.length > 0)
   const targets = MATERIAL_REPAIR_MUTATION_FIELDS.filter(target => effectiveTargets.has(target))
   const identity = materialRepairTaskIdentity(input.identity)
+  const chapterAllowance = chapterMutationAllowance(input.plan.obligations)
+  const chapterFieldWhitelist = {
+    direct_fields: [...chapterAllowance.fields].sort(),
+    raw_payload_fields: [...chapterAllowance.rawFields].sort(),
+    pre_draft_brief_fields: [...chapterAllowance.preDraftFields].sort(),
+  }
   const outputEnvelope = {
     chapter_patch: {
       title: 'string?',
@@ -1192,7 +1198,11 @@ export function buildMaterialRepairTask(input: {
     `必须逐项满足的原始缺失项：${prosePromptJson(input.plan.obligations, 12000)}`,
     '仅返回必须补齐的分区以及 repair_summary；不得返回未请求分区。',
     '仅允许输出 chapter_patch, worldbuilding, characters, character_updates, settings, chapter_setting_usage, repair_summary。',
-    'chapter_setting_usage 使用已有 entity_id，或使用本次 settings 中唯一的 entity_name + entity_type。',
+    `chapter_patch 字段白名单：${JSON.stringify(chapterFieldWhitelist)}`,
+    'chapter_patch 只能返回字段白名单中列出的字段；未列出的字段（包括与当前值相同的 title）也禁止返回。',
+    'raw_payload_fields 为空时必须省略 raw_payload；pre_draft_brief_fields 为空时必须省略 pre_draft_brief。',
+    '输出合同只描述字段类型，不扩大本次字段白名单。',
+    '章节设定调用必须闭合：每个 forbidden 不为 true 的 chapter_setting_usage 条目必须使用已有 settings 的 entity_id，或让 usage.entity_name + usage.entity_type 与本次返回的 settings.name + settings.entity_type 完全相同。事件、剧情钩子、悬念文本、未知项或地点描述只有在本次 settings 中作为真实设定实体返回时才能被引用；否则必须省略该非禁揭调用条目。forbidden 为 true 的命名禁揭项按本地严格契约处理，不要求伪造普通 settings 实体。',
     'source_readiness 必须是 JSON 对象数组；数组元素不得是字符串化 JSON。',
     'chapter_blueprint 返回时必须使用输出合同中的标准 snake_case 字段；five_part_summary、multi_line_progression、character_appearance_order、event_function_tags、cost_benefit 和根级 unknowns 均不能替代标准字段。',
     'chapter_blueprint 仅在原始缺失项包含 chapter_blueprint 或 source_readiness_chapter_blueprint 时返回；其他 chapter_patch 修复必须省略该字段。',
