@@ -86,11 +86,21 @@ export interface LLMToolCall {
   arguments: Record<string, any>
 }
 
+export type LLMReferenceImage = {
+  url: string
+  reference_index: number
+  reference_id?: string
+  reference_role?: string
+  source_asset_ids?: number[]
+}
+
 export interface LLMRequest {
   model: string
   type?: string
   prompt?: string
   messages: LLMMessage[]
+  /** Ordered canvas image references. `image_url` remains a legacy first-image compatibility field. */
+  reference_images?: LLMReferenceImage[]
   /** Optional negative prompt. Provider body builders only forward this on media routes. */
   negative_prompt?: string
   temperature?: number

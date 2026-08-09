@@ -77,6 +77,8 @@ function compiledSkillResult(overrides: Record<string, any> = {}) {
       parameters: {},
       references_used: overrides.references || [],
       warnings: overrides.warnings || [],
+      ...(overrides.referenceBindings ? { reference_bindings: overrides.referenceBindings } : {}),
+      ...(overrides.referenceModeHint ? { reference_mode_hint: overrides.referenceModeHint } : {}),
     },
     inputHash: overrides.inputHash || 'hash-1',
     cached: false,
@@ -198,6 +200,7 @@ describe('canvas generate route', () => {
     })
     expect(request.client_id).toBeUndefined()
     expect(request.empty_optional).toBeUndefined()
+    expect(request.reference_images).toBeUndefined()
   })
 
   test('packages incoming canvas assets as multimodal message parts and source lineage', async () => {
@@ -214,9 +217,29 @@ describe('canvas generate route', () => {
           { id: 103, type: 'prompt', content: '主角穿红色外套，画面要有压迫感', source_asset_ids: [201, 202] },
         ],
       },
+      reference_images: [
+        { url: '/duplicate-a.png', reference_index: 1 },
+        { url: '/duplicate-b.png', reference_index: 2 },
+      ],
     }) as any
 
     expect(request.image_url).toBe('/api/assets/media/assets%2Fsource-a.png')
+    expect(request.reference_images).toEqual([
+      {
+        url: '/api/assets/media/assets%2Fsource-a.png',
+        reference_index: 1,
+        reference_id: 'reference-1',
+        reference_role: 'general',
+        source_asset_ids: [101],
+      },
+      {
+        url: 'https://cdn.example/source-b.png',
+        reference_index: 2,
+        reference_id: 'reference-2',
+        reference_role: 'general',
+        source_asset_ids: [102],
+      },
+    ])
     expect(request.source_asset_ids).toEqual([101, 102, 103, 201, 202])
     expect(request.incoming_assets).toBeUndefined()
     expect(request.messages).toEqual([
@@ -228,6 +251,42 @@ describe('canvas generate route', () => {
           { type: 'image_url', image_url: { url: 'https://cdn.example/source-b.png' } },
         ],
       },
+    ])
+  })
+
+  test('uses reference bindings and reference images as ordered fallbacks when incoming assets are absent', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const fromBindings = buildCanvasGenerateLLMRequest({
+      model: 'vision-model',
+      type: 'image_to_video',
+      prompt: '组合参考',
+      referenceBindings: [
+        { type: 'image', url: '/api/assets/media/a.png', referenceIndex: 1, referenceId: 'a', referenceRole: 'first_frame', sourceAssetIds: [11] },
+        { type: 'prompt', content: '保持角色服装一致', referenceIndex: 2, referenceId: 'context', referenceRole: 'prompt_context', sourceAssetIds: [12] },
+      ],
+    }) as any
+    const fromImages = buildCanvasGenerateLLMRequest({
+      model: 'vision-model',
+      type: 'image_to_video',
+      prompt: '组合参考',
+      reference_images: [
+        { url: '/api/assets/media/a.png', reference_index: 1, reference_id: 'a', reference_role: 'first_frame', source_asset_ids: [11] },
+        { url: '/api/assets/media/b.png', reference_index: 2, reference_id: 'b', reference_role: 'last_frame', source_asset_ids: [12] },
+      ],
+    }) as any
+
+    expect(fromBindings.reference_images).toEqual([
+      { url: '/api/assets/media/a.png', reference_index: 1, reference_id: 'a', reference_role: 'first_frame', source_asset_ids: [11] },
+    ])
+    expect(fromBindings.source_asset_ids).toEqual([11, 12])
+    expect(fromBindings.messages[0].content).toEqual([
+      { type: 'text', text: '组合参考\n\n[连线素材]:\n保持角色服装一致' },
+      { type: 'image_url', image_url: { url: '/api/assets/media/a.png' } },
+    ])
+    expect(fromImages.reference_images).toEqual([
+      { url: '/api/assets/media/a.png', reference_index: 1, reference_id: 'a', reference_role: 'first_frame', source_asset_ids: [11] },
+      { url: '/api/assets/media/b.png', reference_index: 2, reference_id: 'b', reference_role: 'last_frame', source_asset_ids: [12] },
     ])
   })
 
@@ -586,6 +645,164 @@ describe('canvas generate route', () => {
     })
   })
 
+  test('preserves ordered canonical reference images through Skill compilation, provider execution, audit, and lineage', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileInput: any
+    let executeRequest: any
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileInput = input
+        return compiledSkillResult({
+          skillName: 'h3-prompt-writing',
+          mode: 'image_to_video',
+          prompt: 'compiled multi-reference prompt',
+          references: ['references/video.md'],
+          referenceBindings: input.incomingAssets,
+          referenceModeHint: 'FL2VA',
+        }) as any
+      },
+      execute: async (_workspace, request) => {
+        executeRequest = request
+        return { content: 'video-result', finish_reason: 'stop', parsed: null } as any
+      },
+    })
+
+    const incomingAssets = [
+      {
+        id: 41,
+        type: 'image',
+        url: '/ref-a.png',
+        referenceIndex: 1,
+        referenceId: 'opening-frame',
+        referenceRole: 'first_frame',
+        sourceAssetIds: [401, 41, -1, 401],
+      },
+      {
+        id: 42,
+        type: 'image',
+        url: '/ref-b.png',
+        reference_index: 2,
+        reference_id: 'closing-frame',
+        reference_role: 'last_frame',
+        source_asset_ids: [402, 42, 0, 402],
+      },
+    ]
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'video-model',
+        type: 'image_to_video',
+        prompt: 'animate both frames',
+        skill_name: 'h3-prompt-writing',
+        params: { incoming_assets: incomingAssets },
+        reference_images: incomingAssets.map(item => ({ ...item, type: undefined })),
+      },
+    })
+
+    expect(compileInput.incomingAssets).toEqual([
+      {
+        type: 'image',
+        url: '/ref-a.png',
+        reference_index: 1,
+        reference_id: 'opening-frame',
+        reference_role: 'first_frame',
+        source_asset_ids: [41, 401],
+      },
+      {
+        type: 'image',
+        url: '/ref-b.png',
+        reference_index: 2,
+        reference_id: 'closing-frame',
+        reference_role: 'last_frame',
+        source_asset_ids: [42, 402],
+      },
+    ])
+    expect(executeRequest.image_url).toBe('/ref-a.png')
+    expect(executeRequest.reference_images).toEqual([
+      {
+        url: '/ref-a.png',
+        reference_index: 1,
+        reference_id: 'opening-frame',
+        reference_role: 'first_frame',
+        source_asset_ids: [41, 401],
+      },
+      {
+        url: '/ref-b.png',
+        reference_index: 2,
+        reference_id: 'closing-frame',
+        reference_role: 'last_frame',
+        source_asset_ids: [42, 402],
+      },
+    ])
+    expect(executeRequest.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'compiled multi-reference prompt' },
+      { type: 'image_url', image_url: { url: '/ref-a.png' } },
+      { type: 'image_url', image_url: { url: '/ref-b.png' } },
+    ])
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      source_asset_ids: [41, 401, 42, 402],
+      reference_bindings: compileInput.incomingAssets,
+      reference_mode_hint: 'FL2VA',
+      result: {
+        source_asset_ids: [41, 401, 42, 402],
+        reference_bindings: compileInput.incomingAssets,
+        reference_mode_hint: 'FL2VA',
+      },
+    })
+  })
+
+  test('rejects invalid reference collections before compiler, provider, Comfy, or task work', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), '{invalid-provider-json')
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    let executeCalls = 0
+    let comfyCalls = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({ skillName: 'h3-prompt-writing', mode: 'image_to_video' }) as any
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      comfyExecute: async () => { comfyCalls += 1; return { prompt_id: 'unexpected', output_files: [], history: {} } },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    const invalidCases = [
+      {
+        expectedCode: 'REFERENCE_LIMIT_EXCEEDED',
+        assets: Array.from({ length: 10 }, (_, index) => ({ type: 'image', url: `/ref-${index + 1}.png` })),
+      },
+      { expectedCode: 'REFERENCE_MEDIA_UNSUPPORTED', assets: [{ type: 'video', url: '/clip.mp4' }] },
+      { expectedCode: 'REFERENCE_MEDIA_UNSUPPORTED', assets: [{ type: 'audio', url: '/voice.wav' }] },
+      { expectedCode: 'REFERENCE_LINEAGE_INVALID', assets: [{ type: 'image', url: '/ref.png', source_asset_ids: 'not-an-array' }] },
+    ]
+
+    for (const invalidCase of invalidCases) {
+      const res = await call(handlers.get('POST /api/generate'), {
+        body: {
+          provider: 'local-comfy',
+          model: 'comfyui-workflow',
+          type: 'image_to_video',
+          prompt: 'animate references',
+          skill_name: 'h3-prompt-writing',
+          workflow_json: { '3': { inputs: { text: 'editable' } } },
+          params: { client_id: `invalid-${invalidCase.expectedCode}`, incoming_assets: invalidCase.assets },
+        },
+      })
+      expect(res.statusCode).toBe(422)
+      expect(res.body).toMatchObject({ error_code: invalidCase.expectedCode })
+    }
+    expect(compileCalls).toBe(0)
+    expect(executeCalls).toBe(0)
+    expect(comfyCalls).toBe(0)
+    expect(taskCalls).toBe(0)
+  })
+
   test('detects final-user Skill commands in messages-only payloads and lets them override dropdowns', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')
@@ -695,7 +912,13 @@ describe('canvas generate route', () => {
     let executeCalls = 0
     let cancelExecutionStarted = false
     registerGenerateRoutes(app as any, () => workspace, {
-      compilePromptSkill: async () => compiledSkillResult({ sourceUrl: 'https://github.com/acme/prompt-pack' }) as any,
+      compilePromptSkill: async () => compiledSkillResult({
+        sourceUrl: 'https://github.com/acme/prompt-pack',
+        referenceBindings: [{
+          type: 'image', url: '/audit-ref.png', reference_index: 1, reference_id: 'audit-ref', reference_role: 'general', source_asset_ids: [77],
+        }],
+        referenceModeHint: 'Ref2VA',
+      }) as any,
       execute: async (_activeWorkspace, _request, _preferredModelId, options) => {
         executeCalls += 1
         if (executeCalls === 1) return { content: 'async image', finish_reason: 'stop', parsed: null } as any
@@ -735,9 +958,17 @@ describe('canvas generate route', () => {
           skill_name: 'prompt-optimizer',
           skill_pack_id: 'builtin',
           skill_pack_source: 'https://github.com/acme/prompt-pack',
+          reference_bindings: [{
+            type: 'image', url: '/audit-ref.png', reference_index: 1, reference_id: 'audit-ref', reference_role: 'general', source_asset_ids: [77],
+          }],
+          reference_mode_hint: 'Ref2VA',
           result: {
             skill_pack_id: 'builtin',
             skill_pack_source: 'https://github.com/acme/prompt-pack',
+            reference_bindings: [{
+              type: 'image', url: '/audit-ref.png', reference_index: 1, reference_id: 'audit-ref', reference_role: 'general', source_asset_ids: [77],
+            }],
+            reference_mode_hint: 'Ref2VA',
           },
         },
       },

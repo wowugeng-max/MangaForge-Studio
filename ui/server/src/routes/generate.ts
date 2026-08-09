@@ -7,7 +7,16 @@ import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageCo
 import { registerTask, taskMessageManager, unregisterTask, type CancelToken } from '../ws-manager'
 import { executeLocalComfyWorkflow, interruptLocalComfy, type ExecuteLocalComfyWorkflowOptions, type LocalComfyResult } from '../comfy-local'
 import { parseSkillCommand } from '../skills/skill-command'
-import type { CanvasMediaMode, PromptCompileInput, PromptCompileResult } from '../skills/types'
+import { CanvasReferenceError, validateCanvasReferenceAssets } from '../skills/reference-bindings'
+import type {
+  CanvasMediaMode,
+  CanvasReferenceBinding,
+  CanvasReferenceModeHint,
+  CanvasReferenceRole,
+  CanvasReferenceType,
+  PromptCompileInput,
+  PromptCompileResult,
+} from '../skills/types'
 
 type ExecuteGenerate = (
   activeWorkspace: string,
@@ -49,6 +58,8 @@ type SkillCompileAudit = {
   warnings: string[]
   compiler_model_id: number
   raw_prompt: string
+  reference_bindings?: CanvasReferenceBinding[]
+  reference_mode_hint?: CanvasReferenceModeHint
 }
 
 const SKILL_MEDIA_MODES = new Set<CanvasMediaMode>([
@@ -70,7 +81,7 @@ function skillErrorStatus(code: string): number {
   // Ambiguous selectors and duplicate leading commands are client choices;
   // callers can resolve them without retrying a provider request.
   if (code === 'SKILL_AMBIGUOUS' || code === 'SKILL_COMMAND_DUPLICATE') return 409
-  if (code.startsWith('SKILL_')) return 422
+  if (code.startsWith('SKILL_') || code.startsWith('REFERENCE_')) return 422
   return 500
 }
 
@@ -87,7 +98,10 @@ function toNumber(value: unknown, fallback: number) {
 
 type IncomingCanvasAsset = {
   id?: number
-  type: string
+  type: CanvasReferenceType
+  reference_index: number
+  reference_id: string
+  reference_role: CanvasReferenceRole
   content?: string
   file_path?: string
   url?: string
@@ -276,6 +290,10 @@ function replaceCompiledPrompt(messages: LLMMessage[], prompt: string): LLMMessa
 }
 
 function compileAudit(compiled: CompiledSkillResult, rawPrompt: string): SkillCompileAudit {
+  const referenceBindings = compiled.result.reference_bindings?.map(binding => ({
+    ...binding,
+    ...(binding.source_asset_ids ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+  }))
   return {
     skill_name: compiled.result.skill_name,
     skill_pack_id: compiled.skill.packId,
@@ -288,50 +306,131 @@ function compileAudit(compiled: CompiledSkillResult, rawPrompt: string): SkillCo
     warnings: [...compiled.result.warnings],
     compiler_model_id: compiled.compilerModelId,
     raw_prompt: rawPrompt,
+    ...(referenceBindings ? { reference_bindings: referenceBindings } : {}),
+    ...(compiled.result.reference_mode_hint ? { reference_mode_hint: compiled.result.reference_mode_hint } : {}),
   }
 }
 
-function normalizeCanvasAssetImageUrl(value: unknown) {
+function normalizeCanvasAssetImageUrl(value: unknown, preserveRootRelative = false) {
   const text = String(value || '').trim()
   if (!text) return ''
   if (/^(https?:|data:|blob:)/i.test(text)) return text
   if (text.startsWith('/api/assets/media/')) return text
   if (text.startsWith('/api/files/')) return text
+  if (preserveRootRelative && text.startsWith('/')) return text
   return `/api/assets/media/${encodeURIComponent(text.replace(/^\/+/, ''))}`
 }
 
-function normalizeIncomingAssets(value: unknown): IncomingCanvasAsset[] {
-  const rawAssets = Array.isArray(value) ? value : []
-  return rawAssets
-    .map((item: any) => {
-      if (!item || typeof item !== 'object') return null
-      const type = String(item.type || item.asset_type || '').toLowerCase()
-      const id = Number.isFinite(Number(item.id)) ? Number(item.id) : undefined
-      const lineage = Array.from(new Set([
-        ...(id ? [id] : []),
-        ...normalizeSourceAssetIds(item.source_asset_ids ?? item.sourceAssetIds),
-      ]))
-      const rawImageUrl = item.url || item.file_path || item.filePath || item.data?.url || item.data?.file_path || item.data?.content
-      if (type === 'image' || (rawImageUrl && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(String(rawImageUrl)))) {
-        const url = normalizeCanvasAssetImageUrl(rawImageUrl)
-        return {
-          id,
-          type: 'image',
-          file_path: url,
-          url,
-          ...(lineage.length ? { source_asset_ids: lineage } : {}),
-        }
+function positiveAssetId(value: unknown): number | undefined {
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined
+}
+
+function normalizeIncomingAssets(value: unknown, referenceImagesOnly = false): IncomingCanvasAsset[] {
+  if (!Array.isArray(value)) {
+    throw new CanvasReferenceError('REFERENCE_ASSET_INVALID', 'Canvas references must be an array')
+  }
+  const rawAssets = value.map((item: any, arrayIndex) => {
+    const referenceIndex = arrayIndex + 1
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new CanvasReferenceError('REFERENCE_ASSET_INVALID', `Reference ${referenceIndex} must be an object`, referenceIndex)
+    }
+
+    const rawType = String(item.type ?? item.asset_type ?? item.assetType ?? '').trim().toLowerCase()
+    const explicitUrl = item.url ?? item.data?.url
+    const filePath = item.file_path ?? item.filePath ?? item.data?.file_path ?? item.data?.filePath
+    const legacyContent = item.content ?? item.data?.content
+    const rawMediaUrl = explicitUrl ?? filePath ?? legacyContent
+    const inferredImage = referenceImagesOnly
+      || rawType === 'image'
+      || (!rawType && typeof rawMediaUrl === 'string' && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(rawMediaUrl))
+    const type = (rawType || (inferredImage ? 'image' : 'prompt')) as CanvasReferenceType
+    const id = positiveAssetId(item.id)
+    const rawLineage = item.source_asset_ids ?? item.sourceAssetIds
+    if (rawLineage !== undefined && !Array.isArray(rawLineage)) {
+      throw new CanvasReferenceError(
+        'REFERENCE_LINEAGE_INVALID',
+        `Reference ${referenceIndex} source_asset_ids must be an array`,
+        referenceIndex,
+      )
+    }
+    const lineage = normalizeSourceAssetIds([
+      ...(id ? [id] : []),
+      ...(rawLineage ?? []),
+    ])
+    const normalized: Record<string, any> = {
+      type,
+      reference_index: item.reference_index ?? item.referenceIndex,
+      reference_id: item.reference_id ?? item.referenceId,
+      reference_role: item.reference_role ?? item.referenceRole ?? item.role,
+      ...(lineage.length ? { source_asset_ids: lineage } : {}),
+    }
+
+    if (type === 'prompt') {
+      const content = stringifyLLMMessageContent(item.content ?? item.text ?? item.data?.content ?? item.data?.text)
+      if (!content.trim()) {
+        throw new CanvasReferenceError(
+          'REFERENCE_ASSET_INVALID',
+          `Reference ${referenceIndex} prompt content must be non-empty`,
+          referenceIndex,
+        )
       }
-      const content = stringifyLLMMessageContent(item.content || item.text || item.data?.content || item.data?.text)
-      if (!content.trim()) return null
-      return {
-        id,
-        type: type || 'prompt',
-        content,
-        ...(lineage.length ? { source_asset_ids: lineage } : {}),
+      normalized.content = content
+    } else {
+      if (typeof rawMediaUrl !== 'string' || !rawMediaUrl.trim()) {
+        throw new CanvasReferenceError(
+          'REFERENCE_ASSET_INVALID',
+          `Reference ${referenceIndex} media url must be non-empty`,
+          referenceIndex,
+        )
       }
-    })
-    .filter((item): item is IncomingCanvasAsset => Boolean(item))
+      normalized.url = normalizeCanvasAssetImageUrl(rawMediaUrl, explicitUrl !== undefined)
+    }
+    return normalized
+  })
+
+  return validateCanvasReferenceAssets(rawAssets as any).map(binding => ({
+    ...binding,
+    ...(binding.url ? { file_path: binding.url } : {}),
+    ...(binding.source_asset_ids ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+  }))
+}
+
+function incomingAssetCollectionForPayload(payload: any): { value: unknown; referenceImagesOnly: boolean } | null {
+  const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+  const primary = [
+    params.incoming_assets,
+    params.incomingAssets,
+    payload?.incoming_assets,
+    payload?.incomingAssets,
+  ]
+  for (const value of primary) {
+    if (value !== undefined && value !== null) return { value, referenceImagesOnly: false }
+  }
+  const bindingFallbacks = [
+    params.reference_bindings,
+    params.referenceBindings,
+    payload?.reference_bindings,
+    payload?.referenceBindings,
+  ]
+  for (const value of bindingFallbacks) {
+    if (value !== undefined && value !== null) return { value, referenceImagesOnly: false }
+  }
+  const imageFallbacks = [
+    params.reference_images,
+    params.referenceImages,
+    payload?.reference_images,
+    payload?.referenceImages,
+  ]
+  for (const value of imageFallbacks) {
+    if (value !== undefined && value !== null) return { value, referenceImagesOnly: true }
+  }
+  return null
+}
+
+function canonicalIncomingAssetsForPayload(payload: any): IncomingCanvasAsset[] {
+  const collection = incomingAssetCollectionForPayload(payload)
+  return collection ? normalizeIncomingAssets(collection.value, collection.referenceImagesOnly) : []
 }
 
 function messageContentImageUrls(content: LLMMessage['content']) {
@@ -361,10 +460,13 @@ function appendIncomingAssetsToMessages(messages: LLMMessage[], assets: Incoming
   const existingImages = new Set(messageContentImageUrls(userMessage.content))
   const incomingText = textAssets.length ? `[连线素材]:\n${textAssets.join('\n')}` : ''
   const text = [baseText, incomingText].filter(Boolean).join('\n\n') || '描述这些参考素材'
-  const imageParts = imageAssets
-    .map(asset => String(asset.url || '').trim())
-    .filter(url => url && !existingImages.has(url))
-    .map(url => ({ type: 'image_url', image_url: { url } }))
+  const imageParts: Array<{ type: 'image_url'; image_url: { url: string } }> = []
+  for (const asset of imageAssets) {
+    const url = String(asset.url || '').trim()
+    if (!url || existingImages.has(url)) continue
+    existingImages.add(url)
+    imageParts.push({ type: 'image_url', image_url: { url } })
+  }
 
   if (Array.isArray(userMessage.content)) {
     const existingTextIndex = userMessage.content.findIndex(part => typeof part === 'object' && (part as any).type !== 'image_url' && (part as any).type !== 'input_image')
@@ -388,6 +490,10 @@ const CANVAS_CONTROL_PARAM_KEYS = new Set([
   'response_mode',
   'incoming_assets',
   'incomingAssets',
+  'reference_bindings',
+  'referenceBindings',
+  'reference_images',
+  'referenceImages',
   'skill_name',
   'skillName',
   'skill_pack_id',
@@ -425,9 +531,17 @@ function extractCanvasRuntimeParams(params: Record<string, any>) {
   )
 }
 
-export function buildCanvasGenerateLLMRequest(payload: any): LLMRequest {
+export function buildCanvasGenerateLLMRequest(
+  payload: any,
+  canonicalIncomingAssets?: readonly IncomingCanvasAsset[],
+): LLMRequest {
   const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
-  const incomingAssets = normalizeIncomingAssets(params.incoming_assets ?? payload?.incoming_assets ?? payload?.incomingAssets)
+  const incomingAssets = canonicalIncomingAssets
+    ? canonicalIncomingAssets.map(asset => ({
+      ...asset,
+      ...(asset.source_asset_ids ? { source_asset_ids: [...asset.source_asset_ids] } : {}),
+    }))
+    : canonicalIncomingAssetsForPayload(payload)
   const firstIncomingImage = incomingAssets.find(asset => asset.type === 'image' && asset.url)?.url || ''
   const request: any = {
     ...extractCanvasRuntimeParams(params),
@@ -442,8 +556,18 @@ export function buildCanvasGenerateLLMRequest(payload: any): LLMRequest {
   }
   const routingStrategy = String(payload?.routing_strategy || payload?.routingStrategy || params.routing_strategy || params.routingStrategy || '').trim()
   if (routingStrategy) request.routing_strategy = routingStrategy
-  const imageUrl = String(payload?.image_url || payload?.imageUrl || firstIncomingImage || '').trim()
+  const imageUrl = String(firstIncomingImage || payload?.image_url || payload?.imageUrl || '').trim()
   if (imageUrl) request.image_url = imageUrl
+  const referenceImages = incomingAssets
+    .filter(asset => asset.type === 'image' && Boolean(asset.url))
+    .map(asset => ({
+      url: String(asset.url),
+      reference_index: asset.reference_index,
+      reference_id: asset.reference_id,
+      reference_role: asset.reference_role,
+      ...(asset.source_asset_ids?.length ? { source_asset_ids: [...asset.source_asset_ids] } : {}),
+    }))
+  if (referenceImages.length) request.reference_images = referenceImages
   const sourceAssetIds = Array.from(new Set(incomingAssets.flatMap(incomingAssetSourceIds)))
   if (sourceAssetIds.length) request.source_asset_ids = sourceAssetIds
   return request
@@ -453,6 +577,7 @@ async function compileCanvasSkillIfSelected(
   payload: any,
   activeWorkspace: string,
   request: LLMRequest,
+  incomingAssets: readonly IncomingCanvasAsset[],
   compile?: (input: PromptCompileInput) => Promise<CompiledSkillResult>,
 ): Promise<{ request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null> {
   if (!compile) {
@@ -474,7 +599,6 @@ async function compileCanvasSkillIfSelected(
   const rawPrompt = rawPromptForSkill(payload, request)
   const selector = skillSelectorForPayload(payload, params, rawPrompt)
   if (!selector) return null
-  const incomingAssets = normalizeIncomingAssets(params.incoming_assets ?? payload?.incoming_assets ?? payload?.incomingAssets)
   const mode = skillModeForPayload(payload, params)
   const argumentsValue = payloadValue(payload, params, 'skill_arguments', 'skillArguments', 'arguments')
   const compilerModelValue = payloadValue(payload, params, 'compiler_model_id', 'compilerModelId', 'skill_compiler_model_id', 'skillCompilerModelId')
@@ -499,9 +623,12 @@ async function compileCanvasSkillIfSelected(
     rawPrompt,
     mode,
     incomingAssets: incomingAssets.map(asset => ({
-      type: asset.type === 'image' ? 'image' : 'prompt',
+      type: asset.type,
       ...(asset.url ? { url: asset.url } : {}),
       ...(asset.content ? { content: asset.content } : {}),
+      reference_index: asset.reference_index,
+      reference_id: asset.reference_id,
+      reference_role: asset.reference_role,
       ...(asset.source_asset_ids?.length ? { source_asset_ids: [...asset.source_asset_ids] } : {}),
     })),
     nodeParams: skillNodeParams(payload, params),
@@ -550,7 +677,15 @@ function extractClientId(payload: any): string {
 
 function normalizeSourceAssetIds(value: unknown): number[] {
   if (!Array.isArray(value)) return []
-  return value.map(item => Number(item)).filter(id => Number.isFinite(id))
+  const seen = new Set<number>()
+  const ids: number[] = []
+  for (const item of value) {
+    const id = Number(item)
+    if (!Number.isSafeInteger(id) || id <= 0 || seen.has(id)) continue
+    seen.add(id)
+    ids.push(id)
+  }
+  return ids
 }
 
 function incomingAssetSourceIds(asset: IncomingCanvasAsset): number[] {
@@ -754,17 +889,18 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     let comfyOptions: ExecuteLocalComfyWorkflowOptions | null = null
     let compiledSkill: { request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null = null
     let request: LLMRequest | null = null
+    let incomingAssets: IncomingCanvasAsset[] = []
 
-    // Skill compilation is deliberately the first asynchronous operation in
-    // the route. A bad selector, incompatible mode, or compiler failure must
-    // not create a Comfy queue item, task-manager entry, or provider request.
+    // Canonical reference validation and Skill compilation deliberately run
+    // before the first provider-store, Comfy, task-manager, or executor call.
     try {
+      incomingAssets = canonicalIncomingAssetsForPayload(payload)
+      request = buildCanvasGenerateLLMRequest(payload, incomingAssets)
       const rawCandidate = rawPromptForSkill(payload)
       const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
       const selected = skillSelectorForPayload(payload, params, rawCandidate)
       if (selected) {
-        request = buildCanvasGenerateLLMRequest(payload)
-        compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, compile)
+        compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, incomingAssets, compile)
         if (compiledSkill) {
           request = compiledSkill.request
         }
@@ -782,7 +918,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     }
 
     if (comfyOptions) {
-      const skillSourceAssetIds = compiledSkill && request ? normalizeSourceAssetIds((request as any).source_asset_ids) : []
+      const skillSourceAssetIds = request ? normalizeSourceAssetIds((request as any).source_asset_ids) : []
       if (!clientId) {
         try {
           const response = await comfyExecute(comfyOptions)
