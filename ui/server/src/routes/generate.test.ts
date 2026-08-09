@@ -40,13 +40,39 @@ async function call(handler: any, req: any = {}) {
   return res
 }
 
+function compiledSkillResult(overrides: Record<string, any> = {}) {
+  const skillName = overrides.skillName || 'prompt-optimizer'
+  const revision = overrides.revision || 'rev-1'
+  return {
+    result: {
+      skill_name: skillName,
+      skill_version: revision,
+      mode: overrides.mode || 'text_to_image',
+      prompt: overrides.prompt || 'compiled prompt',
+      negative_prompt: overrides.negativePrompt || '',
+      parameters: {},
+      references_used: overrides.references || [],
+      warnings: overrides.warnings || [],
+    },
+    inputHash: overrides.inputHash || 'hash-1',
+    cached: false,
+    compilerModelId: overrides.compilerModelId || 99,
+    skill: {
+      name: skillName,
+      packId: overrides.packId || 'builtin',
+      revision,
+      ...(overrides.sourceUrl ? { sourceUrl: overrides.sourceUrl } : {}),
+    },
+  }
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
 })
 
 describe('canvas generate route', () => {
-  test('builds a runtime LLM request from a GenerateNode payload', async () => {
+  test('builds the exact legacy runtime LLM request shape when no Skill is selected', async () => {
     const { buildCanvasGenerateLLMRequest } = await import('./generate')
 
     const request = buildCanvasGenerateLLMRequest({
@@ -60,17 +86,19 @@ describe('canvas generate route', () => {
       params: { temperature: 0.72, max_tokens: 2048 },
     })
 
-    expect(request).toMatchObject({
+    expect(request).toEqual({
       model: 'gpt-5.5',
       type: 'text_to_video',
+      messages: [
+        { role: 'system', content: '你是分镜大师' },
+        { role: 'user', content: '画一个镜头' },
+      ],
       temperature: 0.72,
       max_tokens: 2048,
+      stream: false,
+      response_mode: 'auto',
       response_format: { type: 'text' },
     })
-    expect(request.messages).toEqual([
-      { role: 'system', content: '你是分镜大师' },
-      { role: 'user', content: '画一个镜头' },
-    ])
   })
 
   test('preserves canvas media inputs and dynamic generation params for runtime media routes', async () => {
@@ -420,7 +448,12 @@ describe('canvas generate route', () => {
           inputHash: 'hash-1',
           cached: false,
           compilerModelId: 99,
-          skill: { name: 'prompt-optimizer', revision: 'rev-1' },
+          skill: {
+            name: 'prompt-optimizer',
+            packId: 'builtin',
+            revision: 'rev-1',
+            sourceUrl: 'https://github.com/mangaforge/builtin-skills',
+          },
         }
       },
       execute: async (_workspace, request) => {
@@ -456,15 +489,220 @@ describe('canvas generate route', () => {
     expect(res.statusCode).toBe(200)
     expect(res.body).toMatchObject({
       skill_name: 'prompt-optimizer',
+      skill_pack_id: 'builtin',
+      skill_pack_source: 'https://github.com/mangaforge/builtin-skills',
       skill_revision: 'rev-1',
       compiled_prompt: 'compiled prompt',
       compiled_negative_prompt: 'bad anatomy',
       compiled_references: ['references/base.txt'],
       compiled_input_hash: 'hash-1',
+      warnings: ['warning'],
       compiler_model_id: 99,
       raw_prompt: '原始可编辑提示词',
-      result: { skill_name: 'prompt-optimizer', compiled_prompt: 'compiled prompt' },
+      source_asset_ids: [101],
+      result: {
+        skill_name: 'prompt-optimizer',
+        skill_pack_id: 'builtin',
+        skill_pack_source: 'https://github.com/mangaforge/builtin-skills',
+        skill_revision: 'rev-1',
+        compiled_prompt: 'compiled prompt',
+        compiled_negative_prompt: 'bad anatomy',
+        compiled_references: ['references/base.txt'],
+        compiled_input_hash: 'hash-1',
+        warnings: ['warning'],
+        compiler_model_id: 99,
+        raw_prompt: '原始可编辑提示词',
+        source_asset_ids: [101],
+      },
     })
+  })
+
+  test('detects final-user Skill commands in messages-only payloads and lets them override dropdowns', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const compileInputs: any[] = []
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileInputs.push(input)
+        return compiledSkillResult({ skillName: input.skillName, packId: input.packId, mode: input.mode }) as any
+      },
+      execute: async () => ({ content: 'ok', finish_reason: 'stop', parsed: null } as any),
+    })
+
+    const messagesOnly = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5',
+        type: 'text_to_image',
+        messages: [
+          { role: 'system', content: 'system' },
+          { role: 'user', content: '/message-pack:message-skill draw from messages only' },
+        ],
+      },
+    })
+    const dropdownOverride = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5',
+        type: 'text_to_video',
+        messages: [{ role: 'user', content: '/command-pack:command-skill orbit around the hero' }],
+        skill_name: 'dropdown-skill',
+        skill_pack_id: 'dropdown-pack',
+      },
+    })
+
+    expect(messagesOnly.statusCode).toBe(200)
+    expect(dropdownOverride.statusCode).toBe(200)
+    expect(compileInputs).toHaveLength(2)
+    expect(compileInputs[0]).toMatchObject({
+      skillName: 'message-skill',
+      packId: 'message-pack',
+      rawPrompt: '/message-pack:message-skill draw from messages only',
+    })
+    expect(compileInputs[1]).toMatchObject({
+      skillName: 'command-skill',
+      packId: 'command-pack',
+      rawPrompt: '/command-pack:command-skill orbit around the hero',
+    })
+  })
+
+  test('short-circuits unsupported route modes and compiler-reported media incompatibility before provider work', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), '{invalid-provider-json')
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    let executeCalls = 0
+    let comfyCalls = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        const error = new Error('Skill is not compatible with text_to_image')
+        ;(error as any).code = 'SKILL_MODE_INCOMPATIBLE'
+        throw error
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      comfyExecute: async () => { comfyCalls += 1; return { prompt_id: 'unexpected', output_files: [], history: {} } },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    for (const mode of ['chat', 'vision']) {
+      const res = await call(handlers.get('POST /api/generate'), {
+        body: {
+          provider: 'local-comfy',
+          model: 'comfyui-workflow',
+          type: mode,
+          workflow_json: { '3': { inputs: { text: 'editable' } } },
+          skill_prompt: '/builtin:prompt-optimizer draw a hero',
+        },
+      })
+      expect(res.statusCode).toBe(422)
+      expect(res.body.error_code).toBe('SKILL_MODE_INCOMPATIBLE')
+    }
+    const incompatible = await call(handlers.get('POST /api/generate'), {
+      body: {
+        provider: 'broken-provider',
+        model: 'gpt-5.5',
+        type: 'text_to_image',
+        prompt: '/builtin:video-only draw a hero',
+      },
+    })
+
+    expect(incompatible.statusCode).toBe(422)
+    expect(incompatible.body.error_code).toBe('SKILL_MODE_INCOMPATIBLE')
+    expect(compileCalls).toBe(1)
+    expect(executeCalls).toBe(0)
+    expect(comfyCalls).toBe(0)
+    expect(taskCalls).toBe(0)
+  })
+
+  test('preserves Skill-enabled SSE result, error, cancellation, and task cleanup behavior', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const messages: any[] = []
+    const registered: any[] = []
+    const unregistered: string[] = []
+    let executeCalls = 0
+    let cancelExecutionStarted = false
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => compiledSkillResult({ sourceUrl: 'https://github.com/acme/prompt-pack' }) as any,
+      execute: async (_activeWorkspace, _request, _preferredModelId, options) => {
+        executeCalls += 1
+        if (executeCalls === 1) return { content: 'async image', finish_reason: 'stop', parsed: null } as any
+        if (executeCalls === 2) return { content: '', error: 'provider failed after compilation' } as any
+        cancelExecutionStarted = true
+        await new Promise<void>((_resolve, reject) => {
+          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+        return { content: 'unexpected' } as any
+      },
+      sendMessage: async (clientId, message) => {
+        messages.push({ clientId, message })
+        return true
+      },
+      registerTask: (clientId, adapterId, cancelToken) => registered.push({ clientId, adapterId, cancelToken }),
+      unregisterTask: clientId => unregistered.push(clientId),
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5',
+        type: 'text_to_image',
+        prompt: '/builtin:prompt-optimizer draw',
+        params: { client_id: 'skill-sse-result' },
+      },
+    })
+
+    expect(res.body).toMatchObject({ success: true, client_id: 'skill-sse-result' })
+    expect(registered[0]).toMatchObject({ clientId: 'skill-sse-result', adapterId: 'canvas-generate' })
+    while (!messages.some(item => item.message.type === 'done')) await new Promise(resolve => setTimeout(resolve, 0))
+    expect(messages.find(item => item.message.type === 'result')).toMatchObject({
+      clientId: 'skill-sse-result',
+      message: {
+        type: 'result',
+        data: {
+          content: 'async image',
+          skill_name: 'prompt-optimizer',
+          skill_pack_id: 'builtin',
+          skill_pack_source: 'https://github.com/acme/prompt-pack',
+          result: {
+            skill_pack_id: 'builtin',
+            skill_pack_source: 'https://github.com/acme/prompt-pack',
+          },
+        },
+      },
+    })
+    while (!unregistered.length) await new Promise(resolve => setTimeout(resolve, 0))
+
+    await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5', type: 'text_to_image', prompt: '/builtin:prompt-optimizer draw',
+        params: { client_id: 'skill-sse-error' },
+      },
+    })
+
+    expect(registered[1]).toMatchObject({ clientId: 'skill-sse-error', adapterId: 'canvas-generate' })
+    while (!messages.some(item => item.clientId === 'skill-sse-error' && item.message.type === 'error')) await new Promise(resolve => setTimeout(resolve, 0))
+    expect(messages.find(item => item.clientId === 'skill-sse-error' && item.message.type === 'error')).toMatchObject({
+      clientId: 'skill-sse-error',
+      message: { type: 'error', message: 'provider failed after compilation' },
+    })
+    while (!unregistered.includes('skill-sse-error')) await new Promise(resolve => setTimeout(resolve, 0))
+
+    await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5', type: 'text_to_image', prompt: '/builtin:prompt-optimizer draw',
+        params: { client_id: 'skill-sse-cancel' },
+      },
+    })
+
+    while (!cancelExecutionStarted) await new Promise(resolve => setTimeout(resolve, 0))
+    expect(registered[2]).toMatchObject({ clientId: 'skill-sse-cancel', adapterId: 'canvas-generate' })
+    await registered[2].cancelToken.interrupt()
+    while (!unregistered.includes('skill-sse-cancel')) await new Promise(resolve => setTimeout(resolve, 0))
+    expect(messages.filter(item => item.clientId === 'skill-sse-cancel').map(item => item.message.type)).toEqual(['status'])
+    expect(unregistered).toEqual(['skill-sse-result', 'skill-sse-error', 'skill-sse-cancel'])
   })
 
   test('short-circuits provider and task creation when Skill compilation fails', async () => {
@@ -532,7 +770,7 @@ describe('canvas generate route', () => {
         skill_name: 'prompt-optimizer', skill_version: 'rev-1', mode: 'text_to_image' as const,
         prompt: 'compiled', negative_prompt: '', parameters: {}, references_used: [], warnings: [],
       }, inputHash: 'hash-comfy', cached: false, compilerModelId: 8,
-      skill: { name: 'prompt-optimizer', revision: 'rev-1' },
+      skill: { name: 'prompt-optimizer', packId: 'builtin', revision: 'rev-1' },
     })
     registerGenerateRoutes(app as any, () => workspace, {
       compilePromptSkill,
@@ -575,6 +813,37 @@ describe('canvas generate route', () => {
     expect(mapped.statusCode).toBe(200)
     expect(mapped.body).toMatchObject({ skill_name: 'prompt-optimizer', compiled_prompt: 'compiled' })
     expect(comfyCalls).toBe(1)
+    expect(workflow['3'].inputs.text).toBe('editable')
+
+    const providerDetectedMissing = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31,
+        provider: 'local-comfy',
+        model: 'custom-workflow-model',
+        type: 'text_to_image',
+        prompt: JSON.stringify(workflow),
+        skill_prompt: 'draw a hero',
+        skill_name: 'prompt-optimizer',
+      },
+    })
+    expect(providerDetectedMissing.statusCode).toBe(422)
+    expect(providerDetectedMissing.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
+    expect(comfyCalls).toBe(1)
+
+    const providerDetectedMapped = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31,
+        provider: 'local-comfy',
+        model: 'custom-workflow-model',
+        type: 'text_to_image',
+        prompt: JSON.stringify(workflow),
+        skill_prompt: 'draw a hero',
+        skill_name: 'prompt-optimizer',
+        skill_comfy_mapping: { compiled_prompt: '3.inputs.text' },
+      },
+    })
+    expect(providerDetectedMapped.statusCode).toBe(200)
+    expect(comfyCalls).toBe(2)
     expect(workflow['3'].inputs.text).toBe('editable')
   })
 

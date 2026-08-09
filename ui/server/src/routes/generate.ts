@@ -34,11 +34,13 @@ type CompiledSkillResult = {
   inputHash: string
   cached: boolean
   compilerModelId: number
-  skill: { name: string; revision: string }
+  skill: { name: string; packId: string; revision: string; sourceUrl?: string }
 }
 
 type SkillCompileAudit = {
   skill_name: string
+  skill_pack_id: string
+  skill_pack_source?: string
   skill_revision: string
   compiled_prompt: string
   compiled_negative_prompt: string
@@ -50,7 +52,7 @@ type SkillCompileAudit = {
 }
 
 const SKILL_MEDIA_MODES = new Set<CanvasMediaMode>([
-  'chat', 'vision', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video',
+  'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video',
 ])
 const SKILL_NODE_PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
 
@@ -142,7 +144,8 @@ function rawPromptForSkill(payload: any, request?: LLMRequest): string {
   // through skill_prompt without being confused with the workflow document.
   if (typeof payload?.prompt === 'string' && payload.prompt.trim()) return payload.prompt
   if (typeof payload?.content === 'string' && payload.content.trim()) return payload.content
-  const user = [...(request?.messages || [])].reverse().find(message => message.role === 'user')
+  const messages = request?.messages || (Array.isArray(payload?.messages) ? normalizeMessages(payload) : [])
+  const user = [...messages].reverse().find(message => message.role === 'user')
   return stringifyLLMMessageContent(user?.content || '')
 }
 
@@ -275,6 +278,8 @@ function replaceCompiledPrompt(messages: LLMMessage[], prompt: string): LLMMessa
 function compileAudit(compiled: CompiledSkillResult, rawPrompt: string): SkillCompileAudit {
   return {
     skill_name: compiled.result.skill_name,
+    skill_pack_id: compiled.skill.packId,
+    ...(compiled.skill.sourceUrl ? { skill_pack_source: compiled.skill.sourceUrl } : {}),
     skill_revision: compiled.skill.revision || compiled.result.skill_version,
     compiled_prompt: compiled.result.prompt,
     compiled_negative_prompt: compiled.result.negative_prompt || '',
@@ -676,14 +681,18 @@ function normalizeComfyBaseUrl(baseUrl: string, key?: APIKeyRecord, payload?: an
   return normalized
 }
 
-async function resolveComfyExecutionOptions(activeWorkspace: string, payload: any): Promise<ExecuteLocalComfyWorkflowOptions | null> {
+async function resolveComfyExecutionOptions(
+  activeWorkspace: string,
+  payload: any,
+  compiledSkill?: PromptCompileResult,
+): Promise<ExecuteLocalComfyWorkflowOptions | null> {
   const apiKeyId = Number(payload?.api_key_id ?? payload?.keyId ?? payload?.key_id ?? 0)
   const providers = await readProviders(activeWorkspace)
   const keys = await readKeys(activeWorkspace)
   const key = apiKeyId ? keys.find(item => Number(item.id) === apiKeyId) : undefined
   const providerId = String(payload?.provider || key?.provider || '')
   const provider = providers.find(item => item.id === providerId)
-  const modelName = String(payload?.model || payload?.model_name || '')
+  const modelName = String(payload?.model || payload?.model_name || '').toLowerCase()
   const modelAsComfy = modelName === 'comfyui-workflow'
   const providerAsComfy = String(provider?.service_type || '').toLowerCase() === 'comfyui'
 
@@ -693,11 +702,12 @@ async function resolveComfyExecutionOptions(activeWorkspace: string, payload: an
 
   const baseUrl = normalizeComfyBaseUrl((key as any)?.base_url || payload?.base_url || payload?.baseUrl || payload?.comfy_base_url || payload?.comfyBaseUrl || provider.default_base_url || '', key, payload)
   if (!baseUrl) throw new Error('ComfyUI base URL is not configured')
+  const workflowPayload = compiledSkill ? applyCompiledSkillToComfyPayload(payload, compiledSkill) : payload
 
   return {
     workspace: activeWorkspace,
     baseUrl,
-    workflow: parseWorkflowPayload(payload),
+    workflow: parseWorkflowPayload(workflowPayload),
     inputFiles: payload?.input_files && typeof payload.input_files === 'object'
       ? payload.input_files
       : payload?.inputFiles && typeof payload.inputFiles === 'object'
@@ -743,7 +753,6 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     const clientId = extractClientId(payload)
     let comfyOptions: ExecuteLocalComfyWorkflowOptions | null = null
     let compiledSkill: { request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null = null
-    let executionPayload = payload
     let request: LLMRequest | null = null
 
     // Skill compilation is deliberately the first asynchronous operation in
@@ -758,13 +767,6 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
         compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, compile)
         if (compiledSkill) {
           request = compiledSkill.request
-          const hasWorkflow = payload?.workflow_json !== undefined || payload?.workflowJson !== undefined || payload?.workflow !== undefined
-            || payload?.params?.workflow_json !== undefined || payload?.params?.workflowJson !== undefined || payload?.params?.workflow !== undefined
-            || (payload?.prompt && typeof payload.prompt === 'object')
-            || (payload?.params?.prompt && typeof payload.params.prompt === 'object')
-          if (String(payload?.model || payload?.model_name || '').toLowerCase() === 'comfyui-workflow' || hasWorkflow) {
-            executionPayload = applyCompiledSkillToComfyPayload(payload, compiledSkill.result)
-          }
         }
       }
     } catch (error) {
@@ -772,8 +774,10 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     }
 
     try {
-      comfyOptions = await resolveComfyExecutionOptions(activeWorkspace, executionPayload)
+      comfyOptions = await resolveComfyExecutionOptions(activeWorkspace, payload, compiledSkill?.result)
     } catch (error) {
+      const code = error && typeof error === 'object' ? (error as any).code : undefined
+      if (typeof code === 'string' && code.startsWith('SKILL_')) return skillErrorResponse(res, error)
       return res.status(400).json(errorBody(error))
     }
 
