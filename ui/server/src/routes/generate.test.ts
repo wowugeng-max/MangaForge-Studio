@@ -768,7 +768,7 @@ describe('canvas generate route', () => {
     const compilePromptSkill = async () => ({
       result: {
         skill_name: 'prompt-optimizer', skill_version: 'rev-1', mode: 'text_to_image' as const,
-        prompt: 'compiled', negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+        prompt: 'compiled', negative_prompt: 'avoid blur', parameters: {}, references_used: [], warnings: [],
       }, inputHash: 'hash-comfy', cached: false, compilerModelId: 8,
       skill: { name: 'prompt-optimizer', packId: 'builtin', revision: 'rev-1' },
     })
@@ -777,11 +777,12 @@ describe('canvas generate route', () => {
       comfyExecute: async options => {
         comfyCalls += 1
         expect(options.workflow['3'].inputs.text).toBe('compiled')
+        expect(options.workflow['3'].inputs.negative).toBe('avoid blur')
         return { prompt_id: 'comfy-skill', output_files: [], history: {} }
       },
     })
 
-    const workflow = { '3': { inputs: { text: 'editable', seed: 1 } } }
+    const workflow = { '3': { inputs: { text: 'editable', negative: 'editable negative', seed: 1 } } }
     const missingMapping = await call(handlers.get('POST /api/generate'), {
       body: {
         api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
@@ -803,17 +804,48 @@ describe('canvas generate route', () => {
     expect(unsafeMapping.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
     expect(comfyCalls).toBe(0)
 
+    const missingNegativeMapping = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
+        prompt: JSON.stringify(workflow), skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
+        skill_comfy_mapping: { compiled_prompt: '3.inputs.text' },
+      },
+    })
+    expect(missingNegativeMapping.statusCode).toBe(422)
+    expect(missingNegativeMapping.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
+    expect(comfyCalls).toBe(0)
+
+    for (const unsafePart of ['__proto__', 'prototype', 'constructor']) {
+      const unsafeNegativeMapping = await call(handlers.get('POST /api/generate'), {
+        body: {
+          api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
+          prompt: JSON.stringify(workflow), skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
+          skill_comfy_mapping: {
+            compiled_prompt: '3.inputs.text',
+            compiled_negative_prompt: `3.inputs.${unsafePart}`,
+          },
+        },
+      })
+      expect(unsafeNegativeMapping.statusCode).toBe(422)
+      expect(unsafeNegativeMapping.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
+      expect(comfyCalls).toBe(0)
+    }
+
     const mapped = await call(handlers.get('POST /api/generate'), {
       body: {
         api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
         prompt: workflow, skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
-        skill_comfy_mapping: { compiled_prompt: '3.inputs.text' },
+        skill_comfy_mapping: {
+          compiled_prompt: '3.inputs.text',
+          compiled_negative_prompt: '3.inputs.negative',
+        },
       },
     })
     expect(mapped.statusCode).toBe(200)
     expect(mapped.body).toMatchObject({ skill_name: 'prompt-optimizer', compiled_prompt: 'compiled' })
     expect(comfyCalls).toBe(1)
     expect(workflow['3'].inputs.text).toBe('editable')
+    expect(workflow['3'].inputs.negative).toBe('editable negative')
 
     const providerDetectedMissing = await call(handlers.get('POST /api/generate'), {
       body: {
@@ -839,12 +871,16 @@ describe('canvas generate route', () => {
         prompt: JSON.stringify(workflow),
         skill_prompt: 'draw a hero',
         skill_name: 'prompt-optimizer',
-        skill_comfy_mapping: { compiled_prompt: '3.inputs.text' },
+        skill_comfy_mapping: {
+          compiled_prompt: '3.inputs.text',
+          compiled_negative_prompt: '3.inputs.negative',
+        },
       },
     })
     expect(providerDetectedMapped.statusCode).toBe(200)
     expect(comfyCalls).toBe(2)
     expect(workflow['3'].inputs.text).toBe('editable')
+    expect(workflow['3'].inputs.negative).toBe('editable negative')
   })
 
   test('routes ComfyUI providers to the local Comfy executor instead of the LLM runtime', async () => {
