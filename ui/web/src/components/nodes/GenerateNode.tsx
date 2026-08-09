@@ -61,6 +61,8 @@ import type {
 export {
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
+  GenerateNodeReferenceError,
+  MAX_GENERATE_NODE_REFERENCE_IMAGES,
   getGenerateNodeAspectRatioSize,
   normalizeGenerateNodeImageUrl,
   parseCanvasSkillCommand,

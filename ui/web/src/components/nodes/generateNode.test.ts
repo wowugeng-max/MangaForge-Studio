@@ -609,6 +609,20 @@ describe('request payload size precedence', () => {
 })
 
 describe('GenerateNode ordered reference bindings', () => {
+  test('re-exports the typed reference error and image limit through the GenerateNode public API', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+
+    expect(typeof module.GenerateNodeReferenceError).toBe('function')
+    expect(module.MAX_GENERATE_NODE_REFERENCE_IMAGES).toBe(9)
+    if (typeof module.GenerateNodeReferenceError !== 'function') return
+
+    expect(new module.GenerateNodeReferenceError('REFERENCE_ROLE_INVALID', 'invalid role', 2)).toMatchObject({
+      name: 'GenerateNodeReferenceError',
+      code: 'REFERENCE_ROLE_INVALID',
+      reference_index: 2,
+    })
+  })
+
   test('migrates legacy incoming assets and normalizes persisted camel/snake fields without mutation', async () => {
     const module = await loadGenerateNodeReferenceApi()
     const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
@@ -765,6 +779,113 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(() => normalizeBindings([
       { type: 'image', url: '/bad-role.png', reference_role: 'background_only' },
     ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+  })
+
+  test('rejects duplicate ids, malformed lineage, and missing type-specific content', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    expect(() => normalizeBindings([
+      { type: 'image', url: '/a.png', reference_id: 'duplicate-id' },
+      { type: 'image', url: '/b.png', referenceId: 'duplicate-id' },
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ID_INVALID' }))
+    expect(() => normalizeBindings([
+      { type: 'image', url: '/a.png', source_asset_ids: 'not-an-array' },
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_LINEAGE_INVALID' }))
+
+    for (const type of ['image', 'video', 'audio']) {
+      expect(() => normalizeBindings([{ type }], [])).toThrow(expect.objectContaining({
+        code: 'REFERENCE_ASSET_INVALID',
+      }))
+    }
+    expect(() => normalizeBindings([{ type: 'prompt' }], [])).toThrow(expect.objectContaining({
+      code: 'REFERENCE_ASSET_INVALID',
+    }))
+    expect(() => normalizeBindings([{ type: 'prompt', content: '   ' }], [])).toThrow(expect.objectContaining({
+      code: 'REFERENCE_ASSET_INVALID',
+    }))
+  })
+
+  test('returns an immutable normalized copy for invalid reorder indexes', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reorderBindings = module.reorderGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    expect(typeof reorderBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function' || typeof reorderBindings !== 'function') return
+
+    const bindings = normalizeBindings([
+      {
+        type: 'image',
+        url: '/api/assets/media/a.png',
+        reference_index: 9,
+        reference_id: 'stable-a',
+        source_asset_ids: [81, 82],
+      },
+      {
+        type: 'prompt',
+        content: '保持动作连续',
+        reference_index: 4,
+        reference_id: 'stable-b',
+        source_asset_ids: [83],
+      },
+    ], [])
+    const snapshot = JSON.parse(JSON.stringify(bindings))
+
+    for (const [fromIndex, toIndex] of [[-1, 0], [0, 9], [1.5, 0]]) {
+      const copy = reorderBindings(bindings, fromIndex, toIndex)
+      expect(copy).toEqual(snapshot)
+      expect(copy).not.toBe(bindings)
+      expect(copy[0]).not.toBe(bindings[0])
+      expect(copy[0].source_asset_ids).not.toBe(bindings[0].source_asset_ids)
+    }
+    expect(bindings).toEqual(snapshot)
+  })
+
+  test('locks the exhaustive reference role, type, and nine-image contract matrix', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    const roles = [
+      'general',
+      'first_frame',
+      'last_frame',
+      'character',
+      'scene',
+      'style',
+      'full_reference',
+      'prompt_context',
+    ]
+    expect(roles.map(role => normalizeBindings([
+      { type: 'image', url: `/api/assets/media/${role}.png`, reference_role: role },
+    ], [])[0].reference_role)).toEqual(roles)
+
+    const typeInputs = [
+      { type: 'image', url: '/api/assets/media/reference.png' },
+      { type: 'prompt', content: '保持角色一致' },
+      { type: 'video', url: '/api/assets/media/reference.mp4' },
+      { type: 'audio', url: '/api/assets/media/reference.wav' },
+    ]
+    expect(typeInputs.map(input => normalizeBindings([input], [])[0].type)).toEqual([
+      'image',
+      'prompt',
+      'video',
+      'audio',
+    ])
+
+    const nineImages = Array.from({ length: 9 }, (_, index) => ({
+      type: 'image',
+      url: `/api/assets/media/matrix-${index + 1}.png`,
+    }))
+    expect(normalizeBindings(undefined, nineImages)).toHaveLength(9)
+    expect(() => normalizeBindings(undefined, [
+      ...nineImages,
+      { type: 'image', url: '/api/assets/media/matrix-10.png' },
+    ])).toThrow(expect.objectContaining({ code: 'REFERENCE_LIMIT_EXCEEDED' }))
   })
 
   test('serializes reserved video/audio references but rejects them for client execution', async () => {
