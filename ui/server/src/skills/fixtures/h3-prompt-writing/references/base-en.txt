@@ -17,3 +17,7 @@ For the target video, at 0.00 seconds into the target video, <Picture 1> (from [
 
 FL2VA duration example: Picture 1 aligns with the 0.00-second mark and Picture 2 aligns with the 8.00-second mark.
 L2VA duration example: <Picture 1> aligns with the 6.00-second mark of the target video.
+
+Negative prompt preservation example:
+negative_prompt: no deformed hands; no watermark: preserve punctuation / spacing
+Preserve negative_prompt punctuation and spacing exactly; do not rewrite or omit it.

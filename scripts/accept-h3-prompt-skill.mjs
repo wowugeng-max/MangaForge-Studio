@@ -8,6 +8,7 @@ const H3_SKILL_NAME = 'h3-prompt-writing'
 const EXPECTED_REFERENCES = ['references/base-en.txt', 'references/ref-en.txt']
 const REQUEST_TIMEOUT_MS = 15_000
 const LONG_REQUEST_TIMEOUT_MS = 660_000
+const MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
 
 export class H3AcceptanceError extends Error {
   constructor(code, message) {
@@ -17,14 +18,38 @@ export class H3AcceptanceError extends Error {
   }
 }
 
+function sensitiveCredentialKey(value) {
+  let normalized = String(value || '')
+  try { normalized = decodeURIComponent(normalized) } catch { /* keep undecodable input for matching */ }
+  return /(?:^|[_-])(?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization|credential|signature|sig)$/i.test(normalized)
+}
+
+function redactUrlCredentials(value) {
+  return value.replace(/\bhttps?:\/\/[^\s<>"']+/gi, candidate => {
+    try {
+      const url = new URL(candidate)
+      if (url.username || url.password) {
+        url.username = ''
+        url.password = ''
+      }
+      for (const key of new Set(url.searchParams.keys())) {
+        if (sensitiveCredentialKey(key)) url.searchParams.set(key, '[REDACTED]')
+      }
+      return url.toString()
+    } catch {
+      return candidate.replace(/^(https?:\/\/)[^/@\s]+@/i, '$1')
+    }
+  })
+}
+
 export function redactSensitive(value) {
-  return String(value ?? '')
-    .replace(/((?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization)"?\s*:\s*")[^"]*/gi, '$1[REDACTED]')
-    .replace(/((?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization)'?\s*:\s*')[^']*/gi, '$1[REDACTED]')
+  return redactUrlCredentials(String(value ?? ''))
+    .replace(/((?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization|credential|signature|sig)"?\s*:\s*")[^"]*/gi, '$1[REDACTED]')
+    .replace(/((?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization|credential|signature|sig)'?\s*:\s*')[^']*/gi, '$1[REDACTED]')
     .replace(/\bAuthorization\s*:\s*[^\r\n]+/gi, 'Authorization: [REDACTED]')
-    .replace(/((?:^|[\s;,])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization)\s*:\s*)[^\r\n]*/gim, '$1[REDACTED]')
+    .replace(/((?:^|[\s;,])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization|credential|signature|sig)\s*:\s*)[^\r\n]*/gim, '$1[REDACTED]')
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+/gi, 'Bearer [REDACTED]')
-    .replace(/((?:^|[?&\s;,])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization)\s*=\s*)[^&#\s,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:^|[?&\s;,])(?:[A-Za-z0-9]+[_-])*(?:api[_-]?key|token|access[_-]?token|secret|password|auth|authorization|credential|signature|sig)\s*=\s*)[^&#\s,;]+/gi, '$1[REDACTED]')
     .replace(/\b(?:sk|rk)-[A-Za-z0-9_-]{12,}\b/g, '[REDACTED_KEY]')
 }
 
@@ -81,12 +106,21 @@ function apiEndpoint(baseUrl, path) {
   return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
 }
 
-async function fetchWithTimeout(fetchImpl, url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS) {
+async function fetchWithTimeout(fetchImpl, url, init = {}, timeoutMs = REQUEST_TIMEOUT_MS, consume = response => response) {
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), timeoutMs)
+  let timeout
+  const timedOut = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort()
+      reject(new H3AcceptanceError('H3_E2E_NETWORK', `Local MangaForge API request timed out after ${timeoutMs}ms`))
+    }, timeoutMs)
+  })
   try {
-    return await fetchImpl(url, { ...init, redirect: 'manual', signal: controller.signal })
+    const operation = Promise.resolve(fetchImpl(url, { ...init, redirect: 'manual', signal: controller.signal }))
+      .then(response => consume(response))
+    return await Promise.race([operation, timedOut])
   } catch (error) {
+    if (error instanceof H3AcceptanceError) throw error
     const detail = error instanceof Error ? error.message : String(error)
     throw new H3AcceptanceError('H3_E2E_NETWORK', `Local MangaForge API network error: ${detail}`)
   } finally {
@@ -94,16 +128,47 @@ async function fetchWithTimeout(fetchImpl, url, init = {}, timeoutMs = REQUEST_T
   }
 }
 
+async function readBoundedText(response) {
+  const declaredBytes = Number(response.headers.get('content-length'))
+  if (Number.isFinite(declaredBytes) && declaredBytes > MAX_API_RESPONSE_BYTES) {
+    throw new H3AcceptanceError('H3_E2E_NETWORK', `Local MangaForge API response exceeded ${MAX_API_RESPONSE_BYTES} bytes`)
+  }
+  if (!response.body) return ''
+  const reader = response.body.getReader()
+  const chunks = []
+  let totalBytes = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      totalBytes += value.byteLength
+      if (totalBytes > MAX_API_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined)
+        throw new H3AcceptanceError('H3_E2E_NETWORK', `Local MangaForge API response exceeded ${MAX_API_RESPONSE_BYTES} bytes`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  const bytes = new Uint8Array(totalBytes)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
+}
+
 async function requestJson(fetchImpl, baseUrl, path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase()
-  const response = await fetchWithTimeout(fetchImpl, apiEndpoint(baseUrl, path), {
+  const { response, text } = await fetchWithTimeout(fetchImpl, apiEndpoint(baseUrl, path), {
     method,
     ...(options.body === undefined ? {} : {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options.body),
     }),
-  }, options.timeoutMs)
-  const text = await response.text()
+  }, options.timeoutMs, async response => ({ response, text: await readBoundedText(response) }))
   let body = null
   try { body = text ? JSON.parse(text) : null } catch {
     throw new H3AcceptanceError('H3_E2E_API', `${method} ${path} returned invalid JSON (HTTP ${response.status})`)
@@ -118,11 +183,12 @@ async function requestJson(fetchImpl, baseUrl, path, options = {}) {
 
 async function preflightLocalImage(fetchImpl, baseUrl, localUrl) {
   const origin = new URL(baseUrl).origin
-  const response = await fetchWithTimeout(fetchImpl, new URL(localUrl, origin).toString())
-  if (!response.ok) throw new H3AcceptanceError('H3_E2E_API', `Local image asset preflight failed (HTTP ${response.status})`)
-  const contentType = String(response.headers.get('content-type') || '').toLowerCase()
-  if (!contentType.startsWith('image/')) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID did not resolve to image media')
-  await response.body?.cancel().catch(() => undefined)
+  await fetchWithTimeout(fetchImpl, new URL(localUrl, origin).toString(), {}, REQUEST_TIMEOUT_MS, async response => {
+    if (!response.ok) throw new H3AcceptanceError('H3_E2E_API', `Local image asset preflight failed (HTTP ${response.status})`)
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+    if (!contentType.startsWith('image/')) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID did not resolve to image media')
+    await response.body?.cancel().catch(() => undefined)
+  })
 }
 
 function assertLockedRevision(value) {

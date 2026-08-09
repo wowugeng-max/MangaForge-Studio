@@ -14,6 +14,16 @@ import {
   validateSkillPackArchiveEntry,
 } from './path-safety'
 
+function expectOrderedTokens(content: string, tokens: string[]) {
+  let previousIndex = -1
+  for (const token of tokens) {
+    const index = content.indexOf(token)
+    expect(index).toBeGreaterThanOrEqual(0)
+    expect(index).toBeGreaterThan(previousIndex)
+    previousIndex = index
+  }
+}
+
 describe('canvas skill contracts and parser', () => {
   test('parses normalized frontmatter, infers directory name, and extracts explicit references only', () => {
     const raw = `---
@@ -125,6 +135,38 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     ])
     expect(loaded[0]?.content).toContain('H3_BASE_GUIDE_CONTRACT')
     expect(loaded[1]?.content).toContain('H3_REF_GUIDE_CONTRACT')
+  })
+
+  test('pins the checked-in H3 field order, alignment labels, timing, references, and negative prompt contract', async () => {
+    const fixtureRoot = join(import.meta.dir, 'fixtures', 'h3-prompt-writing', 'references')
+    const [base, fullReference] = await Promise.all([
+      readFile(join(fixtureRoot, 'base-en.txt'), 'utf8'),
+      readFile(join(fixtureRoot, 'ref-en.txt'), 'utf8'),
+    ])
+
+    expectOrderedTokens(base, [
+      'integrated_multimodal_description:',
+      'overall_soundscape:',
+      'non_diegetic_music:',
+    ])
+    expect(base).toContain('[Shot 2] At 00:03.500, the camera cuts to...')
+    expect(base).toContain('For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.')
+    expect(base).toContain('FL2VA duration example: Picture 1 aligns with the 0.00-second mark and Picture 2 aligns with the 8.00-second mark.')
+    expect(base).toContain('L2VA duration example: <Picture 1> aligns with the 6.00-second mark of the target video.')
+    expect(base).toContain('negative_prompt: no deformed hands; no watermark: preserve punctuation / spacing')
+    expect(base).toContain('Preserve negative_prompt punctuation and spacing exactly; do not rewrite or omit it.')
+
+    expectOrderedTokens(fullReference, [
+      'subject_definitions:',
+      'summary:',
+      'retention_analysis:',
+      'detailed_description:',
+      'overall_soundscape:',
+      'non_diegetic_music:',
+    ])
+    expect(fullReference).toContain('Stable reference labels include <Subject 1>, <Picture 1>, <Video 1>, and <Audio 1>.')
+    expect(fullReference).toContain('[Shot 2] At 00:03.000, ...')
+    expect(fullReference).toContain('`fully_preserved`, `reference`, and `weak_reference`')
   })
 })
 

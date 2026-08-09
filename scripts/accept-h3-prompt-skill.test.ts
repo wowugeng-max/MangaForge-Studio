@@ -138,6 +138,59 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(calls).toEqual([{ url: 'http://127.0.0.1:8787/api/status', redirect: 'manual' }])
   })
 
+  test('keeps the short timeout active while reading a response body', async () => {
+    const realSetTimeout = globalThis.setTimeout
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    const timeoutSpy = spyOn(globalThis, 'setTimeout').mockImplementation(((handler: any, timeout?: number, ...args: any[]) => (
+      realSetTimeout(handler, Number(timeout) === 15_000 ? 5 : Number(timeout), ...args)
+    )) as typeof setTimeout)
+    const fetchImpl = async (_input: RequestInfo | URL, init: RequestInit = {}) => {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller
+          init.signal?.addEventListener('abort', () => controller.error(new Error('body read aborted')), { once: true })
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    const acceptance = runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })
+    const watchdog = new Promise(resolve => realSetTimeout(() => resolve({ code: 'TEST_BODY_READ_WATCHDOG' }), 75))
+    let outcome: any
+    try {
+      outcome = await Promise.race([acceptance.then(value => value, error => error), watchdog])
+      expect(outcome).toMatchObject({ code: 'H3_E2E_NETWORK' })
+    } finally {
+      timeoutSpy.mockRestore()
+      if (outcome?.code === 'TEST_BODY_READ_WATCHDOG') streamController?.error(new Error('test cleanup'))
+      await acceptance.catch(() => undefined)
+    }
+  })
+
+  test('converts response body stream failures into typed network errors', async () => {
+    const fetchImpl = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new Error('response body stream failed')) },
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+
+    await expect(runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_NETWORK' })
+  })
+
+  test('rejects an oversized API response body with a typed network error', async () => {
+    const oversized = JSON.stringify({ ok: true, padding: 'x'.repeat(3 * 1024 * 1024) })
+    await expect(runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: async () => new Response(oversized, { status: 200, headers: { 'content-type': 'application/json' } }),
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_NETWORK' })
+  })
+
   test.each([
     ['a non-40-character revision', { revision: 'not-a-locked-revision' }],
     ['a result missing the base reference', { references: ['references/ref-en.txt'] }],
@@ -272,5 +325,34 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(caught).toMatchObject({ code: 'H3_E2E_NETWORK' })
     expect(String((caught as Error).message)).not.toContain(secret)
     expect(String((caught as Error).message)).not.toContain('abc.def')
+  })
+
+  test('redacts URL userinfo and signing parameters from typed response-body errors', async () => {
+    const credentialUrl = 'https://client-user:client-pass@api.example.test/v1/compile?X-Amz-Credential=credential%2Fvalue&X-Amz-Signature=amz-value&signature=plain-value&sig=encoded%2Fvalue'
+    const errorText = `POST ${credentialUrl} failed with HTTP 502`
+    const assertRedactedDiagnostic = (value: string) => {
+      for (const leaked of [
+        'client-user', 'client-pass', 'credential/value', 'credential%2Fvalue',
+        'amz-value', 'plain-value', 'encoded/value', 'encoded%2Fvalue',
+      ]) expect(value).not.toContain(leaked)
+      expect(value).toContain('api.example.test/v1/compile')
+      expect(value).toContain('HTTP 502')
+    }
+
+    assertRedactedDiagnostic(redactSensitive(errorText))
+
+    let caught: unknown
+    try {
+      await runH3Acceptance({
+        env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+        fetchImpl: async () => new Response(new ReadableStream<Uint8Array>({
+          start(controller) { controller.error(new Error(errorText)) },
+        }), { status: 200, headers: { 'content-type': 'application/json' } }),
+        log: () => {},
+      })
+    } catch (error) { caught = error }
+    expect(caught).toBeInstanceOf(H3AcceptanceError)
+    expect(caught).toMatchObject({ code: 'H3_E2E_NETWORK' })
+    assertRedactedDiagnostic(String((caught as Error).message))
   })
 })
