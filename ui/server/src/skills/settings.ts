@@ -1,4 +1,4 @@
-import { lstat, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readFile, realpath, rename, unlink, writeFile } from 'node:fs/promises'
 import { randomBytes } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
@@ -55,7 +55,12 @@ export async function writeSkillSettings(workspace: string, skillCompilerModelId
   } catch (error: any) {
     if (error?.code !== 'ENOENT') throw error
   }
-  await writeFile(temporary, `${JSON.stringify({ skill_compiler_model_id: skillCompilerModelId }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
-  await rename(temporary, target)
+  try {
+    await writeFile(temporary, `${JSON.stringify({ skill_compiler_model_id: skillCompilerModelId }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+    await rename(temporary, target)
+  } catch (error) {
+    await unlink(temporary).catch(() => undefined)
+    throw error
+  }
   return { skill_compiler_model_id: skillCompilerModelId }
 }

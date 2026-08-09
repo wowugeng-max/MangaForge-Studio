@@ -41,7 +41,7 @@ function scrub(value: string, workspace: string): string {
   }
   result = result.replace(/(?:sk|rk)-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
   result = result.replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
-  result = result.replace(/([?&](?:api[_-]?key|token|secret|password)=)[^&#\s]+/gi, '$1[REDACTED]')
+  result = result.replace(/([?&](?:api[_-]?key|token|access[_-]?token|secret|password|auth|signature|sig|x-amz-[^=&#\s]+)=)[^&#\s]+/gi, '$1[REDACTED]')
   return result.replace(INTERNAL_NAMES, (name) => `[${name.toUpperCase()}]`)
 }
 
@@ -50,7 +50,7 @@ function scrubUnknown(value: unknown, workspace: string): unknown {
   if (Array.isArray(value)) return value.map((item) => scrubUnknown(item, workspace))
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value)
-      .filter(([key]) => !/activeWorkspace|compilerModelId|request|nodeParams|incomingAssets|source_asset_ids|api[_-]?key|authorization|bearer/i.test(key))
+      .filter(([key]) => !/activeWorkspace|compilerModelId|request|nodeParams|incomingAssets|source_asset_ids|api[_-]?key|access[_-]?token|token|secret|password|auth|signature|sig|x-amz-|authorization|bearer/i.test(key))
       .map(([key, item]) => [key, scrubUnknown(item, workspace)]))
   }
   return value
