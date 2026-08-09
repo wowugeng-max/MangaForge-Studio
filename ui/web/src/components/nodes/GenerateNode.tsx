@@ -143,6 +143,7 @@ function GenerateNodeImpl(props: NodeProps) {
     return normalizeGenerateNodeCompilerModelId(value)
   })
   const [skillArguments, setSkillArguments] = useState<Record<string, string>>(data?.skillArguments ?? data?.skill_arguments ?? {})
+  const [commandSkillArgumentsByCommand, setCommandSkillArgumentsByCommand] = useState<Record<string, Record<string, string>>>({})
   const [skillSettings, setSkillSettings] = useState<CanvasSkillSettings | null>(null)
   const [skillSettingsLoaded, setSkillSettingsLoaded] = useState(false)
   const [compilerModels, setCompilerModels] = useState<any[]>([])
@@ -190,6 +191,8 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
   const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
   const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
+  const commandSkillArgumentKey = parsedSkillCommand ? `${parsedSkillCommand.packId || ''}:${parsedSkillCommand.name}` : ''
+  const commandSkillArguments = commandSkillArgumentKey ? commandSkillArgumentsByCommand[commandSkillArgumentKey] || {} : {}
   const knownSkills = useMemo(() => Array.from(new Map(
     [...allSkills, ...readySkills].map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill]),
   ).values()), [allSkills, readySkills])
@@ -217,8 +220,19 @@ function GenerateNodeImpl(props: NodeProps) {
   const effectiveSkillArguments = resolveGenerateNodeSkillArguments({
     command: parsedSkillCommand,
     skillArguments,
+    commandSkillArguments,
     effectiveSkillArgumentSpecs: effectiveSkill?.arguments,
   })
+  const setEffectiveSkillArgument = (name: string, value: string) => {
+    if (!parsedSkillCommand || !commandSkillArgumentKey) {
+      setSkillArguments(current => ({ ...current, [name]: value }))
+      return
+    }
+    setCommandSkillArgumentsByCommand(current => ({
+      ...current,
+      [commandSkillArgumentKey]: { ...(current[commandSkillArgumentKey] || {}), [name]: value },
+    }))
+  }
   const hasEffectiveSkill = supportsPromptSkills && Boolean(effectiveSkillName)
   const effectiveCompilerModelId = skillCompilerModelId ?? (skillSettingsLoaded ? skillSettings?.skill_compiler_model_id ?? null : compilerModelId)
   const effectiveCompilerModel = compilerModels.find(model => Number(model.id) === Number(effectiveCompilerModelId))
@@ -565,7 +579,8 @@ function GenerateNodeImpl(props: NodeProps) {
       skillRevision: effectiveSkillRevision,
       skillCompileEnabled: hasEffectiveSkill ? true : undefined,
       skillCompilerModelId: hasEffectiveSkill ? effectiveCompilerModelId : undefined,
-      skillArguments: hasEffectiveSkill ? effectiveSkillArguments : undefined,
+      skillArguments: hasEffectiveSkill ? skillArguments : undefined,
+      commandSkillArguments: hasEffectiveSkill ? commandSkillArguments : undefined,
       effectiveSkillArgumentSpecs: hasEffectiveSkill ? effectiveSkill?.arguments : undefined,
       compiledInputHash: hasEffectiveSkill ? compiledInputHash : undefined,
     })
@@ -1152,9 +1167,9 @@ function GenerateNodeImpl(props: NodeProps) {
                     </Text>
                     <Input
                       size="small"
-                      value={skillArguments[argument.name] ?? argument.default ?? ''}
+                      value={effectiveSkillArguments?.[argument.name] ?? argument.default ?? ''}
                       placeholder={argument.default ?? argument.name}
-                      onChange={event => setSkillArguments(current => ({ ...current, [argument.name]: event.target.value }))}
+                      onChange={event => setEffectiveSkillArgument(argument.name, event.target.value)}
                     />
                   </div>
                 ))}

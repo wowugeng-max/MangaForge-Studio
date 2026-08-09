@@ -600,22 +600,28 @@ describe('request payload size precedence', () => {
 })
 
 describe('GenerateNode Skill review regressions', () => {
-  test('filters dropdown arguments to the resolved command Skill manifest', async () => {
+  test('keeps command Skill arguments completely isolated from dropdown Skill arguments', async () => {
     const module = await import('./GenerateNode')
     const resolveGenerateNodeSkillArguments = (module as any).resolveGenerateNodeSkillArguments
     expect(typeof resolveGenerateNodeSkillArguments).toBe('function')
     if (typeof resolveGenerateNodeSkillArguments !== 'function') return
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('const [commandSkillArgumentsByCommand, setCommandSkillArgumentsByCommand]')
+    expect(source).toContain("value={effectiveSkillArguments?.[argument.name] ?? argument.default ?? ''}")
+    expect(source).toContain('onChange={event => setEffectiveSkillArgument(argument.name, event.target.value)}')
 
     const command = parseCanvasSkillCommand('/other-skill hero')
     expect(resolveGenerateNodeSkillArguments({
       command,
       skillArguments: { stale_only: 'old', style: 'anime' },
       effectiveSkillArgumentSpecs: [{ name: 'style' }],
-    })).toEqual({ style: 'anime' })
+    })).toBeUndefined()
     expect(resolveGenerateNodeSkillArguments({
       command,
-      skillArguments: { stale_only: 'old' },
-    })).toBeUndefined()
+      skillArguments: { stale_only: 'old', style: 'anime' },
+      commandSkillArguments: { stale_only: 'command-only', style: 'ink' },
+      effectiveSkillArgumentSpecs: [{ name: 'style' }],
+    })).toEqual({ style: 'ink' })
     expect(resolveGenerateNodeSkillArguments({
       command: null,
       skillArguments: { stale_only: 'selected-skill-value' },
@@ -638,7 +644,25 @@ describe('GenerateNode Skill review regressions', () => {
       skillArguments: { stale_only: 'old', style: 'anime' },
       effectiveSkillArgumentSpecs: [{ name: 'style' }],
     } as any)
-    expect(payload.skill_arguments).toEqual({ style: 'anime' })
+    expect('skill_arguments' in payload).toBe(false)
+
+    const explicitCommandPayload = buildGenerateNodeRequestPayload({
+      id: 'node-explicit-command-arguments',
+      prompt: '/other-skill hero',
+      selectedKey: 7,
+      provider: 'skill-provider',
+      selectedModel: 'image-model',
+      mode: 'text_to_image',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.7,
+      ratioSize: '1024*1024',
+      selectedRolePrompt: 'visual director',
+      skillArguments: { style: 'anime' },
+      commandSkillArguments: { style: 'ink' },
+      effectiveSkillArgumentSpecs: [{ name: 'style' }],
+    } as any)
+    expect(explicitCommandPayload.skill_arguments).toEqual({ style: 'ink' })
   })
 
   test('normalizes nullable compiler model IDs without converting null to zero', async () => {

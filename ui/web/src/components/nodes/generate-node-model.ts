@@ -133,12 +133,16 @@ export function parseCanvasSkillCommand(input: string): ParsedCanvasSkillCommand
 export function resolveGenerateNodeSkillArguments(input: {
   command?: ParsedCanvasSkillCommand | null
   skillArguments?: Record<string, string>
+  commandSkillArguments?: Record<string, string>
   effectiveSkillArgumentSpecs?: Array<{ name: string }> | null
 }): Record<string, string> | undefined {
-  const entries = Object.entries(input.skillArguments || {})
-  if (!input.command) return entries.length ? Object.fromEntries(entries) : undefined
+  if (!input.command) {
+    const dropdownEntries = Object.entries(input.skillArguments || {})
+    return dropdownEntries.length ? Object.fromEntries(dropdownEntries) : undefined
+  }
   if (!Array.isArray(input.effectiveSkillArgumentSpecs)) return undefined
 
+  const entries = Object.entries(input.commandSkillArguments || {})
   const declaredNames = new Set(input.effectiveSkillArgumentSpecs.map(spec => String(spec?.name || '').trim()).filter(Boolean))
   const resolvedEntries = entries.filter(([name]) => declaredNames.has(name))
   return resolvedEntries.length ? Object.fromEntries(resolvedEntries) : undefined
@@ -399,6 +403,7 @@ export function buildGenerateNodeRequestPayload(input: {
   skillCompileEnabled?: boolean
   skillCompilerModelId?: number | string | null
   skillArguments?: Record<string, string>
+  commandSkillArguments?: Record<string, string>
   effectiveSkillArgumentSpecs?: Array<{ name: string }> | null
   compiledInputHash?: string
 }) {
@@ -446,6 +451,7 @@ export function buildGenerateNodeRequestPayload(input: {
   const effectiveSkillArguments = resolveGenerateNodeSkillArguments({
     command,
     skillArguments: input.skillArguments,
+    commandSkillArguments: input.commandSkillArguments,
     effectiveSkillArgumentSpecs: input.effectiveSkillArgumentSpecs,
   })
   if (effectiveSkillArguments) payload.skill_arguments = effectiveSkillArguments
