@@ -1,5 +1,5 @@
 import { lstat, readdir, readFile } from 'node:fs/promises'
-import { basename, dirname, join, sep } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 
 import { readOpenAIMetadata, parseSkillDocument } from './frontmatter'
 import { readPackRecord } from './pack-installer'
@@ -93,12 +93,40 @@ type ScanContext = { packId: string; revision: string; sourceUrl?: string }
 
 type RegistryCache = { signature: string; manifests: SkillManifest[] }
 
-async function isDirectory(path: string): Promise<boolean> {
+async function isDirectory(path: string, boundary?: string): Promise<boolean> {
+  if (await hasSymlinkInPath(path, boundary)) return false
   try { const info = await lstat(path); return info.isDirectory() && !info.isSymbolicLink() } catch { return false }
 }
 
+/** Reject a root when any existing component below its workspace boundary is a symlink. */
+async function hasSymlinkInPath(path: string, boundary?: string): Promise<boolean> {
+  const resolved = resolve(path)
+  if (!boundary) {
+    try { return (await lstat(resolved)).isSymbolicLink() } catch { return false }
+  }
+  const resolvedBoundary = resolve(boundary)
+  const childPath = relative(resolvedBoundary, resolved)
+  if (childPath === '..' || childPath.startsWith(`..${sep}`) || childPath.startsWith(sep)) return false
+  let current = resolvedBoundary
+  const boundaryInfo = await lstat(current).catch(() => undefined)
+  if (boundaryInfo?.isSymbolicLink()) return true
+  for (const segment of childPath.split(sep).filter(Boolean)) {
+    current = join(current, segment)
+    try {
+      const info = await lstat(current)
+      if (info.isSymbolicLink()) return true
+    } catch {
+      // Missing roots are normal for optional Skill directories. Once a
+      // component is missing, no later component can be an existing escape.
+      return false
+    }
+  }
+  return false
+}
+
 /** Build a cheap, deterministic fingerprint without reading Skill contents. */
-async function collectSignature(root: string, entries: string[]): Promise<void> {
+async function collectSignature(root: string, entries: string[], boundary?: string): Promise<void> {
+  if (await hasSymlinkInPath(root, boundary)) return
   let info
   try { info = await lstat(root) } catch { return }
   if (info.isSymbolicLink()) return
@@ -109,7 +137,7 @@ async function collectSignature(root: string, entries: string[]): Promise<void> 
   children.sort((left, right) => left.name.localeCompare(right.name))
   for (const child of children) {
     if (child.isSymbolicLink()) continue
-    await collectSignature(join(root, child.name), entries)
+    await collectSignature(join(root, child.name), entries, boundary)
   }
 }
 
@@ -150,8 +178,8 @@ async function parseFile(filePath: string, context: ScanContext): Promise<SkillM
   }
 }
 
-async function scanSkillRoot(root: string, context: ScanContext): Promise<SkillManifest[]> {
-  if (!(await isDirectory(root))) return []
+async function scanSkillRoot(root: string, context: ScanContext, boundary?: string): Promise<SkillManifest[]> {
+  if (!(await isDirectory(root, boundary))) return []
   const result: SkillManifest[] = []
   const direct = join(root, 'SKILL.md')
   try { if ((await lstat(direct)).isFile()) result.push(await parseFile(direct, context)) } catch { /* no root document */ }
@@ -172,7 +200,7 @@ async function scanSkillRoot(root: string, context: ScanContext): Promise<SkillM
 
 async function scanInstalled(workspace: string): Promise<SkillManifest[]> {
   const root = join(workspace, '.mangaforge', 'skill-packs')
-  if (!(await isDirectory(root))) return []
+  if (!(await isDirectory(root, workspace))) return []
   const result: SkillManifest[] = []
   let packs: Awaited<ReturnType<typeof readdir>>
   try { packs = await readdir(root, { withFileTypes: true }) } catch { return result }
@@ -190,7 +218,7 @@ async function scanInstalled(workspace: string): Promise<SkillManifest[]> {
       if (!record) continue
       result.push(...await scanSkillRoot(join(revisionRoot, 'skills'), {
         packId: record.id, revision: record.revision, sourceUrl: record.sourceUrl,
-      }))
+      }, workspace))
     }
   }
   return result
@@ -208,7 +236,7 @@ export function createSkillRegistry(workspace: string, options: SkillRegistryOpt
   }
   const scan = async (): Promise<SkillManifest[]> => {
     const signatureEntries: string[] = []
-    for (const root of rootsForOptions()) await collectSignature(root, signatureEntries)
+    for (const root of rootsForOptions()) await collectSignature(root, signatureEntries, workspace)
     const signature = signatureEntries.sort().join('\n')
     if (cached?.signature === signature) return cached.manifests
     const manifests = await scanInstalled(workspace)
@@ -217,7 +245,7 @@ export function createSkillRegistry(workspace: string, options: SkillRegistryOpt
     if (options.includeClaudeSkills) roots.push({ root: join(workspace, '.claude', 'skills'), packId: 'claude' })
     if (options.includeCodexSkills) roots.push({ root: join(workspace, '.codex', 'skills'), packId: 'codex' })
     for (const root of options.skillRoots ?? []) roots.push({ root, packId: basename(root) || 'local' })
-    for (const item of roots) manifests.push(...await scanSkillRoot(item.root, { packId: item.packId, revision: 'workspace', sourceUrl: `file://${item.root}` }))
+    for (const item of roots) manifests.push(...await scanSkillRoot(item.root, { packId: item.packId, revision: 'workspace', sourceUrl: `file://${item.root}` }, workspace))
     manifests.sort((left, right) => `${left.packId}\0${left.name}\0${left.revision}\0${left.directoryName}`.localeCompare(`${right.packId}\0${right.name}\0${right.revision}\0${right.directoryName}`))
     cached = { signature, manifests }
     return manifests

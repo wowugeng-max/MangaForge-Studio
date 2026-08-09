@@ -108,6 +108,15 @@ describe('workspace canvas Skill registry', () => {
     expect(manifest?.displayName).toBeUndefined()
   })
 
+  test('does not scan a Skill root reached through an ancestor symlink', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
+    const outside = await mkdtemp(join(tmpdir(), 'mf-registry-outside-'))
+    await skill(join(outside, '.mangaforge', 'skills'), 'outside-skill', 'Return only a prompt for an image.')
+    await symlink(join(outside, '.mangaforge'), join(workspace, '.mangaforge'))
+    const list = await createSkillRegistry(workspace).list({ includeBuiltins: false })
+    expect(list).toHaveLength(0)
+  })
+
   test('honors opt-in Claude/Codex roots and invalidates on mtime/revision changes', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
     const claudeRoot = join(workspace, '.claude', 'skills')
@@ -128,6 +137,10 @@ describe('workspace canvas Skill registry', () => {
     await installedPack(workspace, 'pack-a', 'rev-old', [{ name: 'same-name', body: 'old', frontmatter: 'media_modes: [text_to_image]\n' }])
     await installedPack(workspace, 'pack-a', 'rev-new', [{ name: 'same-name', body: 'new', frontmatter: 'media_modes: [text_to_image]\n' }])
     expect((await registry.list({ includeBuiltins: false })).filter((item) => item.name === 'same-name')).toHaveLength(2)
+    const cachedList = await registry.list({ includeBuiltins: false })
+    registry.invalidate()
+    const refreshedList = await registry.list({ includeBuiltins: false })
+    expect(refreshedList[0]).not.toBe(cachedList[0])
   })
 })
 
