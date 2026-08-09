@@ -116,6 +116,70 @@ export type GenerateNodeIncomingAsset = {
   source_asset_ids?: number[]
 }
 
+export type GenerateNodeReferenceRole =
+  | 'general'
+  | 'first_frame'
+  | 'last_frame'
+  | 'character'
+  | 'scene'
+  | 'style'
+  | 'full_reference'
+  | 'prompt_context'
+
+export type GenerateNodeReferenceType = 'image' | 'prompt' | 'video' | 'audio'
+
+export type GenerateNodeReferenceBinding = {
+  reference_index: number
+  reference_id: string
+  reference_role: GenerateNodeReferenceRole
+  type: GenerateNodeReferenceType
+  id?: number
+  url?: string
+  content?: string
+  source_asset_ids?: number[]
+}
+
+export type GenerateNodeReferenceErrorCode =
+  | 'REFERENCE_LIMIT_EXCEEDED'
+  | 'REFERENCE_ROLE_INVALID'
+  | 'REFERENCE_MEDIA_UNSUPPORTED'
+  | 'REFERENCE_TYPE_INVALID'
+  | 'REFERENCE_ASSET_INVALID'
+  | 'REFERENCE_LINEAGE_INVALID'
+  | 'REFERENCE_ID_INVALID'
+
+export class GenerateNodeReferenceError extends Error {
+  readonly code: GenerateNodeReferenceErrorCode
+  readonly reference_index?: number
+
+  constructor(code: GenerateNodeReferenceErrorCode, message: string, referenceIndex?: number) {
+    super(message)
+    this.name = 'GenerateNodeReferenceError'
+    this.code = code
+    this.reference_index = referenceIndex
+  }
+}
+
+export const MAX_GENERATE_NODE_REFERENCE_IMAGES = 9
+
+const GENERATE_NODE_REFERENCE_ROLES: ReadonlySet<GenerateNodeReferenceRole> = new Set([
+  'general',
+  'first_frame',
+  'last_frame',
+  'character',
+  'scene',
+  'style',
+  'full_reference',
+  'prompt_context',
+])
+
+const GENERATE_NODE_REFERENCE_TYPES: ReadonlySet<GenerateNodeReferenceType> = new Set([
+  'image',
+  'prompt',
+  'video',
+  'audio',
+])
+
 export type ParsedCanvasSkillCommand = { packId?: string; name: string; argumentsText: string }
 
 const canvasSkillToken = '[A-Za-z0-9][A-Za-z0-9._-]*'
@@ -275,24 +339,210 @@ export function areGenerateNodeIncomingContextSnapshotsEqual(
   return left.fingerprint === right.fingerprint
 }
 
-function normalizeGenerateNodeIncomingAsset(asset: any): GenerateNodeIncomingAsset | null {
-  if (!asset || typeof asset !== 'object') return null
-  const id = Number.isFinite(Number(asset.id)) ? Number(asset.id) : undefined
-  const sourceAssetIds = Array.from(new Set([
-    ...(id ? [id] : []),
-    ...normalizeGenerateNodeSourceAssetIds(asset.source_asset_ids),
-    ...normalizeGenerateNodeSourceAssetIds(asset.sourceAssetIds),
-  ]))
-  const type = String(asset.type || '').toLowerCase()
-  if (type === 'image') {
-    const rawUrl = asset.url || asset.file_path || asset.filePath || asset.content || ''
-    const url = normalizeGenerateNodeImageUrl(String(rawUrl || ''))
-    if (!url) return null
-    return { id, type: 'image', file_path: url, url, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+function generateNodeReferenceError(
+  code: GenerateNodeReferenceErrorCode,
+  messageText: string,
+  referenceIndex?: number,
+) {
+  return new GenerateNodeReferenceError(code, messageText, referenceIndex)
+}
+
+function isGenerateNodeReferenceRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeGenerateNodeReferenceLineage(asset: Record<string, unknown>, referenceIndex: number): number[] {
+  const rawLineage = asset.source_asset_ids ?? asset.sourceAssetIds
+  if (rawLineage !== undefined && !Array.isArray(rawLineage)) {
+    throw generateNodeReferenceError(
+      'REFERENCE_LINEAGE_INVALID',
+      `Reference ${referenceIndex} source_asset_ids must be an array`,
+      referenceIndex,
+    )
   }
-  const content = String(asset.content || asset.text || '').trim()
-  if (!content) return null
-  return { id, type: 'prompt', content, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+  const candidates = [asset.id, ...(Array.isArray(rawLineage) ? rawLineage : [])]
+  const seen = new Set<number>()
+  const lineage: number[] = []
+  candidates.forEach(candidate => {
+    const id = (typeof candidate === 'number' || (typeof candidate === 'string' && candidate.trim()))
+      ? Number(candidate)
+      : NaN
+    if (!Number.isSafeInteger(id) || id <= 0 || seen.has(id)) return
+    seen.add(id)
+    lineage.push(id)
+  })
+  return lineage
+}
+
+function enforceGenerateNodeReferenceConstraints(bindings: readonly GenerateNodeReferenceBinding[]) {
+  const imageCount = bindings.filter(binding => binding.type === 'image').length
+  if (imageCount > MAX_GENERATE_NODE_REFERENCE_IMAGES) {
+    throw generateNodeReferenceError(
+      'REFERENCE_LIMIT_EXCEEDED',
+      `GenerateNode references may contain at most ${MAX_GENERATE_NODE_REFERENCE_IMAGES} images`,
+    )
+  }
+  if (bindings.filter(binding => binding.reference_role === 'first_frame').length > 1) {
+    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one first_frame reference is allowed')
+  }
+  if (bindings.filter(binding => binding.reference_role === 'last_frame').length > 1) {
+    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one last_frame reference is allowed')
+  }
+}
+
+export function normalizeGenerateNodeReferenceBindings(
+  persisted: unknown,
+  incomingAssets: readonly GenerateNodeIncomingAsset[] = [],
+): GenerateNodeReferenceBinding[] {
+  const source = persisted === undefined || persisted === null ? incomingAssets : persisted
+  if (!Array.isArray(source)) {
+    throw generateNodeReferenceError('REFERENCE_ASSET_INVALID', 'GenerateNode references must be an array')
+  }
+
+  const referenceIds = new Set<string>()
+  const bindings = source.map((rawAsset, arrayIndex): GenerateNodeReferenceBinding => {
+    const referenceIndex = arrayIndex + 1
+    if (!isGenerateNodeReferenceRecord(rawAsset)) {
+      throw generateNodeReferenceError(
+        'REFERENCE_ASSET_INVALID',
+        `Reference ${referenceIndex} must be an object`,
+        referenceIndex,
+      )
+    }
+
+    const rawType = typeof rawAsset.type === 'string' ? rawAsset.type.toLowerCase() : ''
+    if (!GENERATE_NODE_REFERENCE_TYPES.has(rawType as GenerateNodeReferenceType)) {
+      throw generateNodeReferenceError(
+        'REFERENCE_TYPE_INVALID',
+        `Reference ${referenceIndex} has an invalid reference type`,
+        referenceIndex,
+      )
+    }
+    const type = rawType as GenerateNodeReferenceType
+
+    const rawRole = rawAsset.reference_role ?? rawAsset.referenceRole ?? rawAsset.role ?? 'general'
+    if (typeof rawRole !== 'string' || !GENERATE_NODE_REFERENCE_ROLES.has(rawRole as GenerateNodeReferenceRole)) {
+      throw generateNodeReferenceError(
+        'REFERENCE_ROLE_INVALID',
+        `Reference ${referenceIndex} has an invalid reference role`,
+        referenceIndex,
+      )
+    }
+    const referenceRole = rawRole as GenerateNodeReferenceRole
+
+    const rawReferenceId = rawAsset.reference_id ?? rawAsset.referenceId
+    let referenceId = `reference-${referenceIndex}`
+    if (rawReferenceId !== undefined && rawReferenceId !== null && rawReferenceId !== '') {
+      if (typeof rawReferenceId !== 'string' || !rawReferenceId.trim()) {
+        throw generateNodeReferenceError(
+          'REFERENCE_ID_INVALID',
+          `Reference ${referenceIndex} has an invalid reference id`,
+          referenceIndex,
+        )
+      }
+      referenceId = rawReferenceId.trim()
+    }
+    if (referenceIds.has(referenceId)) {
+      throw generateNodeReferenceError(
+        'REFERENCE_ID_INVALID',
+        `Duplicate reference id: ${referenceId}`,
+        referenceIndex,
+      )
+    }
+    referenceIds.add(referenceId)
+
+    const binding: GenerateNodeReferenceBinding = {
+      reference_index: referenceIndex,
+      reference_id: referenceId,
+      reference_role: referenceRole,
+      type,
+    }
+    if (type === 'prompt') {
+      const rawContent = rawAsset.content ?? rawAsset.text
+      if (typeof rawContent !== 'string' || !rawContent.trim()) {
+        throw generateNodeReferenceError(
+          'REFERENCE_ASSET_INVALID',
+          `Reference ${referenceIndex} prompt content must be a non-empty string`,
+          referenceIndex,
+        )
+      }
+      binding.content = rawContent.trim()
+    } else {
+      const rawUrl = rawAsset.url ?? rawAsset.file_path ?? rawAsset.filePath ?? rawAsset.content
+      if (typeof rawUrl !== 'string' || !rawUrl.trim()) {
+        throw generateNodeReferenceError(
+          'REFERENCE_ASSET_INVALID',
+          `Reference ${referenceIndex} media url must be a non-empty string`,
+          referenceIndex,
+        )
+      }
+      binding.url = normalizeGenerateNodeImageUrl(rawUrl)
+    }
+
+    const sourceAssetIds = normalizeGenerateNodeReferenceLineage(rawAsset, referenceIndex)
+    if (sourceAssetIds.length) binding.source_asset_ids = sourceAssetIds
+    return binding
+  })
+
+  enforceGenerateNodeReferenceConstraints(bindings)
+  return bindings
+}
+
+export function reorderGenerateNodeReferenceBindings(
+  bindings: readonly GenerateNodeReferenceBinding[],
+  fromIndex: number,
+  toIndex: number,
+): GenerateNodeReferenceBinding[] {
+  const reordered = normalizeGenerateNodeReferenceBindings(bindings, [])
+  if (
+    !Number.isInteger(fromIndex) ||
+    !Number.isInteger(toIndex) ||
+    fromIndex < 0 ||
+    toIndex < 0 ||
+    fromIndex >= reordered.length ||
+    toIndex >= reordered.length ||
+    fromIndex === toIndex
+  ) {
+    return reordered
+  }
+  const [moved] = reordered.splice(fromIndex, 1)
+  reordered.splice(toIndex, 0, moved)
+  return reordered.map((binding, index) => ({
+    ...binding,
+    reference_index: index + 1,
+    ...(binding.source_asset_ids ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+  }))
+}
+
+export function buildGenerateNodeReferencePayload(bindings: readonly GenerateNodeReferenceBinding[]) {
+  const referenceBindings = normalizeGenerateNodeReferenceBindings(bindings, [])
+  return {
+    reference_bindings: referenceBindings,
+    reference_images: referenceBindings
+      .filter((binding): binding is GenerateNodeReferenceBinding & { type: 'image'; url: string } => binding.type === 'image' && Boolean(binding.url))
+      .map(binding => ({
+        url: binding.url,
+        reference_index: binding.reference_index,
+        reference_id: binding.reference_id,
+        reference_role: binding.reference_role,
+        ...(binding.source_asset_ids?.length ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+      })),
+  }
+}
+
+export function validateGenerateNodeReferenceBindingsForExecution(
+  bindings: readonly GenerateNodeReferenceBinding[],
+): GenerateNodeReferenceBinding[] {
+  const normalized = normalizeGenerateNodeReferenceBindings(bindings, [])
+  const unsupported = normalized.find(binding => binding.type === 'video' || binding.type === 'audio')
+  if (unsupported) {
+    throw generateNodeReferenceError(
+      'REFERENCE_MEDIA_UNSUPPORTED',
+      `Reference media type ${unsupported.type} is not executable yet`,
+      unsupported.reference_index,
+    )
+  }
+  return normalized
 }
 
 export function isGenerateNodeMuted(nodes: Array<{ id: string; parentNode?: string; data?: any }>, nodeId: string) {
@@ -318,6 +568,7 @@ export function buildGenerateNodeAssetPayload(input: {
   projectId?: number | null
   cameraParams?: Record<string, string>
   sourceAssetIds?: number[] | null
+  referenceBindings?: readonly GenerateNodeReferenceBinding[]
   compiledPrompt?: string
   compiledNegativePrompt?: string
   skillPackId?: string
@@ -339,17 +590,27 @@ export function buildGenerateNodeAssetPayload(input: {
   const sourceAssetIds = Array.isArray(input.sourceAssetIds)
     ? input.sourceAssetIds.map(item => Number(item)).filter(id => Number.isFinite(id))
     : []
+  const referenceBindings = input.referenceBindings === undefined
+    ? undefined
+    : normalizeGenerateNodeReferenceBindings(input.referenceBindings, [])
+  const mergedSourceAssetIds = referenceBindings === undefined
+    ? sourceAssetIds
+    : Array.from(new Set([
+      ...sourceAssetIds,
+      ...referenceBindings.flatMap(binding => binding.source_asset_ids || []),
+    ]))
   const hasCompileProvenance = Boolean(input.compiledPrompt || input.compiledInputHash || input.skillName)
 
   return {
     name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${input.prompt.slice(0, 10) || input.selectedModel}...`,
     type: assetType,
     ...(assetType === 'prompt' ? {} : { file_path: contentStr }),
-    ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+    ...(mergedSourceAssetIds.length ? { source_asset_ids: mergedSourceAssetIds } : {}),
     data: {
       content: contentStr,
       ...mediaFields,
-      ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+      ...(mergedSourceAssetIds.length ? { source_asset_ids: mergedSourceAssetIds } : {}),
+      ...(referenceBindings !== undefined ? { reference_bindings: referenceBindings } : {}),
       source_provider: input.provider,
       source_model: input.selectedModel,
       source_mode: input.mode,
@@ -473,6 +734,7 @@ export function buildGenerateNodeRequestPayload(input: {
   cameraSuffix?: string
   incomingImage?: string
   incomingAssets?: GenerateNodeIncomingAsset[]
+  referenceBindings?: readonly GenerateNodeReferenceBinding[]
   externalSystemPrompt?: string
   systemPromptOverride?: string
   skillPackId?: string
@@ -487,18 +749,28 @@ export function buildGenerateNodeRequestPayload(input: {
 }) {
   const finalPromptText = `${input.prompt || ''}${input.cameraSuffix || ''}`
   const activeSystemPrompt = input.externalSystemPrompt || input.systemPromptOverride || input.selectedRolePrompt
-  const normalizedIncomingAssets = (input.incomingAssets || [])
-    .map(normalizeGenerateNodeIncomingAsset)
-    .filter((asset): asset is GenerateNodeIncomingAsset => Boolean(asset))
-  if (input.incomingImage && !normalizedIncomingAssets.some(asset => asset.type === 'image' && asset.url === input.incomingImage)) {
-    normalizedIncomingAssets.unshift({ type: 'image', file_path: input.incomingImage, url: input.incomingImage })
+  const legacyIncomingAssets = Array.isArray(input.incomingAssets)
+    ? input.incomingAssets.map(asset => ({ ...asset, ...(asset.source_asset_ids ? { source_asset_ids: [...asset.source_asset_ids] } : {}) }))
+    : []
+  if (input.referenceBindings === undefined && input.incomingImage) {
+    const incomingImage = normalizeGenerateNodeImageUrl(input.incomingImage)
+    const hasIncomingImage = legacyIncomingAssets.some(asset => {
+      if (asset.type !== 'image') return false
+      const assetUrl = asset.url || asset.file_path || asset.content || ''
+      return normalizeGenerateNodeImageUrl(String(assetUrl)) === incomingImage
+    })
+    if (!hasIncomingImage) legacyIncomingAssets.unshift({ type: 'image', file_path: incomingImage, url: incomingImage })
   }
-  const incomingImages = normalizedIncomingAssets
-    .filter(asset => asset.type === 'image' && asset.url)
-    .map(asset => String(asset.url))
-  const incomingText = normalizedIncomingAssets
-    .filter(asset => asset.type === 'prompt' && asset.content)
-    .map(asset => String(asset.content).trim())
+  const normalizedReferenceBindings = validateGenerateNodeReferenceBindingsForExecution(
+    input.referenceBindings === undefined
+      ? normalizeGenerateNodeReferenceBindings(undefined, legacyIncomingAssets)
+      : input.referenceBindings,
+  )
+  const referencePayload = buildGenerateNodeReferencePayload(normalizedReferenceBindings)
+  const incomingImages = referencePayload.reference_images.map(reference => reference.url)
+  const incomingText = normalizedReferenceBindings
+    .filter(binding => binding.type === 'prompt' && binding.content)
+    .map(binding => String(binding.content).trim())
     .filter(Boolean)
   const userText = [
     finalPromptText || (incomingImages.length ? '描述这张图片' : '开始执行'),
@@ -534,7 +806,8 @@ export function buildGenerateNodeRequestPayload(input: {
   })
   if (effectiveSkillArguments) payload.skill_arguments = effectiveSkillArguments
   if (input.compiledInputHash) payload.compiled_input_hash = input.compiledInputHash
-  if (normalizedIncomingAssets.length) payload.params.incoming_assets = normalizedIncomingAssets
+  if (normalizedReferenceBindings.length) payload.params.incoming_assets = referencePayload.reference_bindings
+  if (referencePayload.reference_images.length) payload.reference_images = referencePayload.reference_images
   if (input.mode === 'vision' && incomingImages.length) {
     payload.messages.push({
       role: 'user',

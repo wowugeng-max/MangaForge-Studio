@@ -32,6 +32,8 @@ import {
   DEFAULT_ROLE,
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
+  GenerateNodeReferenceError,
+  MAX_GENERATE_NODE_REFERENCE_IMAGES,
   MODES,
   PRESET_ROLES,
   areGenerateNodeIncomingContextSnapshotsEqual,
@@ -75,16 +77,24 @@ export {
   buildGenerateNodeResultWithFission,
   buildGenerateNodeRequestPayload,
   buildGenerateNodeIncomingContextSnapshot,
+  buildGenerateNodeReferencePayload,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
+  normalizeGenerateNodeReferenceBindings,
+  reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeSkillArguments,
+  validateGenerateNodeReferenceBindingsForExecution,
 } from './generate-node-model'
 export type {
   GenerateNodeCommandSkillArgumentsByCommand,
   GenerateNodeIncomingAsset,
+  GenerateNodeReferenceBinding,
+  GenerateNodeReferenceErrorCode,
+  GenerateNodeReferenceRole,
+  GenerateNodeReferenceType,
 } from './generate-node-model'
 
 const { TextArea } = Input

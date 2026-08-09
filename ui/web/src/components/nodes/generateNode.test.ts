@@ -19,6 +19,11 @@ import {
   resolveGenerateNodeSourceContent,
 } from './GenerateNode'
 
+async function loadGenerateNodeReferenceApi() {
+  const module = await import('./GenerateNode')
+  return module as typeof module & Record<string, any>
+}
+
 describe('GenerateNode migration behavior', () => {
   test('refreshes React Flow handles after generation mode changes', () => {
     const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
@@ -462,9 +467,13 @@ describe('GenerateNode migration behavior', () => {
 
     expect(payload.image_url).toBe('/api/assets/media/uploads%2Fa.png')
     expect(payload.params.incoming_assets).toEqual([
-      { id: 11, type: 'image', file_path: '/api/assets/media/uploads%2Fa.png', url: '/api/assets/media/uploads%2Fa.png', source_asset_ids: [11] },
-      { id: 12, type: 'image', file_path: 'https://cdn.example/b.png', url: 'https://cdn.example/b.png', source_asset_ids: [12] },
-      { id: 13, type: 'prompt', content: '角色表情要压抑', source_asset_ids: [13, 21, 22] },
+      { reference_index: 1, reference_id: 'reference-1', reference_role: 'general', type: 'image', url: '/api/assets/media/uploads%2Fa.png', source_asset_ids: [11] },
+      { reference_index: 2, reference_id: 'reference-2', reference_role: 'general', type: 'image', url: 'https://cdn.example/b.png', source_asset_ids: [12] },
+      { reference_index: 3, reference_id: 'reference-3', reference_role: 'general', type: 'prompt', content: '角色表情要压抑', source_asset_ids: [13, 21, 22] },
+    ])
+    expect(payload.reference_images).toEqual([
+      { url: '/api/assets/media/uploads%2Fa.png', reference_index: 1, reference_id: 'reference-1', reference_role: 'general', source_asset_ids: [11] },
+      { url: 'https://cdn.example/b.png', reference_index: 2, reference_id: 'reference-2', reference_role: 'general', source_asset_ids: [12] },
     ])
     expect(payload.messages).toEqual([
       { role: 'system', content: '你是摄影指导' },
@@ -596,6 +605,328 @@ describe('request payload size precedence', () => {
       params: { temperature: 1.5 },
     } as any)
     expect(payload.params.temperature).toBe(0.7)
+  })
+})
+
+describe('GenerateNode ordered reference bindings', () => {
+  test('migrates legacy incoming assets and normalizes persisted camel/snake fields without mutation', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    const incomingAssets = [
+      { id: 21, type: 'image', url: '/api/assets/media/a.png', source_asset_ids: [21] },
+    ]
+    const incomingSnapshot = JSON.parse(JSON.stringify(incomingAssets))
+    expect(normalizeBindings(undefined, incomingAssets)).toEqual([
+      {
+        reference_index: 1,
+        reference_id: 'reference-1',
+        reference_role: 'general',
+        type: 'image',
+        url: '/api/assets/media/a.png',
+        source_asset_ids: [21],
+      },
+    ])
+    expect(incomingAssets).toEqual(incomingSnapshot)
+
+    const persisted = [
+      {
+        referenceIndex: 8,
+        referenceId: 'stable-image',
+        referenceRole: 'first_frame',
+        type: 'image',
+        url: '/api/assets/media/first.png',
+        sourceAssetIds: ['31', 31, 0, -1, 32],
+      },
+      {
+        reference_index: 2,
+        reference_id: 'stable-prompt',
+        role: 'prompt_context',
+        type: 'prompt',
+        content: '  保持角色服装一致  ',
+        source_asset_ids: [41, 41],
+      },
+    ]
+    const persistedSnapshot = JSON.parse(JSON.stringify(persisted))
+    expect(normalizeBindings(persisted, incomingAssets)).toEqual([
+      {
+        reference_index: 1,
+        reference_id: 'stable-image',
+        reference_role: 'first_frame',
+        type: 'image',
+        url: '/api/assets/media/first.png',
+        source_asset_ids: [31, 32],
+      },
+      {
+        reference_index: 2,
+        reference_id: 'stable-prompt',
+        reference_role: 'prompt_context',
+        type: 'prompt',
+        content: '保持角色服装一致',
+        source_asset_ids: [41],
+      },
+    ])
+    expect(persisted).toEqual(persistedSnapshot)
+  })
+
+  test('reorders bindings immutably, renumbers indexes, and keeps stable reference ids', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reorderBindings = module.reorderGenerateNodeReferenceBindings
+    const buildReferencePayload = module.buildGenerateNodeReferencePayload
+    expect(typeof normalizeBindings).toBe('function')
+    expect(typeof reorderBindings).toBe('function')
+    expect(typeof buildReferencePayload).toBe('function')
+    if (typeof normalizeBindings !== 'function' || typeof reorderBindings !== 'function' || typeof buildReferencePayload !== 'function') return
+
+    const bindings = normalizeBindings(undefined, [
+      { id: 21, type: 'image', url: '/api/assets/media/a.png', source_asset_ids: [21] },
+      { id: 22, type: 'prompt', content: '冷色调', source_asset_ids: [22] },
+      { id: 23, type: 'image', url: '/api/assets/media/b.png', source_asset_ids: [23] },
+    ])
+    const snapshot = JSON.parse(JSON.stringify(bindings))
+    const reordered = reorderBindings(bindings, 2, 0)
+
+    expect(reordered.map((item: any) => ({
+      reference_index: item.reference_index,
+      reference_id: item.reference_id,
+    }))).toEqual([
+      { reference_index: 1, reference_id: 'reference-3' },
+      { reference_index: 2, reference_id: 'reference-1' },
+      { reference_index: 3, reference_id: 'reference-2' },
+    ])
+    expect(bindings).toEqual(snapshot)
+    expect(reordered).not.toBe(bindings)
+
+    expect(buildReferencePayload(reordered)).toEqual({
+      reference_bindings: reordered,
+      reference_images: [
+        {
+          url: '/api/assets/media/b.png',
+          reference_index: 1,
+          reference_id: 'reference-3',
+          reference_role: 'general',
+          source_asset_ids: [23],
+        },
+        {
+          url: '/api/assets/media/a.png',
+          reference_index: 2,
+          reference_id: 'reference-1',
+          reference_role: 'general',
+          source_asset_ids: [21],
+        },
+      ],
+    })
+  })
+
+  test('allows nine images plus prompt references but rejects a tenth image with a typed error', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    const nineImagesAndPrompts = [
+      ...Array.from({ length: 9 }, (_, index) => ({
+        type: 'image',
+        url: `/api/assets/media/reference-${index + 1}.png`,
+      })),
+      { type: 'prompt', content: '角色设定不变' },
+      { type: 'prompt', content: '环境保持雨夜' },
+    ]
+    expect(normalizeBindings(undefined, nineImagesAndPrompts)).toHaveLength(11)
+
+    const tenImages = Array.from({ length: 10 }, (_, index) => ({
+      type: 'image',
+      url: `/api/assets/media/reference-${index + 1}.png`,
+    }))
+    const snapshot = JSON.parse(JSON.stringify(tenImages))
+    expect(() => normalizeBindings(undefined, tenImages)).toThrow(expect.objectContaining({
+      code: 'REFERENCE_LIMIT_EXCEEDED',
+    }))
+    expect(tenImages).toEqual(snapshot)
+  })
+
+  test('rejects duplicate first/last roles and invalid roles with typed errors', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    expect(() => normalizeBindings([
+      { type: 'image', url: '/first-a.png', reference_role: 'first_frame' },
+      { type: 'image', url: '/first-b.png', referenceRole: 'first_frame' },
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+    expect(() => normalizeBindings([
+      { type: 'image', url: '/last-a.png', reference_role: 'last_frame' },
+      { type: 'image', url: '/last-b.png', role: 'last_frame' },
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+    expect(() => normalizeBindings([
+      { type: 'image', url: '/bad-role.png', reference_role: 'background_only' },
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+  })
+
+  test('serializes reserved video/audio references but rejects them for client execution', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const validateForExecution = module.validateGenerateNodeReferenceBindingsForExecution
+    const buildReferencePayload = module.buildGenerateNodeReferencePayload
+    expect(typeof normalizeBindings).toBe('function')
+    expect(typeof validateForExecution).toBe('function')
+    expect(typeof buildReferencePayload).toBe('function')
+    if (typeof normalizeBindings !== 'function' || typeof validateForExecution !== 'function' || typeof buildReferencePayload !== 'function') return
+
+    const bindings = normalizeBindings([
+      { type: 'video', url: '/api/assets/media/reference.mp4', referenceRole: 'general' },
+      { type: 'audio', url: '/api/assets/media/reference.wav', reference_role: 'prompt_context' },
+    ], [])
+    expect(bindings).toMatchObject([
+      { type: 'video', reference_index: 1, reference_id: 'reference-1' },
+      { type: 'audio', reference_index: 2, reference_id: 'reference-2' },
+    ])
+    expect(buildReferencePayload(bindings)).toMatchObject({
+      reference_bindings: bindings,
+      reference_images: [],
+    })
+    expect(() => validateForExecution(bindings)).toThrow(expect.objectContaining({
+      code: 'REFERENCE_MEDIA_UNSUPPORTED',
+      reference_index: 1,
+    }))
+  })
+
+  test('migrates legacy single-image requests and sends every explicit image binding in order', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    const base = {
+      id: 'node-references',
+      prompt: '生成连续镜头',
+      selectedKey: 7,
+      provider: 'video-provider',
+      selectedModel: 'video-model',
+      mode: 'image_to_video',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.2,
+      ratioSize: '1280*720',
+      selectedRolePrompt: '你是视频导演',
+    }
+
+    const legacyPayload = buildGenerateNodeRequestPayload({
+      ...base,
+      incomingAssets: [
+        { id: 51, type: 'image', file_path: '/api/assets/media/legacy.png', source_asset_ids: [51] },
+      ],
+    } as any)
+    expect(legacyPayload.image_url).toBe('/api/assets/media/legacy.png')
+    expect(legacyPayload.params.incoming_assets).toEqual([
+      {
+        reference_index: 1,
+        reference_id: 'reference-1',
+        reference_role: 'general',
+        type: 'image',
+        url: '/api/assets/media/legacy.png',
+        source_asset_ids: [51],
+      },
+    ])
+    expect(legacyPayload.reference_images).toEqual([
+      {
+        url: '/api/assets/media/legacy.png',
+        reference_index: 1,
+        reference_id: 'reference-1',
+        reference_role: 'general',
+        source_asset_ids: [51],
+      },
+    ])
+
+    const referenceBindings = normalizeBindings([
+      {
+        type: 'image',
+        url: '/api/assets/media/first.png',
+        reference_id: 'first-ref',
+        reference_role: 'first_frame',
+        source_asset_ids: [61, 62],
+      },
+      {
+        type: 'image',
+        url: '/api/assets/media/last.png',
+        referenceId: 'last-ref',
+        referenceRole: 'last_frame',
+        sourceAssetIds: [63],
+      },
+    ], [])
+    const snapshot = JSON.parse(JSON.stringify(referenceBindings))
+    const payload = buildGenerateNodeRequestPayload({ ...base, referenceBindings } as any)
+
+    expect(payload.image_url).toBe('/api/assets/media/first.png')
+    expect(payload.params.incoming_assets).toEqual(referenceBindings)
+    expect(payload.reference_images).toEqual([
+      {
+        url: '/api/assets/media/first.png',
+        reference_index: 1,
+        reference_id: 'first-ref',
+        reference_role: 'first_frame',
+        source_asset_ids: [61, 62],
+      },
+      {
+        url: '/api/assets/media/last.png',
+        reference_index: 2,
+        reference_id: 'last-ref',
+        reference_role: 'last_frame',
+        source_asset_ids: [63],
+      },
+    ])
+    expect(referenceBindings).toEqual(snapshot)
+  })
+
+  test('persists reference bindings in generated assets and merges all lineage without changing legacy payloads', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    expect(typeof normalizeBindings).toBe('function')
+    if (typeof normalizeBindings !== 'function') return
+
+    const base = {
+      resultContent: 'https://cdn.example/out.mp4',
+      mode: 'image_to_video',
+      prompt: '连续动作',
+      selectedModel: 'video-model',
+      provider: 'video-provider',
+      selectedRolePrompt: 'director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '16:9',
+      ratioSize: '1280*720',
+      sourceAssetIds: [71, 72],
+    }
+    const legacyPayload = buildGenerateNodeAssetPayload(base)
+    expect(legacyPayload.source_asset_ids).toEqual([71, 72])
+    expect(legacyPayload.data.source_asset_ids).toEqual([71, 72])
+    expect('reference_bindings' in legacyPayload.data).toBe(false)
+
+    const referenceBindings = normalizeBindings([
+      {
+        type: 'image',
+        url: '/api/assets/media/first.png',
+        reference_role: 'first_frame',
+        source_asset_ids: [72, 73],
+      },
+      {
+        type: 'prompt',
+        content: '服装保持一致',
+        reference_role: 'prompt_context',
+        source_asset_ids: [74, 73],
+      },
+    ], [])
+    const snapshot = JSON.parse(JSON.stringify(referenceBindings))
+    const payload = buildGenerateNodeAssetPayload({ ...base, referenceBindings } as any)
+
+    expect(payload.source_asset_ids).toEqual([71, 72, 73, 74])
+    expect(payload.data.source_asset_ids).toEqual([71, 72, 73, 74])
+    expect(payload.data.reference_bindings).toEqual(referenceBindings)
+    expect(referenceBindings).toEqual(snapshot)
   })
 })
 
