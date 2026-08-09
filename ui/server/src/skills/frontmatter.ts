@@ -4,6 +4,7 @@ import { parse as parseYaml } from 'yaml'
 
 import type {
   CanvasMediaMode,
+  ParsedSkillDocument,
   SkillArgumentSpec,
   SkillCompatibility,
   SkillManifest,
@@ -159,7 +160,7 @@ function splitFrontmatter(raw: string, filePath: string): { frontmatter: Frontma
   return { frontmatter: parsed as Frontmatter, body: normalized.slice(match[0].length) }
 }
 
-export function parseSkillDocument(raw: string, filePath: string): SkillManifest {
+export function parseSkillDocument(raw: string, filePath: string): ParsedSkillDocument {
   if (Buffer.byteLength(raw, 'utf8') > 256 * 1024) {
     throw new SkillParseError(
       'SKILL_FILE_TOO_LARGE',
@@ -186,7 +187,7 @@ export function parseSkillDocument(raw: string, filePath: string): SkillManifest
     : 'prompt_ready'
   const rootDir = dirname(filePath)
 
-  return {
+  const manifest: SkillManifest = {
     packId: inferPackId(filePath, frontmatter),
     directoryName: basename(rootDir),
     name,
@@ -215,6 +216,7 @@ export function parseSkillDocument(raw: string, filePath: string): SkillManifest
     ),
     defaultPrompt: optionalString(valueFor(frontmatter, 'defaultPrompt', 'default_prompt', 'default-prompt')),
   }
+  return { manifest, references: manifest.references }
 }
 
 export type OpenAIMetadata = {

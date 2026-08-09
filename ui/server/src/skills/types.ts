@@ -42,6 +42,11 @@ export type SkillManifest = {
   defaultPrompt?: string
 }
 
+export type ParsedSkillDocument = {
+  manifest: SkillManifest
+  references: string[]
+}
+
 export type PromptCompileResult = {
   skill_name: string
   skill_version: string

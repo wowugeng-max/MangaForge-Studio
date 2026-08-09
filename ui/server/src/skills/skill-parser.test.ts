@@ -33,7 +33,8 @@ arguments:
 Read [the base guide](references/base-en.txt) and \`references/ref-en.txt\`.
 Do not load references/implicit.txt or execute \`scripts/build.ts\`.
 `
-    const manifest = parseSkillDocument(raw, '/packs/demo/skills/fancy-dir/SKILL.md')
+    const parsed = parseSkillDocument(raw, '/packs/demo/skills/fancy-dir/SKILL.md')
+    const manifest = parsed.manifest
 
     expect(manifest.name).toBe('Fancy H3 Prompt')
     expect(manifest.directoryName).toBe('fancy-dir')
@@ -48,6 +49,7 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
       'references/base-en.txt',
       'references/ref-en.txt',
     ])
+    expect(parsed.references).toEqual(manifest.references)
     expect(manifest.body).toContain('scripts/build.ts')
   })
 
@@ -55,7 +57,7 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     const manifest = parseSkillDocument(
       '---\nname: delimiter-check\ndescription: test\n---\nBefore\n---\nAfter',
       '/packs/demo/skills/delimiter-check/SKILL.md',
-    )
+    ).manifest
     expect(manifest.body).toBe('Before\n---\nAfter')
   })
 
@@ -69,6 +71,9 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     expect(() =>
       parseSkillDocument('---\nname: [broken\n---\nbody', '/tmp/skills/x/SKILL.md'),
     ).toThrow(expect.objectContaining({ code: 'SKILL_FRONTMATTER_INVALID' }))
+    expect(() => parseSkillDocument('---\nname: missing-close\n', '/tmp/skills/x/SKILL.md')).toThrow(
+      expect.objectContaining({ code: 'SKILL_FRONTMATTER_MISSING' }),
+    )
   })
 
   test('reads only the supported OpenAI metadata keys', () => {
@@ -91,8 +96,9 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
   test('parses and loads only the explicit references in the H3 fixture', async () => {
     const fixtureRoot = join(import.meta.dir, 'fixtures', 'h3-prompt-writing')
     const raw = await readFile(join(fixtureRoot, 'SKILL.md'), 'utf8')
-    const manifest = parseSkillDocument(raw, join(fixtureRoot, 'SKILL.md'))
-    const loaded = await loadSkillReferences(fixtureRoot, manifest.references)
+    const parsed = parseSkillDocument(raw, join(fixtureRoot, 'SKILL.md'))
+    const manifest = parsed.manifest
+    const loaded = await loadSkillReferences(fixtureRoot, parsed.references)
 
     expect(manifest.name).toBe('h3-prompt-writing')
     expect(manifest.mediaModes).toEqual(['text_to_video', 'image_to_video'])
@@ -121,6 +127,8 @@ describe('safe skill file loading', () => {
     await expect(loadSkillReferences(root, ['references/large.txt'])).rejects.toThrow(
       expect.objectContaining({ code: 'SKILL_FILE_TOO_LARGE' }),
     )
+    await writeFile(join(root, 'references', 'exact.txt'), Buffer.alloc(512 * 1024))
+    await expect(loadSkillReferences(root, ['references/exact.txt'])).resolves.toHaveLength(1)
     await expect(loadSkillReferences(root, ['references/missing.txt'])).rejects.toThrow(
       expect.objectContaining({ code: 'SKILL_REFERENCE_MISSING' }),
     )
@@ -134,6 +142,14 @@ describe('safe skill file loading', () => {
     await expect(loadSkillReferences(root, aggregatePaths)).rejects.toThrow(
       expect.objectContaining({ code: 'SKILL_FILE_TOO_LARGE' }),
     )
+
+    const exactAggregatePaths: string[] = []
+    for (let index = 0; index < 4; index += 1) {
+      const relativePath = `references/exact-aggregate-${index}.txt`
+      exactAggregatePaths.push(relativePath)
+      await writeFile(join(root, relativePath), Buffer.alloc(512 * 1024))
+    }
+    await expect(loadSkillReferences(root, exactAggregatePaths)).resolves.toHaveLength(4)
   })
 
   test('rejects traversal and symlink escape without executing files', async () => {
@@ -154,7 +170,7 @@ describe('safe skill file loading', () => {
     const manifest = parseSkillDocument(
       '---\nname: inert-script\ndescription: test\n---\nDo not run `scripts/evil.js`.',
       join(root, 'SKILL.md'),
-    )
+    ).manifest
     expect(manifest.references).toEqual([])
     await expect(access(sentinel)).rejects.toThrow()
   })
