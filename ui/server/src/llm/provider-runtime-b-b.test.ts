@@ -844,6 +844,47 @@ describe('gemini chat-style image generation routing', () => {
     expect(body.size).toBe('1344x768')
   })
 
+  test('forwards negative_prompt only on media payloads', () => {
+    const mediaBody = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      negative_prompt: 'blurry',
+    } as any, openaiSelection({
+      endpoint: 'images/generations',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gpt-image-2', capabilities: { text_to_image: true } },
+    }))
+    expect(mediaBody.negative_prompt).toBe('blurry')
+
+    const chatBody = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'chat',
+      negative_prompt: 'must not leak',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'chat',
+      model: { ...selection().model, model_name: 'gpt-5.5', capabilities: { chat: true } },
+    }))
+    expect(chatBody.negative_prompt).toBeUndefined()
+  })
+
+  test('does not expose negative_prompt through non-media payload templates', () => {
+    const routeConfig = {
+      payload_template: { prompt: '{{prompt}}', negative: '{{negative_prompt}}' },
+    }
+    const chatBody = buildProviderRequestBody({
+      model: 'x', messages: [{ role: 'user', content: 'chat prompt' }], type: 'chat', negative_prompt: 'secret-negative',
+    } as any, openaiSelection({ routeConfig, routeType: 'chat' }))
+    expect(chatBody).toEqual({ prompt: 'chat prompt' })
+
+    const mediaBody = buildProviderRequestBody({
+      model: 'x', messages: [{ role: 'user', content: 'image prompt' }], type: 'text_to_image', negative_prompt: 'blurry',
+    } as any, openaiSelection({ routeConfig, routeType: 'text_to_image' }))
+    expect(mediaBody).toEqual({ prompt: 'image prompt', negative: 'blurry' })
+  })
+
   test('image_to_image request bound for chat endpoint attaches the source image', () => {
     const body = buildProviderRequestBody({
       model: 'x',

@@ -91,6 +91,9 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     'routingStrategy',
     'incoming_assets',
     'source_asset_ids',
+    // Negative prompts are a media-only transport field. Do not leak this
+    // internal canvas field into chat/text requests.
+    'negative_prompt',
   ])
   if (isMediaRouteType(routeType)) {
     // Chat-style image generation (Gemini-family on openai-compatible proxies):
@@ -106,6 +109,9 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
         model: selection.model.model_name || request.model,
         messages: [{ role: 'user', content: userContent }],
         max_tokens: request.max_tokens ?? 4096,
+        ...(typeof request.negative_prompt === 'string' && request.negative_prompt.trim()
+          ? { negative_prompt: request.negative_prompt }
+          : {}),
       }
     }
     const body: Record<string, any> = {
@@ -120,6 +126,9 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     }
     // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
     if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
+    if (typeof request.negative_prompt === 'string' && request.negative_prompt.trim()) {
+      body.negative_prompt = request.negative_prompt
+    }
     return body
   }
   const shouldStream = shouldStreamRequest(request, selection)
@@ -393,7 +402,7 @@ function renderTemplateValue(template: any, context: Record<string, any>): any {
 }
 
 function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelection) {
-  return {
+  const context: Record<string, any> = {
     ...(request as any),
     model: selection.model.model_name || request.model,
     messages: request.messages,
@@ -402,6 +411,11 @@ function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelect
     temperature: request.temperature,
     max_tokens: request.max_tokens,
   }
+  // Endpoint templates are provider-authored but request fields are not. Keep
+  // the compiler's negative prompt media-only even when a text template uses a
+  // generic `{{negative_prompt}}` context lookup.
+  if (!isMediaRouteType(requestRouteType(request, selection.model))) delete context.negative_prompt
+  return context
 }
 
 function getValueByPath(data: any, path: string) {
@@ -530,4 +544,3 @@ export function summarizeProviderRequestBodyForLog(body: Record<string, any>) {
     has_max_output_tokens: Object.prototype.hasOwnProperty.call(body, 'max_output_tokens'),
   }
 }
-

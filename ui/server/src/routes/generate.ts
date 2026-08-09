@@ -6,6 +6,8 @@ import { executeWithRuntimeModel, type RuntimeExecutionOptions } from '../llm/pr
 import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageContent, type LLMMessage, type LLMMessageContentPart, type LLMRequest, type LLMResponse } from '../llm/types'
 import { registerTask, taskMessageManager, unregisterTask, type CancelToken } from '../ws-manager'
 import { executeLocalComfyWorkflow, interruptLocalComfy, type ExecuteLocalComfyWorkflowOptions, type LocalComfyResult } from '../comfy-local'
+import { parseSkillCommand } from '../skills/skill-command'
+import type { CanvasMediaMode, PromptCompileInput, PromptCompileResult } from '../skills/types'
 
 type ExecuteGenerate = (
   activeWorkspace: string,
@@ -18,14 +20,62 @@ type GenerateRouteDeps = {
   execute?: ExecuteGenerate
   comfyExecute?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<LocalComfyResult>
   comfyInterrupt?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<boolean> | boolean
+  /** Workspace-scoped Skill compiler boundary supplied by index.ts. */
+  skillRuntime?: { compilePromptSkill: (input: PromptCompileInput) => Promise<CompiledSkillResult> }
+  /** Direct compiler injection is useful for isolated route tests. */
+  compilePromptSkill?: (input: PromptCompileInput) => Promise<CompiledSkillResult>
   sendMessage?: (clientId: string, message: Record<string, any>) => Promise<boolean> | boolean
   registerTask?: (clientId: string, adapterId: string, cancelToken: CancelToken) => void
   unregisterTask?: (clientId: string) => void
 }
 
+type CompiledSkillResult = {
+  result: PromptCompileResult
+  inputHash: string
+  cached: boolean
+  compilerModelId: number
+  skill: { name: string; revision: string }
+}
+
+type SkillCompileAudit = {
+  skill_name: string
+  skill_revision: string
+  compiled_prompt: string
+  compiled_negative_prompt: string
+  compiled_references: string[]
+  compiled_input_hash: string
+  warnings: string[]
+  compiler_model_id: number
+  raw_prompt: string
+}
+
+const SKILL_MEDIA_MODES = new Set<CanvasMediaMode>([
+  'chat', 'vision', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video',
+])
+const SKILL_NODE_PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
+
 function errorBody(message: unknown, extra: Record<string, any> = {}) {
   const error = String(message)
   return { error, detail: error, ...extra }
+}
+
+function skillErrorCode(error: unknown): string {
+  if (error && typeof error === 'object' && typeof (error as any).code === 'string') return String((error as any).code)
+  return 'SKILL_COMPILE_FAILED'
+}
+
+function skillErrorStatus(code: string): number {
+  // Ambiguous selectors and duplicate leading commands are client choices;
+  // callers can resolve them without retrying a provider request.
+  if (code === 'SKILL_AMBIGUOUS' || code === 'SKILL_COMMAND_DUPLICATE') return 409
+  if (code.startsWith('SKILL_')) return 422
+  return 500
+}
+
+function skillErrorResponse(res: any, error: unknown) {
+  const code = skillErrorCode(error)
+  const detail = error instanceof Error ? error.message : String(error)
+  return res.status(skillErrorStatus(code)).json({ error: detail, detail, error_code: code })
 }
 
 function toNumber(value: unknown, fallback: number) {
@@ -73,6 +123,167 @@ function normalizeMessages(payload: any): LLMMessage[] {
   if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt })
   messages.push({ role: 'user', content: stringifyLLMMessageContent(payload?.prompt || payload?.content || '开始执行') })
   return messages
+}
+
+function payloadValue(payload: any, params: Record<string, any>, ...keys: string[]) {
+  for (const key of keys) {
+    if (payload && payload[key] !== undefined && payload[key] !== null) return payload[key]
+    if (params && params[key] !== undefined && params[key] !== null) return params[key]
+  }
+  return undefined
+}
+
+function rawPromptForSkill(payload: any, request?: LLMRequest): string {
+  const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+  const explicit = payloadValue(payload, params, 'raw_prompt', 'rawPrompt', 'skill_prompt', 'skillPrompt')
+  if (typeof explicit === 'string' && explicit.trim()) return explicit
+  // `prompt` is intentionally only accepted when it is textual. ComfyUI uses
+  // the same field for a JSON workflow; its editable Skill prompt can be sent
+  // through skill_prompt without being confused with the workflow document.
+  if (typeof payload?.prompt === 'string' && payload.prompt.trim()) return payload.prompt
+  if (typeof payload?.content === 'string' && payload.content.trim()) return payload.content
+  const user = [...(request?.messages || [])].reverse().find(message => message.role === 'user')
+  return stringifyLLMMessageContent(user?.content || '')
+}
+
+function leadingSkillCommandCount(rawPrompt: string): number {
+  const text = String(rawPrompt || '').trim()
+  if (!text.startsWith('/')) return 0
+  // Only consecutive command tokens at the beginning are invocations. A slash
+  // later in the free-form prompt (`/skill hero /path`) is ordinary prompt
+  // text, not a second command.
+  const token = '[A-Za-z0-9][A-Za-z0-9._-]*'
+  const commandToken = new RegExp(`^\\/${token}(?::${token})?$`)
+  let count = 0
+  for (const part of text.split(/\s+/)) {
+    if (!commandToken.test(part)) break
+    count += 1
+  }
+  return count
+}
+
+function skillSelectorForPayload(payload: any, params: Record<string, any>, rawPrompt: string) {
+  const command = parseSkillCommand(rawPrompt)
+  const skillName = payloadValue(payload, params, 'skill_name', 'skillName')
+  const packId = payloadValue(payload, params, 'skill_pack_id', 'skillPackId', 'pack_id', 'packId')
+  const enabled = payloadValue(payload, params, 'skill_compile_enabled', 'skillCompileEnabled')
+  const selected = typeof skillName === 'string' && skillName.trim()
+    || typeof packId === 'string' && packId.trim()
+    || command !== null
+    || enabled === true
+    || enabled === 'true'
+    || enabled === 1
+  if (!selected) return null
+  if (leadingSkillCommandCount(rawPrompt) > 1) {
+    const duplicate = new Error('Multiple leading Skill commands are not allowed')
+    ;(duplicate as any).code = 'SKILL_COMMAND_DUPLICATE'
+    throw duplicate
+  }
+  return {
+    command,
+    // A leading command is the explicit invocation. Its qualified Pack ID
+    // must be forwarded to the compiler even when the dropdown selected a
+    // different/default Pack.
+    skillName: command?.name || (typeof skillName === 'string' && skillName.trim() ? skillName.trim() : undefined),
+    packId: command?.packId || (typeof packId === 'string' && packId.trim() ? packId.trim() : undefined),
+  }
+}
+
+function skillModeForPayload(payload: any, params: Record<string, any>): CanvasMediaMode {
+  const raw = payloadValue(payload, params, 'type', 'mode')
+  const mode = String(raw || '').trim() as CanvasMediaMode
+  if (!SKILL_MEDIA_MODES.has(mode)) {
+    const error = new Error(`Skill is not compatible with media mode ${mode || '(missing)'}`)
+    ;(error as any).code = 'SKILL_MODE_INCOMPATIBLE'
+    throw error
+  }
+  return mode
+}
+
+function normalizeSkillArguments(value: unknown): Record<string, string> | undefined {
+  if (value === undefined || value === null) return undefined
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    const error = new Error('skill_arguments must be an object')
+    ;(error as any).code = 'SKILL_ARGUMENT_INVALID'
+    throw error
+  }
+  const result: Record<string, string> = {}
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof item !== 'string' && typeof item !== 'number' && typeof item !== 'boolean') {
+      const error = new Error(`skill_arguments.${key} must be a scalar value`)
+      ;(error as any).code = 'SKILL_ARGUMENT_INVALID'
+      throw error
+    }
+    result[key] = String(item)
+  }
+  return result
+}
+
+function skillNodeParams(payload: any, params: Record<string, any>): Record<string, unknown> {
+  const nodeParams: Record<string, unknown> = {}
+  for (const key of SKILL_NODE_PARAM_KEYS) {
+    const value = payloadValue(payload, params, key)
+    if (value !== undefined && value !== null && value !== '') nodeParams[key] = value
+  }
+  return nodeParams
+}
+
+function cloneMessage(message: LLMMessage): LLMMessage {
+  return {
+    ...message,
+    content: Array.isArray(message.content)
+      ? message.content.map(part => part && typeof part === 'object' ? { ...(part as any) } : part)
+      : message.content,
+  }
+}
+
+function replaceCompiledPrompt(messages: LLMMessage[], prompt: string): LLMMessage[] {
+  const next = messages.map(cloneMessage)
+  let index = next.findLastIndex(message => message.role === 'user')
+  if (index < 0) {
+    next.push({ role: 'user', content: prompt })
+    return next
+  }
+  const message = next[index]
+  if (!Array.isArray(message.content)) {
+    message.content = prompt
+    return next
+  }
+  const retained: any[] = []
+  let textInserted = false
+  for (const part of message.content) {
+    const image = imageUrlFromLLMContentPart(part)
+    if (image) {
+      retained.push(part)
+      continue
+    }
+    const text = stringifyLLMMessageContent(part)
+    if (!textInserted && text) {
+      retained.push({ ...(part && typeof part === 'object' ? part : {}), type: 'text', text: prompt })
+      textInserted = true
+      continue
+    }
+    // Keep non-text structured parts (for example input_file) but remove
+    // stale user text/assets so the provider sees one final compiled prompt.
+    if (!text && part && typeof part === 'object') retained.push(part)
+  }
+  if (!textInserted) retained.unshift({ type: 'text', text: prompt })
+  message.content = retained
+  return next
+}
+
+function compileAudit(compiled: CompiledSkillResult, rawPrompt: string): SkillCompileAudit {
+  return {
+    skill_name: compiled.result.skill_name,
+    skill_revision: compiled.skill.revision || compiled.result.skill_version,
+    compiled_prompt: compiled.result.prompt,
+    compiled_negative_prompt: compiled.result.negative_prompt || '',
+    compiled_references: [...compiled.result.references_used],
+    compiled_input_hash: compiled.inputHash,
+    warnings: [...compiled.result.warnings],
+    compiler_model_id: compiled.compilerModelId,
+    raw_prompt: rawPrompt,
+  }
 }
 
 function normalizeCanvasAssetImageUrl(value: unknown) {
@@ -171,6 +382,32 @@ const CANVAS_CONTROL_PARAM_KEYS = new Set([
   'stream',
   'response_mode',
   'incoming_assets',
+  'incomingAssets',
+  'skill_name',
+  'skillName',
+  'skill_pack_id',
+  'skillPackId',
+  'pack_id',
+  'packId',
+  'skill_arguments',
+  'skillArguments',
+  'arguments',
+  'raw_prompt',
+  'rawPrompt',
+  'skill_prompt',
+  'skillPrompt',
+  'skill_compile_enabled',
+  'skillCompileEnabled',
+  'compiler_model_id',
+  'compilerModelId',
+  'skill_compiler_model_id',
+  'skillCompilerModelId',
+  'workflow_mapping',
+  'workflowMapping',
+  'skill_comfy_mapping',
+  'skillComfyMapping',
+  'comfy_skill_mapping',
+  'comfySkillMapping',
 ])
 
 function extractCanvasRuntimeParams(params: Record<string, any>) {
@@ -205,6 +442,79 @@ export function buildCanvasGenerateLLMRequest(payload: any): LLMRequest {
   const sourceAssetIds = Array.from(new Set(incomingAssets.flatMap(incomingAssetSourceIds)))
   if (sourceAssetIds.length) request.source_asset_ids = sourceAssetIds
   return request
+}
+
+async function compileCanvasSkillIfSelected(
+  payload: any,
+  activeWorkspace: string,
+  request: LLMRequest,
+  compile?: (input: PromptCompileInput) => Promise<CompiledSkillResult>,
+): Promise<{ request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null> {
+  if (!compile) {
+    // Explicit Skill use is a configuration error when the route was mounted
+    // without the workspace runtime boundary. It must still short-circuit all
+    // provider/Comfy/task-manager work.
+    const raw = rawPromptForSkill(payload, request)
+    const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+    const selector = skillSelectorForPayload(payload, params, raw)
+    if (selector) {
+      const error = new Error('Prompt Skill runtime is not configured')
+      ;(error as any).code = 'SKILL_COMPILE_FAILED'
+      throw error
+    }
+    return null
+  }
+
+  const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+  const rawPrompt = rawPromptForSkill(payload, request)
+  const selector = skillSelectorForPayload(payload, params, rawPrompt)
+  if (!selector) return null
+  const incomingAssets = normalizeIncomingAssets(params.incoming_assets ?? payload?.incoming_assets ?? payload?.incomingAssets)
+  const mode = skillModeForPayload(payload, params)
+  const argumentsValue = payloadValue(payload, params, 'skill_arguments', 'skillArguments', 'arguments')
+  const compilerModelValue = payloadValue(payload, params, 'compiler_model_id', 'compilerModelId', 'skill_compiler_model_id', 'skillCompilerModelId')
+  let compilerModelId: number | undefined
+  if (compilerModelValue !== undefined && compilerModelValue !== null && compilerModelValue !== '') {
+    if (typeof compilerModelValue !== 'number' && typeof compilerModelValue !== 'string') {
+      const error = new Error('compiler_model_id must be a non-negative integer')
+      ;(error as any).code = 'SKILL_COMPILER_MODEL_INVALID'
+      throw error
+    }
+    const parsed = Number(compilerModelValue)
+    if (!Number.isSafeInteger(parsed) || parsed < 0) {
+      const error = new Error('compiler_model_id must be a non-negative integer')
+      ;(error as any).code = 'SKILL_COMPILER_MODEL_INVALID'
+      throw error
+    }
+    compilerModelId = parsed
+  }
+  const input: PromptCompileInput = {
+    ...(selector.skillName ? { skillName: selector.skillName } : {}),
+    ...(selector.packId ? { packId: selector.packId } : {}),
+    rawPrompt,
+    mode,
+    incomingAssets: incomingAssets.map(asset => ({
+      type: asset.type === 'image' ? 'image' : 'prompt',
+      ...(asset.url ? { url: asset.url } : {}),
+      ...(asset.content ? { content: asset.content } : {}),
+      ...(asset.source_asset_ids?.length ? { source_asset_ids: [...asset.source_asset_ids] } : {}),
+    })),
+    nodeParams: skillNodeParams(payload, params),
+    ...(normalizeSkillArguments(argumentsValue) ? { arguments: normalizeSkillArguments(argumentsValue) } : {}),
+    ...(compilerModelId !== undefined ? { compilerModelId } : {}),
+    activeWorkspace,
+  }
+  const compiled = await compile(input)
+  const audit = compileAudit(compiled, rawPrompt)
+  const nextRequest: LLMRequest = {
+    ...request,
+    // Media body builders use request.prompt; chat/text providers use the
+    // final user message. Keep both in sync with the immutable compiler result.
+    prompt: compiled.result.prompt,
+    negative_prompt: compiled.result.negative_prompt || undefined,
+    messages: replaceCompiledPrompt(request.messages, compiled.result.prompt),
+  } as LLMRequest
+  return { request: nextRequest, audit, result: compiled.result, selector }
 }
 
 async function resolvePreferredModelId(activeWorkspace: string, payload: any): Promise<number | undefined> {
@@ -245,13 +555,14 @@ function incomingAssetSourceIds(asset: IncomingCanvasAsset): number[] {
   ]))
 }
 
-function responsePayload(response: LLMResponse<any> & { runtimeSelection?: any }, sourceAssetIds: number[] = []) {
+function responsePayload(response: LLMResponse<any> & { runtimeSelection?: any }, sourceAssetIds: number[] = [], audit?: SkillCompileAudit) {
   const lineage = sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}
   return {
     success: true,
     content: response.content,
     ...lineage,
-    result: { content: response.content, ...lineage },
+    ...(audit || {}),
+    result: { content: response.content, ...lineage, ...(audit || {}) },
     output: response.output,
     parsed: response.parsed,
     usage: response.usage,
@@ -275,6 +586,74 @@ function parseWorkflowPayload(payload: any): Record<string, any> {
     }
   }
   throw new Error('ComfyUI workflow is required')
+}
+
+function workflowSkillMapping(payload: any): Record<string, any> | null {
+  const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+  const candidate = payloadValue(payload, params,
+    'skill_comfy_mapping', 'skillComfyMapping', 'comfy_skill_mapping', 'comfySkillMapping',
+    'workflow_mapping', 'workflowMapping', 'comfy_mapping', 'comfyMapping',
+  )
+  return candidate && typeof candidate === 'object' && !Array.isArray(candidate) ? candidate : null
+}
+
+function workflowPathParts(selector: unknown): string[] {
+  if (typeof selector === 'string') return selector.replace(/^\$\.?/, '').split(/[/.]/).filter(Boolean)
+  if (!selector || typeof selector !== 'object' || Array.isArray(selector)) return []
+  const row = selector as Record<string, any>
+  const nodeId = row.node_id ?? row.nodeId ?? row.node
+  const field = row.input ?? row.field ?? row.path
+  if (nodeId === undefined || field === undefined) return []
+  return [String(nodeId), 'inputs', ...String(field).split(/[/.]/).filter(Boolean)]
+}
+
+function setWorkflowMappedValue(workflow: Record<string, any>, selector: unknown, value: string): boolean {
+  const parts = workflowPathParts(selector)
+  if (!parts.length) return false
+  const isSafePart = (part: string) => !['__proto__', 'prototype', 'constructor'].includes(part)
+  if (parts.some(part => !isSafePart(part))) return false
+  let cursor: any = workflow
+  for (const part of parts.slice(0, -1)) {
+    if (!cursor || typeof cursor !== 'object' || !Object.prototype.hasOwnProperty.call(cursor, part)) return false
+    cursor = cursor[part]
+  }
+  const finalPart = parts[parts.length - 1]
+  if (!cursor || typeof cursor !== 'object' || !Object.prototype.hasOwnProperty.call(cursor, finalPart)) return false
+  cursor[finalPart] = value
+  return true
+}
+
+function applyCompiledSkillToComfyPayload(payload: any, compiled: PromptCompileResult): any {
+  const mapping = workflowSkillMapping(payload)
+  const promptSelector = mapping && (mapping.compiled_prompt ?? mapping.compiledPrompt ?? mapping.prompt)
+  const negativeSelector = mapping && (mapping.compiled_negative_prompt ?? mapping.compiledNegativePrompt ?? mapping.negative_prompt ?? mapping.negativePrompt)
+  if (!promptSelector) {
+    const error = new Error('ComfyUI workflow must explicitly map compiled_prompt')
+    ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+    throw error
+  }
+  const workflow = JSON.parse(JSON.stringify(parseWorkflowPayload(payload)))
+  if (!setWorkflowMappedValue(workflow, promptSelector, compiled.prompt)) {
+    const error = new Error('ComfyUI workflow compiled_prompt mapping is invalid')
+    ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+    throw error
+  }
+  if (compiled.negative_prompt) {
+    if (!negativeSelector) {
+      const error = new Error('ComfyUI workflow must explicitly map compiled_negative_prompt')
+      ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+      throw error
+    }
+    if (!setWorkflowMappedValue(workflow, negativeSelector, compiled.negative_prompt)) {
+      const error = new Error('ComfyUI workflow compiled_negative_prompt mapping is invalid')
+      ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+      throw error
+    }
+  }
+  const nextPayload = { ...payload, workflow_json: workflow }
+  // Keep `prompt` as the editable original/workflow field. resolveComfy uses
+  // workflow_json first, so the compiled text never leaks as a guessed node.
+  return nextPayload
 }
 
 function buildComfyHeaders(provider: ProviderRecord, key?: APIKeyRecord, baseUrl = '', payload?: any) {
@@ -329,14 +708,19 @@ async function resolveComfyExecutionOptions(activeWorkspace: string, payload: an
   }
 }
 
-function comfyResponsePayload(response: LocalComfyResult) {
+function comfyResponsePayload(response: LocalComfyResult, sourceAssetIds: number[] = [], audit?: SkillCompileAudit) {
   const firstOutput = response.output_files[0]
   const content = firstOutput?.media_url || firstOutput?.path || ''
+  const lineage = sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}
   return {
     success: true,
     content,
+    ...lineage,
+    ...(audit || {}),
     result: {
       content,
+      ...lineage,
+      ...(audit || {}),
       prompt_id: response.prompt_id,
       output_files: response.output_files,
       history: response.history,
@@ -348,6 +732,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
   const execute = deps.execute || executeWithRuntimeModel
   const comfyExecute = deps.comfyExecute || executeLocalComfyWorkflow
   const comfyInterrupt = deps.comfyInterrupt || ((options: ExecuteLocalComfyWorkflowOptions) => interruptLocalComfy({ baseUrl: options.baseUrl, headers: options.headers }))
+  const compile = deps.compilePromptSkill || deps.skillRuntime?.compilePromptSkill
   const sendMessage = deps.sendMessage || ((clientId, message) => taskMessageManager.sendMessage(clientId, message))
   const addTask = deps.registerTask || registerTask
   const removeTask = deps.unregisterTask || unregisterTask
@@ -357,18 +742,47 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     const payload = req.body || {}
     const clientId = extractClientId(payload)
     let comfyOptions: ExecuteLocalComfyWorkflowOptions | null = null
+    let compiledSkill: { request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null = null
+    let executionPayload = payload
+    let request: LLMRequest | null = null
+
+    // Skill compilation is deliberately the first asynchronous operation in
+    // the route. A bad selector, incompatible mode, or compiler failure must
+    // not create a Comfy queue item, task-manager entry, or provider request.
+    try {
+      const rawCandidate = rawPromptForSkill(payload)
+      const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
+      const selected = skillSelectorForPayload(payload, params, rawCandidate)
+      if (selected) {
+        request = buildCanvasGenerateLLMRequest(payload)
+        compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, compile)
+        if (compiledSkill) {
+          request = compiledSkill.request
+          const hasWorkflow = payload?.workflow_json !== undefined || payload?.workflowJson !== undefined || payload?.workflow !== undefined
+            || payload?.params?.workflow_json !== undefined || payload?.params?.workflowJson !== undefined || payload?.params?.workflow !== undefined
+            || (payload?.prompt && typeof payload.prompt === 'object')
+            || (payload?.params?.prompt && typeof payload.params.prompt === 'object')
+          if (String(payload?.model || payload?.model_name || '').toLowerCase() === 'comfyui-workflow' || hasWorkflow) {
+            executionPayload = applyCompiledSkillToComfyPayload(payload, compiledSkill.result)
+          }
+        }
+      }
+    } catch (error) {
+      return skillErrorResponse(res, error)
+    }
 
     try {
-      comfyOptions = await resolveComfyExecutionOptions(activeWorkspace, payload)
+      comfyOptions = await resolveComfyExecutionOptions(activeWorkspace, executionPayload)
     } catch (error) {
       return res.status(400).json(errorBody(error))
     }
 
     if (comfyOptions) {
+      const skillSourceAssetIds = compiledSkill && request ? normalizeSourceAssetIds((request as any).source_asset_ids) : []
       if (!clientId) {
         try {
           const response = await comfyExecute(comfyOptions)
-          return res.json(comfyResponsePayload(response))
+          return res.json(comfyResponsePayload(response, skillSourceAssetIds, compiledSkill?.audit))
         } catch (error) {
           return res.status(500).json(errorBody(error))
         }
@@ -396,7 +810,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
             },
           })
           if (cancelToken.cancelled) return
-          await sendMessage(clientId, { type: 'result', data: comfyResponsePayload(response) })
+          await sendMessage(clientId, { type: 'result', data: comfyResponsePayload(response, skillSourceAssetIds, compiledSkill?.audit) })
           await sendMessage(clientId, { type: 'done' })
         } catch (error) {
           if (!cancelToken.cancelled) await sendMessage(clientId, { type: 'error', message: String(error) })
@@ -408,7 +822,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
       return res.json({ success: true, client_id: clientId, message: 'ComfyUI 任务已交由后台引擎处理' })
     }
 
-    const request = buildCanvasGenerateLLMRequest(payload)
+    if (!request) request = buildCanvasGenerateLLMRequest(payload)
     const sourceAssetIds = normalizeSourceAssetIds((request as any).source_asset_ids)
     const preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
 
@@ -416,7 +830,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
       try {
         const response = await execute(activeWorkspace, request, preferredModelId)
         if (response.error) return res.status(500).json(errorBody(response.error, { runtimeSelection: response.runtimeSelection }))
-        return res.json(responsePayload(response, sourceAssetIds))
+        return res.json(responsePayload(response, sourceAssetIds, compiledSkill?.audit))
       } catch (error) {
         return res.status(500).json(errorBody(error))
       }
@@ -442,7 +856,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
           await sendMessage(clientId, { type: 'error', message: response.error, runtimeSelection: response.runtimeSelection })
           return
         }
-        await sendMessage(clientId, { type: 'result', data: responsePayload(response, sourceAssetIds) })
+        await sendMessage(clientId, { type: 'result', data: responsePayload(response, sourceAssetIds, compiledSkill?.audit) })
         await sendMessage(clientId, { type: 'done' })
       } catch (error) {
         if (!cancelToken.cancelled) await sendMessage(clientId, { type: 'error', message: String(error) })

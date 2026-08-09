@@ -89,7 +89,10 @@ export interface LLMToolCall {
 export interface LLMRequest {
   model: string
   type?: string
+  prompt?: string
   messages: LLMMessage[]
+  /** Optional negative prompt. Provider body builders only forward this on media routes. */
+  negative_prompt?: string
   temperature?: number
   max_tokens?: number
   stream?: boolean

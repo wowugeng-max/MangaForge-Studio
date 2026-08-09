@@ -385,6 +385,199 @@ describe('canvas generate route', () => {
     expect(registered[0].cancelToken.cancelled).toBe(true)
   })
 
+  test('compiles an explicit canvas Skill before provider execution and returns audit metadata', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      { id: 12, api_key_id: 5, provider: 'any', display_name: 'GPT', model_name: 'gpt-5.5', health_status: 'healthy' },
+    ]))
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const events: string[] = []
+    let executedRequest: any
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        events.push('compile')
+        expect(input).toMatchObject({
+          skillName: 'prompt-optimizer',
+          packId: 'builtin',
+          rawPrompt: '原始可编辑提示词',
+          mode: 'text_to_image',
+          nodeParams: { size: '1024*1024' },
+          arguments: { style: 'cinematic' },
+          activeWorkspace: workspace,
+        })
+        return {
+          result: {
+            skill_name: 'prompt-optimizer',
+            skill_version: 'rev-1',
+            mode: 'text_to_image',
+            prompt: 'compiled prompt',
+            negative_prompt: 'bad anatomy',
+            parameters: {},
+            references_used: ['references/base.txt'],
+            warnings: ['warning'],
+          },
+          inputHash: 'hash-1',
+          cached: false,
+          compilerModelId: 99,
+          skill: { name: 'prompt-optimizer', revision: 'rev-1' },
+        }
+      },
+      execute: async (_workspace, request) => {
+        events.push('execute')
+        executedRequest = request
+        return { content: 'image-result', finish_reason: 'stop', parsed: null } as any
+      },
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 5,
+        model: 'gpt-5.5',
+        type: 'text_to_image',
+        prompt: '原始可编辑提示词',
+        skill_name: 'prompt-optimizer',
+        skill_pack_id: 'builtin',
+        skill_arguments: { style: 'cinematic' },
+        params: { size: '1024*1024', incoming_assets: [{ id: 101, type: 'image', url: 'https://cdn.example/ref.png' }] },
+      },
+    })
+
+    expect(events).toEqual(['compile', 'execute'])
+    expect(executedRequest.prompt).toBe('compiled prompt')
+    expect(executedRequest.negative_prompt).toBe('bad anatomy')
+    expect(executedRequest.messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'compiled prompt' },
+        { type: 'image_url', image_url: { url: 'https://cdn.example/ref.png' } },
+      ],
+    }])
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toMatchObject({
+      skill_name: 'prompt-optimizer',
+      skill_revision: 'rev-1',
+      compiled_prompt: 'compiled prompt',
+      compiled_negative_prompt: 'bad anatomy',
+      compiled_references: ['references/base.txt'],
+      compiled_input_hash: 'hash-1',
+      compiler_model_id: 99,
+      raw_prompt: '原始可编辑提示词',
+      result: { skill_name: 'prompt-optimizer', compiled_prompt: 'compiled prompt' },
+    })
+  })
+
+  test('short-circuits provider and task creation when Skill compilation fails', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let executeCalls = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        const error = new Error('compiler model required')
+        ;(error as any).code = 'SKILL_COMPILER_MODEL_REQUIRED'
+        throw error
+      },
+      execute: async () => { executeCalls += 1; return { content: 'should-not-run' } as any },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'gpt-5.5', type: 'text_to_image', prompt: '原始提示', skill_name: 'prompt-optimizer',
+        params: { client_id: 'skill-failure-node' },
+      },
+    })
+
+    expect(res.statusCode).toBe(422)
+    expect(res.body).toEqual({
+      error: 'compiler model required', detail: 'compiler model required', error_code: 'SKILL_COMPILER_MODEL_REQUIRED',
+    })
+    expect(executeCalls).toBe(0)
+    expect(taskCalls).toBe(0)
+  })
+
+  test('rejects duplicate leading Skill commands with 409 before compilation', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => { compileCalls += 1; throw new Error('unexpected') },
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: { model: 'gpt-5.5', type: 'text_to_image', prompt: '/first /second' },
+    })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.body.error_code).toBe('SKILL_COMMAND_DUPLICATE')
+    expect(compileCalls).toBe(0)
+  })
+
+  test('requires explicit ComfyUI Skill mappings and injects compiled prompt without guessing nodes', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      { id: 'local-comfy', display_name: 'Local Comfy', service_type: 'comfyui', api_format: 'comfyui', auth_type: 'none', default_base_url: 'http://provider-comfy', supported_modalities: ['text_to_image'], is_active: true },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 31, provider: 'local-comfy', description: 'GPU', is_active: true, base_url: 'http://key-comfy' },
+    ]))
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let comfyCalls = 0
+    const compilePromptSkill = async () => ({
+      result: {
+        skill_name: 'prompt-optimizer', skill_version: 'rev-1', mode: 'text_to_image' as const,
+        prompt: 'compiled', negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+      }, inputHash: 'hash-comfy', cached: false, compilerModelId: 8,
+      skill: { name: 'prompt-optimizer', revision: 'rev-1' },
+    })
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill,
+      comfyExecute: async options => {
+        comfyCalls += 1
+        expect(options.workflow['3'].inputs.text).toBe('compiled')
+        return { prompt_id: 'comfy-skill', output_files: [], history: {} }
+      },
+    })
+
+    const workflow = { '3': { inputs: { text: 'editable', seed: 1 } } }
+    const missingMapping = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
+        prompt: JSON.stringify(workflow), skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
+      },
+    })
+    expect(missingMapping.statusCode).toBe(422)
+    expect(missingMapping.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
+    expect(comfyCalls).toBe(0)
+
+    const unsafeMapping = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
+        prompt: JSON.stringify(workflow), skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
+        skill_comfy_mapping: { compiled_prompt: '__proto__.toString' },
+      },
+    })
+    expect(unsafeMapping.statusCode).toBe(422)
+    expect(unsafeMapping.body.error_code).toBe('SKILL_COMFY_MAPPING_REQUIRED')
+    expect(comfyCalls).toBe(0)
+
+    const mapped = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 31, provider: 'local-comfy', model: 'comfyui-workflow', type: 'text_to_image',
+        prompt: workflow, skill_prompt: 'draw a hero', skill_name: 'prompt-optimizer',
+        skill_comfy_mapping: { compiled_prompt: '3.inputs.text' },
+      },
+    })
+    expect(mapped.statusCode).toBe(200)
+    expect(mapped.body).toMatchObject({ skill_name: 'prompt-optimizer', compiled_prompt: 'compiled' })
+    expect(comfyCalls).toBe(1)
+    expect(workflow['3'].inputs.text).toBe('editable')
+  })
+
   test('routes ComfyUI providers to the local Comfy executor instead of the LLM runtime', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'providers.json'), JSON.stringify([
