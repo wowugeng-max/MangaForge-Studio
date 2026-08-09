@@ -5,7 +5,12 @@ import {
   normalizeCanvasReferenceAssets,
   validateCanvasReferenceAssets,
 } from './reference-bindings'
-import { computeCompileInputHash } from './compile-cache'
+import {
+  canonicalCompileInput,
+  computeCompileInputHash,
+  type CompileCacheInput,
+} from './compile-cache'
+import type { CanvasReferenceAsset } from './types'
 
 describe('canvas reference bindings', () => {
   test('normalizes ordered image references with stable ids, roles, and lineage', () => {
@@ -75,24 +80,59 @@ describe('canvas reference bindings', () => {
     expect(normalized[0]?.source_asset_ids).toEqual([11, 12])
   })
 
-  test('changes the canonical compile hash when reference order, role, or lineage changes', () => {
-    const base: any = {
+  test('changes the canonical compile hash when reference order, index, id, role, or lineage changes', () => {
+    const firstReference: CanvasReferenceAsset = {
+      type: 'image',
+      url: '/a.png',
+      reference_index: 1,
+      reference_id: 'reference-1',
+      reference_role: 'general',
+      source_asset_ids: [11],
+    }
+    const secondReference: CanvasReferenceAsset = {
+      type: 'image',
+      url: '/b.png',
+      reference_index: 2,
+      reference_id: 'reference-2',
+      reference_role: 'character',
+      source_asset_ids: [12],
+    }
+    const base: CompileCacheInput = {
       packId: 'pack',
       revision: 'rev',
       skillName: 'skill',
       rawPrompt: 'prompt',
       mode: 'image_to_video',
-      incomingAssets: [
-        { type: 'image', url: '/a.png', reference_index: 1, reference_id: 'reference-1', reference_role: 'general', source_asset_ids: [11] },
-        { type: 'image', url: '/b.png', reference_index: 2, reference_id: 'reference-2', reference_role: 'character', source_asset_ids: [12] },
-      ],
+      incomingAssets: [firstReference, secondReference],
       nodeParams: {},
     }
-    const reordered = { ...base, incomingAssets: [base.incomingAssets[1], base.incomingAssets[0]] }
-    const roleChanged = { ...base, incomingAssets: [{ ...base.incomingAssets[0], reference_role: 'style' }, base.incomingAssets[1]] }
-    const lineageChanged = { ...base, incomingAssets: [{ ...base.incomingAssets[0], source_asset_ids: [99] }, base.incomingAssets[1]] }
+    const reordered: CompileCacheInput = { ...base, incomingAssets: [secondReference, firstReference] }
+    const indexChanged: CompileCacheInput = { ...base, incomingAssets: [{ ...firstReference, reference_index: 9 }, secondReference] }
+    const idChanged: CompileCacheInput = { ...base, incomingAssets: [{ ...firstReference, reference_id: 'different-id' }, secondReference] }
+    const roleChanged: CompileCacheInput = { ...base, incomingAssets: [{ ...firstReference, reference_role: 'style' }, secondReference] }
+    const lineageChanged: CompileCacheInput = { ...base, incomingAssets: [{ ...firstReference, source_asset_ids: [99] }, secondReference] }
     expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(reordered))
+    expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(indexChanged))
+    expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(idChanged))
     expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(roleChanged))
     expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(lineageChanged))
+  })
+
+  test('keeps legacy inputs without reference metadata byte-compatible with the parent contract', () => {
+    const legacyImageInput: CompileCacheInput = {
+      packId: 'p',
+      revision: 'r',
+      skillName: 's',
+      rawPrompt: 'x',
+      mode: 'text_to_video',
+      incomingAssets: [{ type: 'image', url: '/a.png' }],
+      nodeParams: {},
+    }
+    const legacyEmptyInput: CompileCacheInput = { ...legacyImageInput, incomingAssets: [] }
+
+    expect(canonicalCompileInput(legacyImageInput)).toBe('{"arguments":{},"incomingAssets":[{"content":undefined,"source_asset_ids":undefined,"type":"image","url":"/a.png"}],"mode":"text_to_video","nodeParams":{},"packId":"p","rawPrompt":"x","revision":"r","skillName":"s"}')
+    expect(computeCompileInputHash(legacyImageInput)).toBe('6a41c8c3eb7df702c101c048605f8d291af001e73677936b7a5d80cadc931c4e')
+    expect(canonicalCompileInput(legacyEmptyInput)).toBe('{"arguments":{},"incomingAssets":[],"mode":"text_to_video","nodeParams":{},"packId":"p","rawPrompt":"x","revision":"r","skillName":"s"}')
+    expect(computeCompileInputHash(legacyEmptyInput)).toBe('b80237cc7a6de7991edd5bb0f6816f45f1d8255d538379a5ab9aaf14e14d0aa4')
   })
 })

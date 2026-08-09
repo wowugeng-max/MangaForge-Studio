@@ -217,4 +217,3 @@ export function deriveH3ReferenceModeHint(
   if (roles.length === 2 && roles.includes('first_frame') && roles.includes('last_frame')) return 'FL2VA'
   return 'Ref2VA'
 }
-
