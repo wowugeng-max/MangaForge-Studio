@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { SkillManifest } from '../skills/types'
 import { SkillCompilerError } from '../skills/compiler'
+import { createSkillRegistry } from '../skills/registry'
 
 type Handler = (req: any, res: any) => unknown
 
@@ -55,12 +56,69 @@ function manifest(overrides: Partial<SkillManifest> = {}): SkillManifest {
 
 let workspaces: string[] = []
 
+const WORKFLOW_FIXTURE_REVISION = 'c'.repeat(40)
+
+async function installWorkflowOnlyFixturePack(workspace: string) {
+  const root = join(workspace, '.mangaforge', 'skill-packs', 'MiniMax-H3', WORKFLOW_FIXTURE_REVISION)
+  const skillRoot = join(root, 'skills', 'brand-promo-video-generator')
+  await mkdir(skillRoot, { recursive: true })
+  await writeFile(join(root, 'pack.json'), JSON.stringify({
+    id: 'MiniMax-H3',
+    sourceUrl: 'https://github.com/MiniMax-AI/MiniMax-H3',
+    owner: 'MiniMax-AI',
+    repo: 'MiniMax-H3',
+    revision: WORKFLOW_FIXTURE_REVISION,
+    installedAt: '2026-08-09T00:00:00.000Z',
+    status: 'installed',
+  }))
+  await writeFile(join(skillRoot, 'SKILL.md'), `---
+name: brand-promo-video-generator
+description: Generate a polished brand promotional video through a staged Hub workflow.
+allowed-tools:
+  - webfetch
+  - hub_generate_video
+  - hub_video_edit
+  - task
+---
+# Brand Promo Video Generator
+
+Run a multi-stage workflow with tools: verify brand facts, plan shots, generate video, edit, and review delivery.
+`)
+}
+
 afterEach(async () => {
   await Promise.all(workspaces.map(path => rm(path, { recursive: true, force: true })))
   workspaces = []
 })
 
 describe('canvas skill routes', () => {
+  test('keeps workflow-only Hub Skills visible with a reason but excludes them from ready-only video results', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    await installWorkflowOnlyFixturePack(workspace)
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      getRegistry: async () => createSkillRegistry(workspace),
+      readSkillSettings: async () => ({ skill_compiler_model_id: null }),
+    })
+
+    const ordinary = await call(handlers.get('GET /api/skills')!, { query: { mode: 'text_to_video' } })
+    const readyOnly = await call(handlers.get('GET /api/skills')!, { query: { mode: 'text_to_video', ready_only: 'true' } })
+    const workflow = ordinary.body.skills.find((item: any) => item.name === 'brand-promo-video-generator')
+
+    expect(ordinary.statusCode).toBe(200)
+    expect(workflow).toMatchObject({
+      packId: 'MiniMax-H3',
+      compatibility: 'workflow_only',
+      compatibilityReason: 'declares external tools',
+      reason: 'declares external tools',
+      mediaModes: ['text_to_video'],
+    })
+    expect(readyOnly.statusCode).toBe(200)
+    expect(readyOnly.body.skills.some((item: any) => item.name === 'brand-promo-video-generator')).toBe(false)
+  })
+
   test('lists safe Skill summaries and applies mode/ready_only filters', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
     workspaces.push(workspace)

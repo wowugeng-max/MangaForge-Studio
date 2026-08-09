@@ -29,6 +29,13 @@ export type PromptCompilerDeps = {
 type RegistryLike = SkillRegistry | { resolve: (query: any) => Promise<SkillManifest> }
 
 const PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
+const H3_RESULT_MODE_ALIASES: Readonly<Record<string, Extract<CanvasMediaMode, 'text_to_video' | 'image_to_video'>>> = {
+  T2VA: 'text_to_video',
+  I2VA: 'image_to_video',
+  FL2VA: 'image_to_video',
+  L2VA: 'image_to_video',
+  Ref2VA: 'image_to_video',
+}
 const INTERNAL_NAMES = /\b(?:activeWorkspace|compilerModelId|skillCompilerModelId|request|incomingAssets|nodeParams|source_asset_ids|api[_-]?key|authorization|bearer)\b/gi
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 
@@ -74,6 +81,11 @@ function extractContent(response: LLMResponse<any>): string {
   return ''
 }
 
+function normalizedResultMode(value: unknown, skill: SkillManifest): unknown {
+  if (skill.name !== 'h3-prompt-writing' || typeof value !== 'string') return value
+  return H3_RESULT_MODE_ALIASES[value] ?? value
+}
+
 function parseResult(content: string, skill: SkillManifest, mode: CanvasMediaMode): PromptCompileResult {
   if (!content.trim()) throw new SkillCompilerError('SKILL_RESULT_EMPTY', 'Skill compiler returned an empty result')
   let parsed: any
@@ -81,7 +93,7 @@ function parseResult(content: string, skill: SkillManifest, mode: CanvasMediaMod
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill compiler result must be an object')
   if (typeof parsed.prompt !== 'string') throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill compiler result requires a prompt string')
   if (!parsed.prompt.trim()) throw new SkillCompilerError('SKILL_RESULT_EMPTY', 'Skill compiler result prompt is empty')
-  if (parsed.mode !== mode) throw new SkillCompilerError('SKILL_MODE_INCOMPATIBLE', `Skill result mode must be ${mode}`)
+  if (normalizedResultMode(parsed.mode, skill) !== mode) throw new SkillCompilerError('SKILL_MODE_INCOMPATIBLE', `Skill result mode must be ${mode}`)
   if (parsed.skill_name !== skill.name || typeof parsed.skill_name !== 'string') throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill result has an unexpected skill_name')
   if (typeof parsed.skill_version !== 'string' || parsed.skill_version !== skill.revision) throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill result has an unexpected skill_version')
   if (parsed.negative_prompt !== undefined && typeof parsed.negative_prompt !== 'string') throw new SkillCompilerError('SKILL_RESULT_INVALID', 'negative_prompt must be a string')

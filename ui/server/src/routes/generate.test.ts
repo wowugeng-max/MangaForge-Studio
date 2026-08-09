@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
-import { mkdtemp, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -10,6 +10,30 @@ async function tempWorkspace() {
   const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generate-route-'))
   workspaces.push(workspace)
   return workspace
+}
+
+async function installWorkflowOnlyFixturePack(workspace: string) {
+  const revision = 'c'.repeat(40)
+  const root = join(workspace, '.mangaforge', 'skill-packs', 'MiniMax-H3', revision)
+  const skillRoot = join(root, 'skills', 'brand-promo-video-generator')
+  await mkdir(skillRoot, { recursive: true })
+  await writeFile(join(root, 'pack.json'), JSON.stringify({
+    id: 'MiniMax-H3', sourceUrl: 'https://github.com/MiniMax-AI/MiniMax-H3', owner: 'MiniMax-AI', repo: 'MiniMax-H3',
+    revision, installedAt: '2026-08-09T00:00:00.000Z', status: 'installed',
+  }))
+  await writeFile(join(skillRoot, 'SKILL.md'), `---
+name: brand-promo-video-generator
+description: Generate a polished brand promotional video through a staged Hub workflow.
+allowed-tools:
+  - webfetch
+  - hub_generate_video
+  - hub_video_edit
+  - task
+---
+# Brand Promo Video Generator
+
+Run a multi-stage workflow with tools: verify brand facts, plan shots, generate video, edit, and review delivery.
+`)
 }
 
 function createRouteHarness() {
@@ -72,6 +96,51 @@ afterEach(async () => {
 })
 
 describe('canvas generate route', () => {
+  test('rejects an explicitly selected workflow-only Hub Skill before compiler model, provider, or media task work', async () => {
+    const workspace = await tempWorkspace()
+    await installWorkflowOnlyFixturePack(workspace)
+    const { createSkillRegistry } = await import('../skills/registry')
+    const { createPromptCompiler } = await import('../skills/compiler')
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let modelReads = 0
+    let compilerModelCalls = 0
+    let providerCalls = 0
+    let comfyCalls = 0
+    let taskCalls = 0
+    const compiler = createPromptCompiler({
+      registry: createSkillRegistry(workspace),
+      readModels: async () => { modelReads += 1; return [] },
+      executeWithRuntimeModel: async () => { compilerModelCalls += 1; return { content: '{}' } as any },
+    })
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: compiler,
+      execute: async () => { providerCalls += 1; return { content: 'unexpected' } as any },
+      comfyExecute: async () => { comfyCalls += 1; return { prompt_id: 'unexpected', output_files: [], history: {} } },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    const response = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'video-provider',
+        type: 'text_to_video',
+        prompt: 'Create a launch reel from verified brand assets.',
+        skill_name: 'brand-promo-video-generator',
+        skill_pack_id: 'MiniMax-H3',
+        params: { client_id: 'workflow-only-generate-node' },
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.body).toMatchObject({ error_code: 'SKILL_MODE_INCOMPATIBLE' })
+    expect(String(response.body.detail)).toContain('not prompt-ready')
+    expect(modelReads).toBe(0)
+    expect(compilerModelCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+    expect(comfyCalls).toBe(0)
+    expect(taskCalls).toBe(0)
+  })
+
   test('builds the exact legacy runtime LLM request shape when no Skill is selected', async () => {
     const { buildCanvasGenerateLLMRequest } = await import('./generate')
 

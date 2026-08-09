@@ -1,1 +1,19 @@
-H3_BASE_GUIDE_DISTINCTIVE: describe subject, action, setting, camera, lighting, and timing.
+H3_BASE_GUIDE_CONTRACT
+
+This deterministic fixture preserves only the public H3 base-mode contract needed by tests.
+
+Mode aliases: T2VA, I2VA, FL2VA, and L2VA.
+
+Exact field order:
+integrated_multimodal_description: [Shot 1] ...
+overall_soundscape: ...
+non_diegetic_music: ...
+
+The first shot has no timestamp. Later cuts use the exact format:
+[Shot 2] At 00:03.500, the camera cuts to...
+
+I2VA first-frame label and time example:
+For the target video, at 0.00 seconds into the target video, <Picture 1> (from [Shot 1]) is fully referenced.
+
+FL2VA duration example: Picture 1 aligns with the 0.00-second mark and Picture 2 aligns with the 8.00-second mark.
+L2VA duration example: <Picture 1> aligns with the 6.00-second mark of the target video.

@@ -1,1 +1,15 @@
-H3_REFERENCE_GUIDE_DISTINCTIVE: preserve identity and composition from incoming visual references.
+H3_REF_GUIDE_CONTRACT
+
+This deterministic fixture preserves only the public H3 full-reference contract needed by tests.
+
+Exact section order:
+subject_definitions:
+summary:
+retention_analysis:
+detailed_description:
+overall_soundscape:
+non_diegetic_music:
+
+Stable reference labels include <Subject 1>, <Picture 1>, <Video 1>, and <Audio 1>.
+The first shot is `[Shot 1]` without a timestamp. Later cuts use `[Shot 2] At 00:03.000, ...`.
+Retention relationships keep fixed labels such as `fully_preserved`, `reference`, and `weak_reference`.

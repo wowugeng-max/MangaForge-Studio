@@ -118,13 +118,13 @@ Do not load references/implicit.txt or execute \`scripts/build.ts\`.
     const loaded = await loadSkillReferences(fixtureRoot, parsed.references)
 
     expect(manifest.name).toBe('h3-prompt-writing')
-    expect(manifest.mediaModes).toEqual(['text_to_video', 'image_to_video'])
+    expect(manifest.mediaModes).toEqual([])
     expect(loaded.map((item) => item.relativePath)).toEqual([
       'references/base-en.txt',
       'references/ref-en.txt',
     ])
-    expect(loaded[0]?.content).toContain('H3_BASE_GUIDE_DISTINCTIVE')
-    expect(loaded[1]?.content).toContain('H3_REFERENCE_GUIDE_DISTINCTIVE')
+    expect(loaded[0]?.content).toContain('H3_BASE_GUIDE_CONTRACT')
+    expect(loaded[1]?.content).toContain('H3_REF_GUIDE_CONTRACT')
   })
 })
 

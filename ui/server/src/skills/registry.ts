@@ -73,7 +73,7 @@ export function classifySkillCompatibility(manifest: SkillManifest, raw = ''): S
       mediaModes,
     }
   }
-  const promptOnly = /\bprompt[-_ ]only\b|return\s+only\s+(?:a\s+)?(?:compiled\s+)?(?:visual\s+)?prompt|prompt\s+engineer|compiled\s+visual\s+prompt|\b(?:write|generate|create|turn|convert|transform)\b[\s\S]{0,100}\bprompt\b/i.test(`${raw}\n${manifest.body}`)
+  const promptOnly = /\bprompt[-_ ]only\b|return\s+only\s+(?:a\s+)?(?:compiled\s+)?(?:visual\s+)?prompt|prompt\s+engineer|compiled\s+visual\s+prompt|\b(?:write|generate|create|turn|convert|transform)\b[\s\S]{0,100}\bprompts?\b/i.test(`${raw}\n${manifest.body}`)
   if (mediaModes.length && promptOnly) {
     return { compatibility: 'prompt_ready', mediaModes }
   }

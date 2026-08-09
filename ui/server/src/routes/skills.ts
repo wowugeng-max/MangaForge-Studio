@@ -97,6 +97,7 @@ function publicSkillSummary(skill: SkillManifest) {
     triggerWords: [...skill.triggerWords],
     mediaModes: [...skill.mediaModes],
     compatibility: skill.compatibility,
+    compatibilityReason: skill.compatibilityReason,
     reason: skill.compatibilityReason,
     revision: skill.revision,
     sourceUrl: typeof skill.sourceUrl === 'string' ? publicSourceUrl(skill.sourceUrl) : skill.sourceUrl,
