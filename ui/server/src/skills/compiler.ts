@@ -30,6 +30,7 @@ type RegistryLike = SkillRegistry | { resolve: (query: any) => Promise<SkillMani
 
 const PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
 const INTERNAL_NAMES = /\b(?:activeWorkspace|compilerModelId|skillCompilerModelId|request|incomingAssets|nodeParams|source_asset_ids|api[_-]?key|authorization|bearer)\b/gi
+function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 
 function scrub(value: string, workspace: string): string {
   let result = String(value ?? '')
@@ -37,11 +38,11 @@ function scrub(value: string, workspace: string): string {
     // Redact both filesystem and URL-encoded forms so a workspace path cannot
     // be smuggled through query strings or prompt text.
     const variants = new Set([workspace, encodeURIComponent(workspace), encodeURI(workspace)])
-    for (const variant of variants) if (variant) result = result.split(variant).join('[WORKSPACE]')
+    for (const variant of variants) if (variant) result = result.replace(new RegExp(escapeRegExp(variant), 'gi'), '[WORKSPACE]')
   }
   result = result.replace(/(?:sk|rk)-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
   result = result.replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
-  result = result.replace(/([?&](?:api[_-]?key|token|access[_-]?token|secret|password|auth|signature|sig|x-amz-[^=&#\s]+)=)[^&#\s]+/gi, '$1[REDACTED]')
+  result = result.replace(/((?:^|[?&\s])(?:api[_-]?key|token|access[_-]?token|secret|password|auth|signature|sig|x-amz-[^=&#\s]+)=)[^&#\s]+/gi, '$1[REDACTED]')
   return result.replace(INTERNAL_NAMES, (name) => `[${name.toUpperCase()}]`)
 }
 
