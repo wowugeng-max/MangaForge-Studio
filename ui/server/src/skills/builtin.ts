@@ -16,4 +16,3 @@ export const builtinPromptSkill: SkillManifest = {
   body: '你是顶级 Prompt Engineer。把输入转化为极致详细的英文 Prompt，并给出负面 Prompt。',
   references: [],
 }
-

@@ -72,8 +72,8 @@ export function classifySkillCompatibility(manifest: SkillManifest, raw = ''): S
       mediaModes,
     }
   }
-  const promptOnly = /\bprompt[-_ ]only\b|return\s+only\s+(?:a\s+)?(?:compiled\s+)?(?:visual\s+)?prompt|prompt\s+engineer|compiled\s+visual\s+prompt/i.test(`${raw}\n${manifest.body}`)
-  if (mediaModes.length && (manifest.mediaModes.length || promptOnly || /\bprompt\b/i.test(manifest.body))) {
+  const promptOnly = /\bprompt[-_ ]only\b|return\s+only\s+(?:a\s+)?(?:compiled\s+)?(?:visual\s+)?prompt|prompt\s+engineer|compiled\s+visual\s+prompt|\b(?:write|generate|create|turn|convert|transform)\b[\s\S]{0,100}\bprompt\b/i.test(`${raw}\n${manifest.body}`)
+  if (mediaModes.length && promptOnly) {
     return { compatibility: 'prompt_ready', mediaModes }
   }
   if (mediaModes.length) return { compatibility: 'prompt_partial', compatibilityReason: 'does not clearly declare prompt-only behavior', mediaModes }
@@ -90,8 +90,26 @@ export type SkillRegistryOptions = {
 
 type ScanContext = { packId: string; revision: string; sourceUrl?: string }
 
+type RegistryCache = { signature: string; manifests: SkillManifest[] }
+
 async function isDirectory(path: string): Promise<boolean> {
   try { const info = await lstat(path); return info.isDirectory() && !info.isSymbolicLink() } catch { return false }
+}
+
+/** Build a cheap, deterministic fingerprint without reading Skill contents. */
+async function collectSignature(root: string, entries: string[]): Promise<void> {
+  let info
+  try { info = await lstat(root) } catch { return }
+  if (info.isSymbolicLink()) return
+  entries.push(`${root}\0${info.isDirectory() ? 'd' : 'f'}\0${info.size}\0${info.mtimeMs}`)
+  if (!info.isDirectory()) return
+  let children: Awaited<ReturnType<typeof readdir>>
+  try { children = await readdir(root, { withFileTypes: true }) } catch { return }
+  children.sort((left, right) => left.name.localeCompare(right.name))
+  for (const child of children) {
+    if (child.isSymbolicLink()) continue
+    await collectSignature(join(root, child.name), entries)
+  }
 }
 
 async function readOptionalMetadata(skillRoot: string): Promise<Pick<SkillManifest, 'displayName' | 'shortDescription' | 'defaultPrompt'>> {
@@ -178,11 +196,20 @@ async function scanInstalled(workspace: string): Promise<SkillManifest[]> {
 }
 
 export function createSkillRegistry(workspace: string, options: SkillRegistryOptions = {}) {
-  let cached: SkillManifest[] | undefined
+  let cached: RegistryCache | undefined
+  const rootsForOptions = (): string[] => {
+    const roots: string[] = [join(workspace, '.mangaforge', 'skill-packs')]
+    if (options.includeLocalSkills !== false) roots.push(join(workspace, '.mangaforge', 'skills'))
+    if (options.includeClaudeSkills) roots.push(join(workspace, '.claude', 'skills'))
+    if (options.includeCodexSkills) roots.push(join(workspace, '.codex', 'skills'))
+    roots.push(...(options.skillRoots ?? []))
+    return roots
+  }
   const scan = async (): Promise<SkillManifest[]> => {
-    // The registry is deliberately cheap to refresh: every public read observes
-    // newly installed revisions and edited workspace files. `invalidate()` also
-    // clears the retained snapshot for callers that want an explicit boundary.
+    const signatureEntries: string[] = []
+    for (const root of rootsForOptions()) await collectSignature(root, signatureEntries)
+    const signature = signatureEntries.sort().join('\n')
+    if (cached?.signature === signature) return cached.manifests
     const manifests = await scanInstalled(workspace)
     const roots: Array<{ root: string; packId: string }> = []
     if (options.includeLocalSkills !== false) roots.push({ root: join(workspace, '.mangaforge', 'skills'), packId: 'local' })
@@ -191,7 +218,7 @@ export function createSkillRegistry(workspace: string, options: SkillRegistryOpt
     for (const root of options.skillRoots ?? []) roots.push({ root, packId: basename(root) || 'local' })
     for (const item of roots) manifests.push(...await scanSkillRoot(item.root, { packId: item.packId, revision: 'workspace', sourceUrl: `file://${item.root}` }))
     manifests.sort((left, right) => `${left.packId}\0${left.name}\0${left.revision}\0${left.directoryName}`.localeCompare(`${right.packId}\0${right.name}\0${right.revision}\0${right.directoryName}`))
-    cached = manifests
+    cached = { signature, manifests }
     return manifests
   }
   return {

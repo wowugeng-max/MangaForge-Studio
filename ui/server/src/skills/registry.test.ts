@@ -65,6 +65,19 @@ describe('workspace canvas Skill registry', () => {
     expect(ready.some((item) => item === builtinPromptSkill || item.name === 'prompt-optimizer')).toBe(true)
   })
 
+  test('requires prompt-only semantics after reading explicit media modes', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
+    await installedPack(workspace, 'classification', 'rev-1', [
+      { name: 'non-prompt', body: 'Describe a scene and discuss its historical context.', frontmatter: 'media_modes: [text_to_video]\n' },
+      { name: 'prompt-only', body: 'Return only a compiled visual prompt for the shot.', frontmatter: 'media_modes: [text_to_video]\n' },
+      { name: 'workflow-mode', body: 'Write a prompt, then call a tool to render it.', frontmatter: 'media_modes: [text_to_video]\nallowed-tools: [Bash]\n' },
+    ])
+    const list = await createSkillRegistry(workspace).list({ includeBuiltins: false })
+    expect(list.find((item) => item.name === 'non-prompt')).toMatchObject({ compatibility: 'prompt_partial' })
+    expect(list.find((item) => item.name === 'prompt-only')).toMatchObject({ compatibility: 'prompt_ready' })
+    expect(list.find((item) => item.name === 'workflow-mode')).toMatchObject({ compatibility: 'workflow_only' })
+  })
+
   test('retains workflow-only and malformed manifests without executing scripts', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
     const localRoot = join(workspace, '.mangaforge', 'skills')
@@ -90,8 +103,11 @@ describe('workspace canvas Skill registry', () => {
     await mkdir(join(workspace, '.codex', 'skills'), { recursive: true })
     await skill(join(workspace, '.codex', 'skills'), 'codex-only', 'Prompt text.')
     const registry = createSkillRegistry(workspace, { includeClaudeSkills: true })
-    expect((await registry.list({ includeBuiltins: false })).map((item) => item.name)).toContain('claude-only')
-    expect((await registry.list({ includeBuiltins: false })).map((item) => item.name)).not.toContain('codex-only')
+    const firstList = await registry.list({ includeBuiltins: false })
+    const secondList = await registry.list({ includeBuiltins: false })
+    expect(firstList.map((item) => item.name)).toContain('claude-only')
+    expect(secondList[0]).toBe(firstList[0])
+    expect(secondList.map((item) => item.name)).not.toContain('codex-only')
     const path = join(workspace, '.claude', 'skills', 'claude-only', 'SKILL.md')
     await writeFile(path, '---\nname: changed\nmedia_modes: [text_to_video]\n---\nPrompt changed.')
     await utimes(path, new Date(), new Date(Date.now() + 2000))
