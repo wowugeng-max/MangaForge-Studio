@@ -123,6 +123,45 @@ describe('GenerateNode migration behavior', () => {
     expect(payload.data.source_camera_suffix).toContain('compressed perspective')
   })
 
+  test('keeps the editable source prompt and compile provenance in saved assets', () => {
+    const payload = buildGenerateNodeAssetPayload({
+      resultContent: 'https://cdn.example/out.png',
+      mode: 'text_to_image',
+      prompt: '/pack-a:h3-prompt-writing hero closeup',
+      selectedModel: 'image-model',
+      provider: 'skill-provider',
+      selectedRolePrompt: 'visual director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '1:1',
+      ratioSize: '1024*1024',
+      compiledPrompt: 'cinematic closeup of a heroic character',
+      compiledNegativePrompt: '',
+      skillPackId: 'pack-a',
+      skillPackSource: 'https://example.com/pack-a.git',
+      skillName: 'h3-prompt-writing',
+      skillRevision: 'rev-7',
+      compiledReferences: [{ asset_id: 42, role: 'character' }],
+      compiledInputHash: 'sha256:compiled-input',
+      warnings: ['reference was downscaled'],
+      compilerModelId: 'compiler-model',
+    } as any)
+
+    expect(payload.data).toMatchObject({
+      source_prompt: '/pack-a:h3-prompt-writing hero closeup',
+      compiled_prompt: 'cinematic closeup of a heroic character',
+      compiled_negative_prompt: '',
+      skill_pack_id: 'pack-a',
+      skill_pack_source: 'https://example.com/pack-a.git',
+      skill_name: 'h3-prompt-writing',
+      skill_revision: 'rev-7',
+      compiled_references: [{ asset_id: 42, role: 'character' }],
+      compiled_input_hash: 'sha256:compiled-input',
+      warnings: ['reference was downscaled'],
+      compiler_model_id: 'compiler-model',
+    })
+  })
+
   test('preserves source asset lineage from generation route packets', () => {
     expect(normalizeGenerateNodeGenerationPacket({
       content: 'https://cdn.example/out.png',
@@ -153,6 +192,36 @@ describe('GenerateNode migration behavior', () => {
       content: '/api/assets/media/assets%2Fvideo-loop%2Ffinal.mp4',
       media_url: '/api/assets/media/assets%2Fvideo-loop%2Ffinal.mp4',
       source_asset_ids: [31],
+    })
+  })
+
+  test('merges top-level Skill compile audit fields into normalized generation results', () => {
+    expect(normalizeGenerateNodeGenerationPacket({
+      content: 'https://cdn.example/out.png',
+      result: { content: 'https://cdn.example/out.png' },
+      skill_pack_id: 'pack-a',
+      skill_pack_source: 'https://example.com/pack-a.git',
+      skill_name: 'h3-prompt-writing',
+      skill_revision: 'rev-7',
+      compiled_prompt: 'compiled prompt',
+      compiled_negative_prompt: 'negative prompt',
+      compiled_references: ['reference.md'],
+      compiled_input_hash: 'sha256:input',
+      warnings: ['warning'],
+      compiler_model_id: 9,
+      raw_prompt: '/pack-a:h3-prompt-writing hero',
+    })).toMatchObject({
+      skill_pack_id: 'pack-a',
+      skill_pack_source: 'https://example.com/pack-a.git',
+      skill_name: 'h3-prompt-writing',
+      skill_revision: 'rev-7',
+      compiled_prompt: 'compiled prompt',
+      compiled_negative_prompt: 'negative prompt',
+      compiled_references: ['reference.md'],
+      compiled_input_hash: 'sha256:input',
+      warnings: ['warning'],
+      compiler_model_id: 9,
+      raw_prompt: '/pack-a:h3-prompt-writing hero',
     })
   })
 
@@ -275,6 +344,96 @@ describe('GenerateNode migration behavior', () => {
         ],
       },
     ])
+  })
+
+  test('adds selected Skill fields to generation payloads and omits empty optional fields', () => {
+    const base = {
+      id: 'node-skill',
+      prompt: 'hero closeup',
+      selectedKey: 7,
+      provider: 'skill-provider',
+      selectedModel: 'image-model',
+      mode: 'text_to_image',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.7,
+      ratioSize: '1024*1024',
+      selectedRolePrompt: 'visual director',
+    }
+
+    const payload = buildGenerateNodeRequestPayload({
+      ...base,
+      skillName: 'selected',
+      skillPackId: 'pack-a',
+      cameraSuffix: ', low angle',
+    } as any)
+
+    expect(payload).toMatchObject({
+      prompt: 'hero closeup',
+      skill_name: 'selected',
+      skill_pack_id: 'pack-a',
+      skill_compile_enabled: true,
+    })
+    expect('skill_revision' in payload).toBe(false)
+    expect('skill_compiler_model_id' in payload).toBe(false)
+    expect('skill_arguments' in payload).toBe(false)
+    expect('compiled_input_hash' in payload).toBe(false)
+
+    expect(buildGenerateNodeRequestPayload({
+      ...base,
+      skillName: 'selected',
+      skillPackId: 'pack-a',
+      skillRevision: 'rev-7',
+      skillCompilerModelId: 'compiler-model',
+      skillArguments: { subject: 'hero' },
+      compiledInputHash: 'sha256:preview',
+    } as any)).toMatchObject({
+      skill_revision: 'rev-7',
+      skill_compiler_model_id: 'compiler-model',
+      skill_arguments: { subject: 'hero' },
+      compiled_input_hash: 'sha256:preview',
+    })
+  })
+
+  test('leading Skill commands override stale dropdown selectors without replacing the editable prompt', () => {
+    const base = {
+      id: 'node-command',
+      selectedKey: 7,
+      provider: 'skill-provider',
+      selectedModel: 'image-model',
+      mode: 'text_to_image',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.7,
+      ratioSize: '1024*1024',
+      selectedRolePrompt: 'visual director',
+      skillName: 'stale-selection',
+      skillPackId: 'stale-pack',
+    }
+
+    for (const prompt of ['/h3-prompt-writing hero closeup', '/pack-a:h3-prompt-writing hero']) {
+      const payload = buildGenerateNodeRequestPayload({ ...base, prompt } as any)
+      expect(payload.prompt).toBe(prompt)
+      expect('skill_name' in payload).toBe(false)
+      expect('skill_pack_id' in payload).toBe(false)
+    }
+  })
+
+  test('parses only valid leading canvas Skill commands', async () => {
+    const module = await import('./GenerateNode')
+    const parseCanvasSkillCommand = (module as any).parseCanvasSkillCommand
+
+    expect(typeof parseCanvasSkillCommand).toBe('function')
+    expect(parseCanvasSkillCommand('/h3-prompt-writing hero closeup')).toEqual({
+      name: 'h3-prompt-writing',
+      argumentsText: 'hero closeup',
+    })
+    expect(parseCanvasSkillCommand('/pack-a:h3-prompt-writing hero')).toEqual({
+      packId: 'pack-a',
+      name: 'h3-prompt-writing',
+      argumentsText: 'hero',
+    })
+    expect(parseCanvasSkillCommand('ordinary prompt')).toBeNull()
   })
 
   test('builds vision payloads with multiple incoming assets for backend multimodal parsing', async () => {

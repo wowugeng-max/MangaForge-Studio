@@ -116,6 +116,20 @@ export type GenerateNodeIncomingAsset = {
   source_asset_ids?: number[]
 }
 
+export type ParsedCanvasSkillCommand = { packId?: string; name: string; argumentsText: string }
+
+const canvasSkillToken = '[A-Za-z0-9][A-Za-z0-9._-]*'
+const canvasSkillCommandPattern = new RegExp(`^\\/(${canvasSkillToken})(?::(${canvasSkillToken}))?(?:[ \\t]+([\\s\\S]*))?$`)
+
+export function parseCanvasSkillCommand(input: string): ParsedCanvasSkillCommand | null {
+  if (typeof input !== 'string') return null
+  const match = input.match(canvasSkillCommandPattern)
+  if (!match) return null
+  return match[2]
+    ? { packId: match[1], name: match[2], argumentsText: match[3] ?? '' }
+    : { name: match[1], argumentsText: match[3] ?? '' }
+}
+
 function normalizeGenerateNodeSourceAssetIds(value: unknown): number[] {
   if (!Array.isArray(value)) return []
   return value.map(item => Number(item)).filter(id => Number.isFinite(id) && id > 0)
@@ -178,6 +192,16 @@ export function buildGenerateNodeAssetPayload(input: {
   projectId?: number | null
   cameraParams?: Record<string, string>
   sourceAssetIds?: number[] | null
+  compiledPrompt?: string
+  compiledNegativePrompt?: string
+  skillPackId?: string
+  skillPackSource?: string
+  skillName?: string
+  skillRevision?: string
+  compiledReferences?: unknown[]
+  compiledInputHash?: string
+  warnings?: string[]
+  compilerModelId?: number | string | null
 }) {
   const contentStr = String(input.resultContent || '')
   const looksLikeVideo = input.mode.includes('video') || /^(data:video)/i.test(contentStr) || /\.(mp4|webm|mov)(\?|$)/i.test(contentStr)
@@ -189,6 +213,7 @@ export function buildGenerateNodeAssetPayload(input: {
   const sourceAssetIds = Array.isArray(input.sourceAssetIds)
     ? input.sourceAssetIds.map(item => Number(item)).filter(id => Number.isFinite(id))
     : []
+  const hasCompileProvenance = Boolean(input.compiledPrompt || input.compiledInputHash || input.skillName)
 
   return {
     name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${input.prompt.slice(0, 10) || input.selectedModel}...`,
@@ -209,6 +234,16 @@ export function buildGenerateNodeAssetPayload(input: {
       source_size: input.ratioSize,
       source_camera_params: Object.keys(cameraParams).length > 0 ? cameraParams : null,
       source_camera_suffix: cameraSuffix || null,
+      ...(hasCompileProvenance && input.compiledPrompt !== undefined ? { compiled_prompt: input.compiledPrompt } : {}),
+      ...(hasCompileProvenance && input.compiledNegativePrompt !== undefined ? { compiled_negative_prompt: input.compiledNegativePrompt } : {}),
+      ...(hasCompileProvenance && input.skillPackId ? { skill_pack_id: input.skillPackId } : {}),
+      ...(hasCompileProvenance && input.skillPackSource ? { skill_pack_source: input.skillPackSource } : {}),
+      ...(hasCompileProvenance && input.skillName ? { skill_name: input.skillName } : {}),
+      ...(hasCompileProvenance && input.skillRevision ? { skill_revision: input.skillRevision } : {}),
+      ...(hasCompileProvenance && Array.isArray(input.compiledReferences) ? { compiled_references: input.compiledReferences } : {}),
+      ...(hasCompileProvenance && input.compiledInputHash ? { compiled_input_hash: input.compiledInputHash } : {}),
+      ...(hasCompileProvenance && Array.isArray(input.warnings) ? { warnings: input.warnings } : {}),
+      ...(hasCompileProvenance && input.compilerModelId !== undefined && input.compilerModelId !== null ? { compiler_model_id: input.compilerModelId } : {}),
     },
     tags: ['AI_Generated', input.mode, input.selectedModel],
     thumbnail: assetType === 'image' ? contentStr : undefined,
@@ -234,15 +269,33 @@ export function normalizeGenerateNodeGenerationPacket(packet: any) {
     : Array.isArray(base?.source_asset_ids)
       ? base.source_asset_ids
       : []
+  const compileAuditKeys = [
+    'skill_pack_id',
+    'skill_pack_source',
+    'skill_name',
+    'skill_revision',
+    'compiled_prompt',
+    'compiled_negative_prompt',
+    'compiled_references',
+    'compiled_input_hash',
+    'warnings',
+    'compiler_model_id',
+    'raw_prompt',
+  ] as const
+  const compileAudit = Object.fromEntries(compileAuditKeys.flatMap(key => {
+    const value = base?.[key] ?? data?.result?.[key] ?? data?.[key] ?? root?.result?.[key] ?? root?.[key]
+    return value === undefined ? [] : [[key, value]]
+  }))
   if (base && typeof base === 'object' && !Array.isArray(base)) {
     return {
       ...base,
+      ...compileAudit,
       content,
       ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
     }
   }
   return typeof content === 'string'
-    ? { content, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
+    ? { content, ...compileAudit, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
     : content || packet
 }
 
@@ -296,6 +349,13 @@ export function buildGenerateNodeRequestPayload(input: {
   incomingAssets?: GenerateNodeIncomingAsset[]
   externalSystemPrompt?: string
   systemPromptOverride?: string
+  skillPackId?: string
+  skillName?: string
+  skillRevision?: string
+  skillCompileEnabled?: boolean
+  skillCompilerModelId?: number | string | null
+  skillArguments?: Record<string, string>
+  compiledInputHash?: string
 }) {
   const finalPromptText = `${input.prompt || ''}${input.cameraSuffix || ''}`
   const activeSystemPrompt = input.externalSystemPrompt || input.systemPromptOverride || input.selectedRolePrompt
@@ -318,16 +378,28 @@ export function buildGenerateNodeRequestPayload(input: {
   ].filter(Boolean).join('\n\n')
   // 模型显式声明的 size 参数（快捷参数条）优先；比例系统的 ratioSize 只在模型没有 size 参数时兜底。
   const hasParamSize = input.params?.size !== undefined && input.params.size !== null && input.params.size !== ''
+  const command = parseCanvasSkillCommand(input.prompt)
+  const selectedSkillName = String(input.skillName || '').trim()
+  const selectedSkillPackId = String(input.skillPackId || '').trim()
+  const hasEffectiveSkill = Boolean(command || selectedSkillName)
+  const compileEnabled = input.skillCompileEnabled ?? hasEffectiveSkill
   const payload: any = {
     api_key_id: Number(input.selectedKey) || undefined,
     provider: input.provider,
     model: input.selectedModel,
     type: input.mode,
     routing_strategy: input.routingStrategy,
-    prompt: finalPromptText,
+    prompt: hasEffectiveSkill ? String(input.prompt || '') : finalPromptText,
     params: { ...input.params, temperature: input.temperature, ...(hasParamSize ? {} : { size: input.ratioSize }), client_id: input.id },
     messages: [{ role: 'system', content: activeSystemPrompt }],
   }
+  if (hasEffectiveSkill || input.skillCompileEnabled !== undefined) payload.skill_compile_enabled = compileEnabled
+  if (!command && selectedSkillName) payload.skill_name = selectedSkillName
+  if (!command && selectedSkillPackId) payload.skill_pack_id = selectedSkillPackId
+  if (!command && input.skillRevision) payload.skill_revision = input.skillRevision
+  if (input.skillCompilerModelId !== undefined && input.skillCompilerModelId !== null && input.skillCompilerModelId !== '') payload.skill_compiler_model_id = input.skillCompilerModelId
+  if (input.skillArguments && Object.keys(input.skillArguments).length > 0) payload.skill_arguments = input.skillArguments
+  if (input.compiledInputHash) payload.compiled_input_hash = input.compiledInputHash
   if (normalizedIncomingAssets.length) payload.params.incoming_assets = normalizedIncomingAssets
   if (input.mode === 'vision' && incomingImages.length) {
     payload.messages.push({

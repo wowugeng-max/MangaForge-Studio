@@ -4,6 +4,16 @@ import { useParams } from 'react-router-dom'
 import { Button, Checkbox, Collapse, Input, InputNumber, Segmented, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message, Slider } from 'antd'
 import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFilled } from '@ant-design/icons'
 import apiClient from '../../api/client'
+import {
+  compileSkillPreview,
+  listSkills,
+  readSkillSettings,
+  type CanvasSkillApiError,
+  type CanvasSkillCompileResult,
+  type CanvasSkillMediaMode,
+  type CanvasSkillSettings,
+  type CanvasSkillSummary,
+} from '../../api/skills'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/sse'
 import { useCanvasStore } from '../../stores/canvasStore'
@@ -30,6 +40,7 @@ import {
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
   normalizeGenerateNodeImageUrl,
+  parseCanvasSkillCommand,
   normalizeSelectOptions,
   pickQuickParams,
   resolveGenerateNodePreviewMediaSrc,
@@ -45,6 +56,7 @@ export {
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   getGenerateNodeAspectRatioSize,
   normalizeGenerateNodeImageUrl,
+  parseCanvasSkillCommand,
   normalizeSelectOptions,
   pickQuickParams,
   resolveGenerateNodePreviewMediaSrc,
@@ -63,10 +75,23 @@ export type {
 const { TextArea } = Input
 const { Text } = Typography
 
+const SKILL_MEDIA_MODES = new Set(['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])
+const SKILL_AUDIT_KEYS = [
+  'skill_pack_id', 'skill_pack_source', 'skill_name', 'skill_revision',
+  'compiled_prompt', 'compiled_negative_prompt', 'compiled_references',
+  'compiled_input_hash', 'warnings', 'compiler_model_id', 'raw_prompt',
+]
 
+function withoutSkillAudit(value: any) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const next = { ...value }
+  SKILL_AUDIT_KEYS.forEach(key => delete next[key])
+  return next
+}
 
 function GenerateNodeImpl(props: NodeProps) {
   const { id, data } = props
+  const initialCompileAudit = data?.result && typeof data.result === 'object' ? data.result : data || {}
   const { id: routeProjectId } = useParams<{ id: string }>()
   const updateNodeData = useCanvasStore(s => s.updateNodeData)
   const setNodeStatus = useCanvasStore(s => s.setNodeStatus)
@@ -100,8 +125,39 @@ function GenerateNodeImpl(props: NodeProps) {
   const [progressMsg, setProgressMsg] = useState('')
   const [result, setResult] = useState<any>(data?.result || null)
   const [mediaDims, setMediaDims] = useState('')
+  const [readySkills, setReadySkills] = useState<CanvasSkillSummary[]>([])
+  const [allSkills, setAllSkills] = useState<CanvasSkillSummary[]>([])
+  const [skillsLoading, setSkillsLoading] = useState(false)
+  const [skillPackId, setSkillPackId] = useState(String(data?.skillPackId ?? data?.skill_pack_id ?? ''))
+  const [skillName, setSkillName] = useState(String(data?.skillName ?? data?.skill_name ?? ''))
+  const [skillRevision, setSkillRevision] = useState(String(data?.skillRevision ?? data?.skill_revision ?? ''))
+  const [skillCompileEnabled, setSkillCompileEnabled] = useState(Boolean(data?.skillCompileEnabled ?? data?.skill_compile_enabled ?? data?.skillName ?? data?.skill_name))
+  const [skillCompilerModelId, setSkillCompilerModelId] = useState<number | null>(() => {
+    const value = data?.skillCompilerModelId ?? data?.skill_compiler_model_id
+    return Number.isSafeInteger(Number(value)) ? Number(value) : null
+  })
+  const [skillArguments, setSkillArguments] = useState<Record<string, string>>(data?.skillArguments ?? data?.skill_arguments ?? {})
+  const [skillSettings, setSkillSettings] = useState<CanvasSkillSettings | null>(null)
+  const [skillSettingsLoaded, setSkillSettingsLoaded] = useState(false)
+  const [compilerModels, setCompilerModels] = useState<any[]>([])
+  const [compilerModelsLoaded, setCompilerModelsLoaded] = useState(false)
+  const [compiledPrompt, setCompiledPrompt] = useState(String(data?.compiledPrompt ?? initialCompileAudit?.compiled_prompt ?? ''))
+  const [compiledNegativePrompt, setCompiledNegativePrompt] = useState(String(data?.compiledNegativePrompt ?? initialCompileAudit?.compiled_negative_prompt ?? ''))
+  const [compiledReferences, setCompiledReferences] = useState<unknown[]>(Array.isArray(data?.compiledReferences ?? initialCompileAudit?.compiled_references) ? (data?.compiledReferences ?? initialCompileAudit.compiled_references) : [])
+  const [compiledInputHash, setCompiledInputHash] = useState(String(data?.compiledInputHash ?? initialCompileAudit?.compiled_input_hash ?? ''))
+  const [compileWarnings, setCompileWarnings] = useState<string[]>(Array.isArray(data?.compileWarnings ?? initialCompileAudit?.warnings) ? (data?.compileWarnings ?? initialCompileAudit.warnings).map(String) : [])
+  const [skillPackSource, setSkillPackSource] = useState(String(data?.skillPackSource ?? initialCompileAudit?.skill_pack_source ?? ''))
+  const [compilerModelId, setCompilerModelId] = useState<number | null>(() => {
+    const value = data?.compilerModelId ?? initialCompileAudit?.compiler_model_id
+    return Number.isSafeInteger(Number(value)) ? Number(value) : null
+  })
+  const [skillPreviewResult, setSkillPreviewResult] = useState<CanvasSkillCompileResult | null>(data?.skillPreviewResult || null)
+  const [skillPreviewCached, setSkillPreviewCached] = useState(Boolean(data?.skillPreviewCached))
+  const [skillPreviewLoading, setSkillPreviewLoading] = useState(false)
+  const [skillPreviewError, setSkillPreviewError] = useState<Pick<CanvasSkillApiError, 'error_code' | 'detail'> | null>(null)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
+  const compileInputFingerprintRef = useRef<string | null>(null)
   const nodeRef = useRef<HTMLDivElement>(null)
 
   // UI-only helper states for camera controls
@@ -126,6 +182,41 @@ function GenerateNodeImpl(props: NodeProps) {
   const projectId = Number(routeProjectId || 0) || null
   const visibleModels = allModels.filter(item => showOnlyFavorites ? item.is_favorite : true)
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
+  const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
+  const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
+  const knownSkills = useMemo(() => Array.from(new Map(
+    [...allSkills, ...readySkills].map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill]),
+  ).values()), [allSkills, readySkills])
+  const selectedSkill = useMemo(() => {
+    if (!skillName) return undefined
+    const matches = knownSkills.filter(skill => skill.name === skillName && (!skillPackId || skill.packId === skillPackId))
+    return matches.find(skill => !skillRevision || skill.revision === skillRevision) || matches[0]
+  }, [knownSkills, skillName, skillPackId, skillRevision])
+  const commandSkill = useMemo(() => {
+    if (!parsedSkillCommand) return undefined
+    const matches = knownSkills.filter(skill => skill.name === parsedSkillCommand.name && (!parsedSkillCommand.packId || skill.packId === parsedSkillCommand.packId))
+    return matches.length === 1 ? matches[0] : undefined
+  }, [knownSkills, parsedSkillCommand])
+  const effectiveSkill = parsedSkillCommand ? commandSkill : selectedSkill
+  const effectiveSkillName = parsedSkillCommand?.name || skillName
+  const effectiveSkillPackId = parsedSkillCommand
+    ? parsedSkillCommand.packId || commandSkill?.packId || ''
+    : selectedSkill?.packId || skillPackId
+  const hasEffectiveSkill = supportsPromptSkills && Boolean(effectiveSkillName)
+  const effectiveCompilerModelId = skillCompilerModelId ?? (skillSettingsLoaded ? skillSettings?.skill_compiler_model_id ?? null : compilerModelId)
+  const effectiveCompilerModel = compilerModels.find(model => Number(model.id) === Number(effectiveCompilerModelId))
+  const effectiveSkillIncompatible = Boolean(hasEffectiveSkill && effectiveSkill && (
+    effectiveSkill.compatibility !== 'prompt_ready'
+    || (effectiveSkill.mediaModes.length > 0 && !effectiveSkill.mediaModes.includes(mode as CanvasSkillMediaMode))
+  ))
+  const missingEffectiveCompilerModel = Boolean(hasEffectiveSkill && (
+    !skillSettingsLoaded
+    || !compilerModelsLoaded
+    || effectiveCompilerModelId === null
+    || !effectiveCompilerModel
+  ))
+  const skillRunBlocked = effectiveSkillIncompatible || missingEffectiveCompilerModel
+  const hasCompileMetadata = Boolean(result?.compiled_prompt !== undefined || skillPreviewResult || compiledInputHash || compiledPrompt)
 
   const modelSupportsMode = (item: any) => {
     const capabilities = item?.capabilities || {}
@@ -160,8 +251,36 @@ function GenerateNodeImpl(props: NodeProps) {
       cameraParams,
       cameraCustomOptions,
       customMovements,
+      skillPackId: hasEffectiveSkill ? skillPackId : undefined,
+      skillName: hasEffectiveSkill ? skillName : undefined,
+      skillRevision: hasEffectiveSkill ? skillRevision : undefined,
+      skillCompileEnabled: hasEffectiveSkill ? true : skillCompileEnabled,
+      skillCompilerModelId,
+      skillArguments,
+      compiledPrompt: hasCompileMetadata ? compiledPrompt : undefined,
+      compiledNegativePrompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
+      compiledReferences: hasCompileMetadata ? compiledReferences : undefined,
+      compiledInputHash: hasCompileMetadata ? compiledInputHash : undefined,
+      compileWarnings: hasCompileMetadata ? compileWarnings : undefined,
+      skillPackSource: hasCompileMetadata ? skillPackSource : undefined,
+      compilerModelId: hasCompileMetadata ? compilerModelId : undefined,
+      skillPreviewResult: hasCompileMetadata ? skillPreviewResult : undefined,
+      skillPreviewCached,
+      skill_pack_id: result?.skill_pack_id || (skillPreviewResult ? effectiveSkillPackId : skillPackId) || undefined,
+      skill_name: result?.skill_name || skillPreviewResult?.skill_name || skillName || undefined,
+      skill_revision: result?.skill_revision || skillPreviewResult?.skill_version || skillRevision || undefined,
+      skill_compile_enabled: hasEffectiveSkill ? true : skillCompileEnabled,
+      skill_compiler_model_id: skillCompilerModelId ?? undefined,
+      skill_arguments: Object.keys(skillArguments).length ? skillArguments : undefined,
+      compiled_prompt: hasCompileMetadata ? compiledPrompt : undefined,
+      compiled_negative_prompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
+      compiled_references: hasCompileMetadata ? compiledReferences : undefined,
+      compiled_input_hash: hasCompileMetadata ? compiledInputHash : undefined,
+      warnings: hasCompileMetadata ? compileWarnings : undefined,
+      skill_pack_source: hasCompileMetadata ? skillPackSource || undefined : undefined,
+      compiler_model_id: hasCompileMetadata ? compilerModelId ?? undefined : undefined,
     })
-  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, updateNodeData])
+  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
   useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
 
@@ -174,6 +293,46 @@ function GenerateNodeImpl(props: NodeProps) {
       })
       .catch(() => setKeys([]))
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    listSkills()
+      .then(res => { if (!cancelled) setAllSkills(Array.isArray(res.data?.skills) ? res.data.skills : []) })
+      .catch(() => { if (!cancelled) setAllSkills([]) })
+    readSkillSettings()
+      .then(res => { if (!cancelled) setSkillSettings(res.data) })
+      .catch(() => { if (!cancelled) setSkillSettings({ skill_compiler_model_id: null }) })
+      .finally(() => { if (!cancelled) setSkillSettingsLoaded(true) })
+    apiClient.get('/models/')
+      .then(res => {
+        if (cancelled) return
+        const models = Array.isArray(res.data) ? res.data : []
+        setCompilerModels(models.filter((model: any) => model?.is_active !== false && model?.health_status !== 'disabled' && model?.capabilities?.chat === true))
+      })
+      .catch(() => { if (!cancelled) setCompilerModels([]) })
+      .finally(() => { if (!cancelled) setCompilerModelsLoaded(true) })
+    return () => { cancelled = true }
+  }, [])
+
+  useEffect(() => {
+    if (!supportsPromptSkills) {
+      setReadySkills([])
+      setSkillsLoading(false)
+      return
+    }
+    let cancelled = false
+    setSkillsLoading(true)
+    listSkills(mode as CanvasSkillMediaMode, true)
+      .then(res => {
+        if (cancelled) return
+        const skills = Array.isArray(res.data?.skills) ? res.data.skills : []
+        setReadySkills(skills)
+        setAllSkills(current => Array.from(new Map([...current, ...skills].map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill])).values()))
+      })
+      .catch(() => { if (!cancelled) setReadySkills([]) })
+      .finally(() => { if (!cancelled) setSkillsLoading(false) })
+    return () => { cancelled = true }
+  }, [mode, supportsPromptSkills])
 
   useEffect(() => {
     if (!selectedKey) {
@@ -238,9 +397,8 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const resolveProvider = () => String(selectedKeyRecord?.provider || selectedKey || '')
 
-  const buildPayload = () => {
+  const collectIncomingContext = () => {
     const edges = getEdges(); const nodes = getNodes(); const incomingEdges = edges.filter(e => e.target === id)
-    let finalPromptText = prompt
     const incomingAssets: GenerateNodeIncomingAsset[] = []
     let externalSystemPrompt = ''
     incomingEdges.forEach(edge => {
@@ -257,11 +415,121 @@ function GenerateNodeImpl(props: NodeProps) {
       }
       else if (edge.targetHandle === 'system' && sourceContent) externalSystemPrompt = String(sourceContent)
     })
+    return { incomingAssets, externalSystemPrompt }
+  }
 
+  const skillNodeParams = () => Object.fromEntries(Object.entries({
+    size: params.size || ratioSize,
+    aspect_ratio: aspectRatio,
+    cameraParams,
+    customMovements,
+  }).filter(([, value]) => value !== undefined && value !== null && value !== ''))
+
+  const compileInputFingerprint = JSON.stringify({
+    prompt,
+    mode,
+    skill: { packId: parsedSkillCommand?.packId || (!parsedSkillCommand ? effectiveSkillPackId : ''), name: effectiveSkillName || '', revision: parsedSkillCommand ? '' : skillRevision },
+    skillArguments,
+    compilerModelId: effectiveCompilerModelId,
+    incomingAssets: collectIncomingContext().incomingAssets,
+    nodeParams: skillNodeParams(),
+    params,
+  })
+
+  useEffect(() => {
+    const previous = compileInputFingerprintRef.current
+    compileInputFingerprintRef.current = compileInputFingerprint
+    if (previous === null || previous === compileInputFingerprint) return
+
+    setCompiledPrompt('')
+    setCompiledNegativePrompt('')
+    setCompiledReferences([])
+    setCompiledInputHash('')
+    setCompileWarnings([])
+    setSkillPackSource('')
+    setCompilerModelId(null)
+    setSkillPreviewResult(null)
+    setSkillPreviewCached(false)
+    setSkillPreviewError(null)
+    const currentResult = useCanvasStore.getState().nodes.find(node => node.id === id)?.data?.result
+    const nextResult = withoutSkillAudit(currentResult)
+    setResult(nextResult)
+    updateNodeData(id, {
+      result: nextResult,
+      compiledPrompt: undefined,
+      compiledNegativePrompt: undefined,
+      compiledReferences: undefined,
+      compiledInputHash: undefined,
+      compileWarnings: undefined,
+      skillPackSource: undefined,
+      compilerModelId: undefined,
+      skillPreviewResult: undefined,
+      skillPreviewCached: false,
+      compiled_prompt: undefined,
+      compiled_negative_prompt: undefined,
+      compiled_references: undefined,
+      compiled_input_hash: undefined,
+      warnings: undefined,
+      skill_pack_source: undefined,
+      compiler_model_id: undefined,
+    })
+  }, [compileInputFingerprint, id, updateNodeData])
+
+  const handleSkillPreview = async () => {
+    if (!hasEffectiveSkill) return message.info('请先选择 Skill 或在提示词开头输入 /skill 命令')
+    if (effectiveSkillIncompatible) return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容`)
+    if (missingEffectiveCompilerModel || effectiveCompilerModelId === null) {
+      return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
+    }
+
+    const { incomingAssets } = collectIncomingContext()
+    setSkillPreviewLoading(true)
+    setSkillPreviewError(null)
+    try {
+      const res = await compileSkillPreview({
+        skill_name: effectiveSkillName,
+        ...(effectiveSkillPackId ? { pack_id: effectiveSkillPackId } : {}),
+        raw_prompt: prompt,
+        mode: mode as CanvasSkillMediaMode,
+        incoming_assets: incomingAssets.map(asset => ({
+          type: asset.type,
+          ...(asset.url ? { url: asset.url } : {}),
+          ...(asset.content ? { content: asset.content } : {}),
+          ...(asset.source_asset_ids?.length ? { source_asset_ids: asset.source_asset_ids } : {}),
+        })),
+        node_params: skillNodeParams(),
+        ...(Object.keys(skillArguments).length ? { arguments: skillArguments } : {}),
+        compiler_model_id: effectiveCompilerModelId,
+      })
+      const preview = res.data.result
+      setCompiledPrompt(preview.prompt)
+      setCompiledNegativePrompt(preview.negative_prompt || '')
+      setCompiledReferences(Array.isArray(preview.references_used) ? preview.references_used : [])
+      setCompiledInputHash(res.data.cache_key)
+      setCompileWarnings(Array.isArray(preview.warnings) ? preview.warnings : [])
+      setSkillPackSource(effectiveSkill?.sourceUrl || '')
+      setCompilerModelId(effectiveCompilerModelId)
+      setSkillPreviewResult(preview)
+      setSkillPreviewCached(Boolean(res.data.cached))
+      setSkillCompileEnabled(true)
+      message.success(res.data.cached ? '已复用 Skill 编译缓存' : 'Skill 提示词编译完成')
+    } catch (error: any) {
+      const body = (error?.response?.data || {}) as Partial<CanvasSkillApiError>
+      setSkillPreviewError({
+        error_code: String(body.error_code || 'SKILL_COMPILE_FAILED'),
+        detail: String(body.detail || body.error || error?.message || 'Skill 编译失败'),
+      })
+    } finally {
+      setSkillPreviewLoading(false)
+    }
+  }
+
+  const buildPayload = () => {
+    const { incomingAssets, externalSystemPrompt } = collectIncomingContext()
     const cameraSuffix = buildCameraPromptSuffix(cameraParams)
-    return buildGenerateNodeRequestPayload({
+    const payload = buildGenerateNodeRequestPayload({
       id,
-      prompt: finalPromptText,
+      prompt,
       selectedKey,
       provider: resolveProvider(),
       selectedModel,
@@ -275,7 +543,21 @@ function GenerateNodeImpl(props: NodeProps) {
       incomingAssets,
       externalSystemPrompt,
       systemPromptOverride: data?._systemPromptOverride,
+      skillPackId,
+      skillName,
+      skillRevision,
+      skillCompileEnabled: hasEffectiveSkill ? true : undefined,
+      skillCompilerModelId: hasEffectiveSkill ? effectiveCompilerModelId : undefined,
+      skillArguments: hasEffectiveSkill ? skillArguments : undefined,
+      compiledInputHash: hasEffectiveSkill ? compiledInputHash : undefined,
     })
+    if (hasEffectiveSkill) {
+      payload.aspect_ratio = aspectRatio
+      payload.cameraParams = cameraParams
+      payload.customMovements = customMovements
+      if (compiledInputHash) payload.skill_preview_cached = skillPreviewCached
+    }
+    return payload
   }
 
   const hasImmediateGenerationResult = (packet: any) => (
@@ -296,8 +578,52 @@ function GenerateNodeImpl(props: NodeProps) {
       onCountMismatch: ({ expected, actual }) => message.warning(`裂变数量校验失败：期望 ${expected} 条，实际 ${actual} 条，已回退普通输出`),
     })
 
+    if (finalResult?.compiled_prompt !== undefined) {
+      const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
+      const warnings = Array.isArray(finalResult.warnings) ? finalResult.warnings.map(String) : []
+      const actualCompilerModelId = Number.isSafeInteger(Number(finalResult.compiler_model_id)) ? Number(finalResult.compiler_model_id) : null
+      setCompiledPrompt(String(finalResult.compiled_prompt || ''))
+      setCompiledNegativePrompt(String(finalResult.compiled_negative_prompt || ''))
+      setCompiledReferences(references)
+      setCompiledInputHash(String(finalResult.compiled_input_hash || ''))
+      setCompileWarnings(warnings)
+      setSkillPackSource(String(finalResult.skill_pack_source || ''))
+      setCompilerModelId(actualCompilerModelId)
+      setSkillPreviewError(null)
+      setSkillPreviewResult({
+        skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
+        skill_version: String(finalResult.skill_revision || skillRevision || ''),
+        mode: mode as CanvasSkillMediaMode,
+        prompt: String(finalResult.compiled_prompt || ''),
+        negative_prompt: String(finalResult.compiled_negative_prompt || ''),
+        parameters: {},
+        references_used: references.map(String),
+        warnings,
+      })
+    }
     setResult(finalResult)
-    updateNodeData(id, { result: finalResult })
+    updateNodeData(id, {
+      result: finalResult,
+      ...(finalResult?.compiled_prompt !== undefined ? {
+        compiledPrompt: finalResult.compiled_prompt,
+        compiledNegativePrompt: finalResult.compiled_negative_prompt || '',
+        compiledReferences: finalResult.compiled_references || [],
+        compiledInputHash: finalResult.compiled_input_hash || '',
+        compileWarnings: finalResult.warnings || [],
+        skillPackSource: finalResult.skill_pack_source || '',
+        compilerModelId: finalResult.compiler_model_id,
+        skill_pack_id: finalResult.skill_pack_id,
+        skill_pack_source: finalResult.skill_pack_source,
+        skill_name: finalResult.skill_name,
+        skill_revision: finalResult.skill_revision,
+        compiled_prompt: finalResult.compiled_prompt,
+        compiled_negative_prompt: finalResult.compiled_negative_prompt || '',
+        compiled_references: finalResult.compiled_references || [],
+        compiled_input_hash: finalResult.compiled_input_hash,
+        warnings: finalResult.warnings || [],
+        compiler_model_id: finalResult.compiler_model_id,
+      } : {}),
+    })
     setNodeStatus(id, 'success')
     setGenerating(false)
     setProgressMsg('')
@@ -351,6 +677,14 @@ function GenerateNodeImpl(props: NodeProps) {
       setNodeStatus(id, 'error')
       return message.warning('请完整选择 Key 和 模型')
     }
+    if (effectiveSkillIncompatible) {
+      setNodeStatus(id, 'error')
+      return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容，请更换或清除`)
+    }
+    if (missingEffectiveCompilerModel) {
+      setNodeStatus(id, 'error')
+      return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
+    }
     setGenerating(true)
     setProgressMsg('正在连接实时通道...')
     setNodeStatus(id, 'running')
@@ -400,7 +734,7 @@ function GenerateNodeImpl(props: NodeProps) {
       await apiClient.post('/assets/', buildGenerateNodeAssetPayload({
         resultContent: String(result.content),
         mode,
-        prompt,
+        prompt: String(result?.raw_prompt || data?._finalSourcePrompt || prompt),
         selectedModel,
         provider: resolveProvider(),
         selectedRolePrompt,
@@ -411,6 +745,18 @@ function GenerateNodeImpl(props: NodeProps) {
         projectId,
         cameraParams,
         sourceAssetIds: result?.source_asset_ids,
+        ...(result?.compiled_prompt !== undefined ? {
+          compiledPrompt: result.compiled_prompt,
+          compiledNegativePrompt: result.compiled_negative_prompt || '',
+          skillPackId: result.skill_pack_id,
+          skillPackSource: result.skill_pack_source,
+          skillName: result.skill_name,
+          skillRevision: result.skill_revision,
+          compiledReferences: result.compiled_references || [],
+          compiledInputHash: result.compiled_input_hash,
+          warnings: result.warnings || [],
+          compilerModelId: result.compiler_model_id,
+        } : {}),
       }))
       message.success('已携带溯源信息固化到资产库！')
       if (projectId) await fetchAssets(projectId)
@@ -454,6 +800,48 @@ function GenerateNodeImpl(props: NodeProps) {
     } catch {
       message.error('创建预设失败')
     }
+  }
+
+  const skillOptionKey = (skill: Pick<CanvasSkillSummary, 'packId' | 'name' | 'revision'>) => `${skill.packId}:${skill.name}:${skill.revision}`
+  const compatibleReadySkills = readySkills.filter(skill => (
+    skill.compatibility === 'prompt_ready'
+    && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode))
+  ))
+  const selectableSkills = selectedSkill && !compatibleReadySkills.some(skill => skillOptionKey(skill) === skillOptionKey(selectedSkill))
+    ? [...compatibleReadySkills, selectedSkill]
+    : compatibleReadySkills
+  const selectedSkillValue = selectedSkill ? skillOptionKey(selectedSkill) : ''
+  const selectPromptSkill = (value: string) => {
+    if (!value) {
+      setSkillPackId('')
+      setSkillName('')
+      setSkillRevision('')
+      setSkillArguments({})
+      setSkillCompileEnabled(Boolean(parsedSkillCommand))
+      return
+    }
+    const skill = knownSkills.find(item => skillOptionKey(item) === value)
+    if (!skill) return
+    setSkillPackId(skill.packId)
+    setSkillName(skill.name)
+    setSkillRevision(skill.revision)
+    setSkillCompileEnabled(true)
+    setSkillArguments(Object.fromEntries(skill.arguments.flatMap(argument => argument.default === undefined ? [] : [[argument.name, String(argument.default)]])))
+  }
+
+  const workspaceCompilerModel = compilerModels.find(model => Number(model.id) === Number(skillSettings?.skill_compiler_model_id))
+  const compilerModelOptions = [
+    {
+      value: 'workspace-default',
+      label: `使用工作区默认${skillSettings?.skill_compiler_model_id === null ? '（未配置）' : ` · ${workspaceCompilerModel?.display_name || workspaceCompilerModel?.model_name || `模型 #${skillSettings?.skill_compiler_model_id}`}`}`,
+    },
+    ...compilerModels.map(model => ({
+      value: Number(model.id),
+      label: `${model.display_name || model.model_name || `模型 #${model.id}`}${model.capabilities?.vision === true ? ' · Vision' : ''}`,
+    })),
+  ]
+  if (skillCompilerModelId !== null && !compilerModels.some(model => Number(model.id) === skillCompilerModelId)) {
+    compilerModelOptions.push({ value: skillCompilerModelId, label: `模型 #${skillCompilerModelId} · 不可用` })
   }
 
   const renderParams = () => {
@@ -697,6 +1085,113 @@ function GenerateNodeImpl(props: NodeProps) {
               </Space>
             ),
           }] : []),
+          ...(supportsPromptSkills ? [{
+            key: 'skill',
+            label: '提示词 Skill',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {parsedSkillCommand && (
+                  <div style={{ padding: 8, borderRadius: 8, background: '#fff7e6', border: '1px solid #ffd591' }}>
+                    <Tag color="orange" style={{ marginBottom: 4 }}>命令生效</Tag>
+                    <Text code style={{ fontSize: 11 }}>/{parsedSkillCommand.packId ? `${parsedSkillCommand.packId}:` : ''}{parsedSkillCommand.name}</Text>
+                    <div><Text type="secondary" style={{ fontSize: 11 }}>命令优先于下方下拉选择，不会根据触发词自动切换。</Text></div>
+                  </div>
+                )}
+                <Select
+                  size="small"
+                  value={selectedSkillValue}
+                  loading={skillsLoading}
+                  onChange={value => selectPromptSkill(String(value || ''))}
+                  style={{ width: '100%' }}
+                  options={[
+                    { value: '', label: '默认（不使用 Skill）' },
+                    ...selectableSkills.map(skill => ({
+                      value: skillOptionKey(skill),
+                      label: `${skill.packId}: ${skill.displayName || skill.name}${skill.compatibility === 'prompt_ready' && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode)) ? '' : ' · 不兼容'}`,
+                    })),
+                  ]}
+                />
+                {hasEffectiveSkill && (
+                  <div style={{ padding: 8, borderRadius: 8, border: `1px solid ${effectiveSkillIncompatible ? '#ffccc7' : '#d9f7be'}`, background: effectiveSkillIncompatible ? '#fff2f0' : '#f6ffed' }}>
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <Text strong style={{ fontSize: 12 }}>{effectiveSkillPackId ? `${effectiveSkillPackId}: ` : ''}{effectiveSkill?.displayName || effectiveSkillName}</Text>
+                      <Tag color={effectiveSkillIncompatible ? 'red' : 'green'} style={{ margin: 0 }}>{effectiveSkillIncompatible ? '不兼容' : 'prompt_ready'}</Tag>
+                      {(skillPreviewResult?.skill_version || (parsedSkillCommand ? effectiveSkill?.revision : skillRevision || effectiveSkill?.revision)) && (
+                        <Tag color="blue" style={{ margin: 0 }}>锁定 {skillPreviewResult?.skill_version || (parsedSkillCommand ? effectiveSkill?.revision : skillRevision || effectiveSkill?.revision)}</Tag>
+                      )}
+                    </div>
+                    {(effectiveSkill?.reason || effectiveSkill?.shortDescription || effectiveSkill?.description) && (
+                      <Text type={effectiveSkillIncompatible ? 'danger' : 'secondary'} style={{ display: 'block', marginTop: 4, fontSize: 11 }}>
+                        {effectiveSkill?.reason || effectiveSkill?.shortDescription || effectiveSkill?.description}
+                      </Text>
+                    )}
+                  </div>
+                )}
+                {effectiveSkill?.arguments.map(argument => (
+                  <div key={argument.name}>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11, marginBottom: 3 }}>
+                      {argument.name}{argument.required ? ' *' : ''}{argument.description ? ` · ${argument.description}` : ''}
+                    </Text>
+                    <Input
+                      size="small"
+                      value={skillArguments[argument.name] ?? argument.default ?? ''}
+                      placeholder={argument.default ?? argument.name}
+                      onChange={event => setSkillArguments(current => ({ ...current, [argument.name]: event.target.value }))}
+                    />
+                  </div>
+                ))}
+                <div>
+                  <Text type="secondary" style={{ display: 'block', fontSize: 11, marginBottom: 3 }}>Skill 编译模型</Text>
+                  <Select
+                    size="small"
+                    value={skillCompilerModelId ?? 'workspace-default'}
+                    options={compilerModelOptions}
+                    onChange={value => setSkillCompilerModelId(value === 'workspace-default' ? null : Number(value))}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                {hasEffectiveSkill && missingEffectiveCompilerModel && (
+                  <Text type="danger" style={{ fontSize: 11 }}>
+                    {!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载可用编译模型…' : '需要配置一个启用且 capabilities.chat === true 的编译模型后才能预览或运行。'}
+                  </Text>
+                )}
+                <Button
+                  block
+                  size="small"
+                  loading={skillPreviewLoading}
+                  disabled={!hasEffectiveSkill || effectiveSkillIncompatible || missingEffectiveCompilerModel}
+                  onClick={handleSkillPreview}
+                >
+                  预览编译提示词
+                </Button>
+                {skillPreviewError && (
+                  <div style={{ padding: 8, borderRadius: 8, background: '#fff2f0', border: '1px solid #ffccc7' }}>
+                    <Text type="danger" strong style={{ display: 'block', fontSize: 11 }}>{skillPreviewError.error_code}</Text>
+                    <Text type="danger" style={{ fontSize: 11 }}>{skillPreviewError.detail}</Text>
+                  </div>
+                )}
+                {(skillPreviewResult || compiledPrompt) && (
+                  <div style={{ display: 'grid', gap: 6 }}>
+                    <Space size={4} wrap>
+                      <Tag color="geekblue" style={{ margin: 0 }}>{result?.skill_pack_id || effectiveSkillPackId || '默认 Pack'}: {result?.skill_name || skillPreviewResult?.skill_name || effectiveSkillName}</Tag>
+                      <Tag color="blue" style={{ margin: 0 }}>revision {result?.skill_revision || skillPreviewResult?.skill_version || skillRevision || '未知'}</Tag>
+                      <Tag color={skillPreviewCached ? 'green' : 'default'} style={{ margin: 0 }}>{skillPreviewResult ? (skillPreviewCached ? '缓存命中' : '新编译') : '生成审计'}</Tag>
+                    </Space>
+                    <Collapse
+                      size="small"
+                      defaultActiveKey={['positive']}
+                      items={[
+                        { key: 'positive', label: '正向提示词', children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledPrompt}</div> },
+                        { key: 'negative', label: '负向提示词', children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledNegativePrompt || '（无）'}</div> },
+                        { key: 'references', label: `引用 (${compiledReferences.length})`, children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledReferences.length ? compiledReferences.map(String).join('\n') : '（无）'}</div> },
+                        { key: 'warnings', label: `警告 (${compileWarnings.length})`, children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11, color: compileWarnings.length ? '#d4380d' : undefined }}>{compileWarnings.length ? compileWarnings.join('\n') : '（无）'}</div> },
+                      ]}
+                    />
+                  </div>
+                )}
+              </Space>
+            ),
+          }] : []),
           ...(isImageVideoMode ? [{
             key: 'camera',
             label: '镜头控制',
@@ -756,12 +1251,12 @@ function GenerateNodeImpl(props: NodeProps) {
           <Button
             type="primary"
             danger={generating}
-            disabled={isMuted}
+            disabled={isMuted || (!generating && skillRunBlocked)}
             icon={generating ? <StopOutlined /> : <PlayCircleOutlined />}
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
           </Button>
         </div>
 

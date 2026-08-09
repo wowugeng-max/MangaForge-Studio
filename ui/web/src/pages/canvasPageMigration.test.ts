@@ -1,9 +1,17 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 
 function source(file: string) {
   return readFileSync(join(import.meta.dir, file), 'utf8')
+}
+
+function sourcesUnder(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) return sourcesUnder(path)
+    return /\.[cm]?[jt]sx?$/.test(entry.name) ? [readFileSync(path, 'utf8')] : []
+  })
 }
 
 describe('ComfyForge canvas feature migration', () => {
@@ -194,6 +202,31 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain('project_id: null')
     expect(generateNode).toContain('setRoleAssetId')
     expect(generateNode).toContain('setUseRoleAsset(true)')
+  })
+
+  test('canvas prompt Skill UI stays media-only and uses the typed Skill API without novel coupling', () => {
+    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const skillsApiPath = join(import.meta.dir, '../api/skills.ts')
+    const apiExists = existsSync(skillsApiPath)
+
+    expect(apiExists).toBe(true)
+    if (!apiExists) return
+
+    const skillsApi = readFileSync(skillsApiPath, 'utf8')
+    expect(generateNode).toContain("const SKILL_MEDIA_MODES = new Set(['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])")
+    expect(generateNode).toContain('const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)')
+    expect(generateNode).toContain('提示词 Skill')
+    expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
+
+    for (const helper of ['listSkills', 'installSkillPack', 'compileSkillPreview', 'readSkillSettings', 'writeSkillSettings']) {
+      expect(skillsApi).toContain(`export function ${helper}`)
+    }
+    for (const endpoint of ["'/skills'", "'/skills/packs'", "'/skills/compile-preview'", "'/skills/settings'"]) {
+      expect(skillsApi).toContain(endpoint)
+    }
+
+    const novelSources = sourcesUnder(join(import.meta.dir, 'novel-workspace'))
+    expect(novelSources.some(text => text.includes('api/skills'))).toBe(false)
   })
 
   test('generate node uses a node-following config toolbar with quick access layers', () => {
