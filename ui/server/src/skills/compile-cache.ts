@@ -28,7 +28,8 @@ function normalizedAsset(asset: CompileCacheInput['incomingAssets'] extends Arra
     type: asset.type,
     content: typeof asset.content === 'string' ? asset.content : undefined,
     url: typeof asset.url === 'string' ? asset.url : undefined,
-    source_asset_ids: Array.isArray(asset.source_asset_ids) ? [...asset.source_asset_ids].map(Number).sort((a, b) => a - b) : undefined,
+    // Preserve ordered asset provenance; changing lineage order must invalidate.
+    source_asset_ids: Array.isArray(asset.source_asset_ids) ? [...asset.source_asset_ids].map(Number) : undefined,
   }
 }
 
