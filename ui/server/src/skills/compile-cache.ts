@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { CanvasMediaMode, PromptCompileResult } from './types'
+import type { CanvasMediaMode, CanvasReferenceAsset, PromptCompileResult } from './types'
 
 export type CompileCacheInput = {
   packId?: string
@@ -7,7 +7,7 @@ export type CompileCacheInput = {
   skillName?: string
   rawPrompt: string
   mode: CanvasMediaMode
-  incomingAssets?: Array<{ type: 'image' | 'prompt'; url?: string; content?: string; source_asset_ids?: number[] }>
+  incomingAssets?: CanvasReferenceAsset[]
   nodeParams?: Record<string, unknown>
   arguments?: Record<string, string>
 }
@@ -23,14 +23,26 @@ function canonical(value: unknown): string {
   return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(',')}}`
 }
 
-function normalizedAsset(asset: CompileCacheInput['incomingAssets'] extends Array<infer T> ? T : never) {
-  return {
+function normalizedAsset(asset: CanvasReferenceAsset) {
+  const hasReferenceMetadata = asset.reference_index !== undefined
+    || asset.reference_id !== undefined
+    || asset.reference_role !== undefined
+  const normalized: Record<string, unknown> = {
     type: asset.type,
     content: typeof asset.content === 'string' ? asset.content : undefined,
     url: typeof asset.url === 'string' ? asset.url : undefined,
     // Preserve ordered asset provenance; changing lineage order must invalidate.
     source_asset_ids: Array.isArray(asset.source_asset_ids) ? [...asset.source_asset_ids].map(Number) : undefined,
   }
+  // Keep the legacy no-reference canonical string byte-for-byte compatible.
+  // Once any binding metadata is present, include all three fields so a change
+  // in index, id, or role invalidates the compile cache deterministically.
+  if (hasReferenceMetadata) {
+    normalized.reference_index = asset.reference_index
+    normalized.reference_id = asset.reference_id
+    normalized.reference_role = asset.reference_role
+  }
+  return normalized
 }
 
 export function canonicalCompileInput(input: CompileCacheInput): string {
