@@ -130,6 +130,50 @@ export function parseCanvasSkillCommand(input: string): ParsedCanvasSkillCommand
     : { name: match[1], argumentsText: match[3] ?? '' }
 }
 
+export function resolveGenerateNodeSkillArguments(input: {
+  command?: ParsedCanvasSkillCommand | null
+  skillArguments?: Record<string, string>
+  effectiveSkillArgumentSpecs?: Array<{ name: string }> | null
+}): Record<string, string> | undefined {
+  const entries = Object.entries(input.skillArguments || {})
+  if (!input.command) return entries.length ? Object.fromEntries(entries) : undefined
+  if (!Array.isArray(input.effectiveSkillArgumentSpecs)) return undefined
+
+  const declaredNames = new Set(input.effectiveSkillArgumentSpecs.map(spec => String(spec?.name || '').trim()).filter(Boolean))
+  const resolvedEntries = entries.filter(([name]) => declaredNames.has(name))
+  return resolvedEntries.length ? Object.fromEntries(resolvedEntries) : undefined
+}
+
+export function normalizeGenerateNodeCompilerModelId(value: unknown): number | null {
+  if (value === null || value === undefined) return null
+  if (typeof value !== 'number' && typeof value !== 'string') return null
+  if (typeof value === 'string' && !/^\d+$/.test(value.trim())) return null
+
+  const normalized = Number(typeof value === 'string' ? value.trim() : value)
+  return Number.isSafeInteger(normalized) && normalized >= 0 ? normalized : null
+}
+
+export function buildGenerateNodeSkillIdentity(input: {
+  command?: ParsedCanvasSkillCommand | null
+  selectedPackId?: string
+  selectedName?: string
+  selectedRevision?: string
+  resolvedCommandSkill?: { packId?: string; revision?: string } | null
+}) {
+  if (input.command) {
+    return {
+      packId: String(input.command.packId || input.resolvedCommandSkill?.packId || ''),
+      name: String(input.command.name || ''),
+      revision: String(input.resolvedCommandSkill?.revision || ''),
+    }
+  }
+  return {
+    packId: String(input.selectedPackId || ''),
+    name: String(input.selectedName || ''),
+    revision: String(input.selectedRevision || ''),
+  }
+}
+
 function normalizeGenerateNodeSourceAssetIds(value: unknown): number[] {
   if (!Array.isArray(value)) return []
   return value.map(item => Number(item)).filter(id => Number.isFinite(id) && id > 0)
@@ -355,6 +399,7 @@ export function buildGenerateNodeRequestPayload(input: {
   skillCompileEnabled?: boolean
   skillCompilerModelId?: number | string | null
   skillArguments?: Record<string, string>
+  effectiveSkillArgumentSpecs?: Array<{ name: string }> | null
   compiledInputHash?: string
 }) {
   const finalPromptText = `${input.prompt || ''}${input.cameraSuffix || ''}`
@@ -398,7 +443,12 @@ export function buildGenerateNodeRequestPayload(input: {
   if (!command && selectedSkillPackId) payload.skill_pack_id = selectedSkillPackId
   if (!command && input.skillRevision) payload.skill_revision = input.skillRevision
   if (input.skillCompilerModelId !== undefined && input.skillCompilerModelId !== null && input.skillCompilerModelId !== '') payload.skill_compiler_model_id = input.skillCompilerModelId
-  if (input.skillArguments && Object.keys(input.skillArguments).length > 0) payload.skill_arguments = input.skillArguments
+  const effectiveSkillArguments = resolveGenerateNodeSkillArguments({
+    command,
+    skillArguments: input.skillArguments,
+    effectiveSkillArgumentSpecs: input.effectiveSkillArgumentSpecs,
+  })
+  if (effectiveSkillArguments) payload.skill_arguments = effectiveSkillArguments
   if (input.compiledInputHash) payload.compiled_input_hash = input.compiledInputHash
   if (normalizedIncomingAssets.length) payload.params.incoming_assets = normalizedIncomingAssets
   if (input.mode === 'vision' && incomingImages.length) {

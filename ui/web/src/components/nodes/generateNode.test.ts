@@ -13,6 +13,7 @@ import {
   normalizeSelectOptions,
   pickQuickParams,
   normalizeGenerateNodeImageUrl,
+  parseCanvasSkillCommand,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
@@ -595,5 +596,91 @@ describe('request payload size precedence', () => {
       params: { temperature: 1.5 },
     } as any)
     expect(payload.params.temperature).toBe(0.7)
+  })
+})
+
+describe('GenerateNode Skill review regressions', () => {
+  test('filters dropdown arguments to the resolved command Skill manifest', async () => {
+    const module = await import('./GenerateNode')
+    const resolveGenerateNodeSkillArguments = (module as any).resolveGenerateNodeSkillArguments
+    expect(typeof resolveGenerateNodeSkillArguments).toBe('function')
+    if (typeof resolveGenerateNodeSkillArguments !== 'function') return
+
+    const command = parseCanvasSkillCommand('/other-skill hero')
+    expect(resolveGenerateNodeSkillArguments({
+      command,
+      skillArguments: { stale_only: 'old', style: 'anime' },
+      effectiveSkillArgumentSpecs: [{ name: 'style' }],
+    })).toEqual({ style: 'anime' })
+    expect(resolveGenerateNodeSkillArguments({
+      command,
+      skillArguments: { stale_only: 'old' },
+    })).toBeUndefined()
+    expect(resolveGenerateNodeSkillArguments({
+      command: null,
+      skillArguments: { stale_only: 'selected-skill-value' },
+    })).toEqual({ stale_only: 'selected-skill-value' })
+
+    const payload = buildGenerateNodeRequestPayload({
+      id: 'node-command-arguments',
+      prompt: '/other-skill hero',
+      selectedKey: 7,
+      provider: 'skill-provider',
+      selectedModel: 'image-model',
+      mode: 'text_to_image',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.7,
+      ratioSize: '1024*1024',
+      selectedRolePrompt: 'visual director',
+      skillName: 'stale-dropdown-skill',
+      skillPackId: 'stale-pack',
+      skillArguments: { stale_only: 'old', style: 'anime' },
+      effectiveSkillArgumentSpecs: [{ name: 'style' }],
+    } as any)
+    expect(payload.skill_arguments).toEqual({ style: 'anime' })
+  })
+
+  test('normalizes nullable compiler model IDs without converting null to zero', async () => {
+    const module = await import('./GenerateNode')
+    const normalizeGenerateNodeCompilerModelId = (module as any).normalizeGenerateNodeCompilerModelId
+    expect(typeof normalizeGenerateNodeCompilerModelId).toBe('function')
+    if (typeof normalizeGenerateNodeCompilerModelId !== 'function') return
+
+    expect(normalizeGenerateNodeCompilerModelId(null)).toBeNull()
+    expect(normalizeGenerateNodeCompilerModelId(undefined)).toBeNull()
+    expect(normalizeGenerateNodeCompilerModelId('')).toBeNull()
+    expect(normalizeGenerateNodeCompilerModelId(0)).toBe(0)
+    expect(normalizeGenerateNodeCompilerModelId('7')).toBe(7)
+    expect(normalizeGenerateNodeCompilerModelId('invalid')).toBeNull()
+    expect(normalizeGenerateNodeCompilerModelId(-1)).toBeNull()
+  })
+
+  test('builds command identity from the resolved Pack and revision without stale dropdown fallback', async () => {
+    const module = await import('./GenerateNode')
+    const buildGenerateNodeSkillIdentity = (module as any).buildGenerateNodeSkillIdentity
+    expect(typeof buildGenerateNodeSkillIdentity).toBe('function')
+    if (typeof buildGenerateNodeSkillIdentity !== 'function') return
+
+    expect(buildGenerateNodeSkillIdentity({
+      command: parseCanvasSkillCommand('/other-skill hero'),
+      selectedPackId: 'stale-pack',
+      selectedName: 'stale-skill',
+      selectedRevision: 'stale-revision',
+      resolvedCommandSkill: { packId: 'pack-b', name: 'other-skill', revision: 'rev-b' },
+    })).toEqual({ packId: 'pack-b', name: 'other-skill', revision: 'rev-b' })
+    expect(buildGenerateNodeSkillIdentity({
+      command: parseCanvasSkillCommand('/pack-a:other-skill hero'),
+      selectedPackId: 'stale-pack',
+      selectedName: 'stale-skill',
+      selectedRevision: 'stale-revision',
+      resolvedCommandSkill: { packId: 'pack-a', name: 'other-skill', revision: 'rev-a' },
+    })).toEqual({ packId: 'pack-a', name: 'other-skill', revision: 'rev-a' })
+    expect(buildGenerateNodeSkillIdentity({
+      command: parseCanvasSkillCommand('/other-skill hero'),
+      selectedPackId: 'stale-pack',
+      selectedName: 'stale-skill',
+      selectedRevision: 'stale-revision',
+    })).toEqual({ packId: '', name: 'other-skill', revision: '' })
   })
 })

@@ -37,12 +37,15 @@ import {
   buildGenerateNodeAssetPayload,
   buildGenerateNodeRequestPayload,
   buildGenerateNodeResultWithFission,
+  buildGenerateNodeSkillIdentity,
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
+  normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeImageUrl,
   parseCanvasSkillCommand,
   normalizeSelectOptions,
   pickQuickParams,
+  resolveGenerateNodeSkillArguments,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
@@ -67,6 +70,9 @@ export {
   normalizeGenerateNodeGenerationPacket,
   buildGenerateNodeResultWithFission,
   buildGenerateNodeRequestPayload,
+  buildGenerateNodeSkillIdentity,
+  normalizeGenerateNodeCompilerModelId,
+  resolveGenerateNodeSkillArguments,
 } from './generate-node-model'
 export type {
   GenerateNodeIncomingAsset,
@@ -134,7 +140,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillCompileEnabled, setSkillCompileEnabled] = useState(Boolean(data?.skillCompileEnabled ?? data?.skill_compile_enabled ?? data?.skillName ?? data?.skill_name))
   const [skillCompilerModelId, setSkillCompilerModelId] = useState<number | null>(() => {
     const value = data?.skillCompilerModelId ?? data?.skill_compiler_model_id
-    return Number.isSafeInteger(Number(value)) ? Number(value) : null
+    return normalizeGenerateNodeCompilerModelId(value)
   })
   const [skillArguments, setSkillArguments] = useState<Record<string, string>>(data?.skillArguments ?? data?.skill_arguments ?? {})
   const [skillSettings, setSkillSettings] = useState<CanvasSkillSettings | null>(null)
@@ -149,7 +155,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillPackSource, setSkillPackSource] = useState(String(data?.skillPackSource ?? initialCompileAudit?.skill_pack_source ?? ''))
   const [compilerModelId, setCompilerModelId] = useState<number | null>(() => {
     const value = data?.compilerModelId ?? initialCompileAudit?.compiler_model_id
-    return Number.isSafeInteger(Number(value)) ? Number(value) : null
+    return normalizeGenerateNodeCompilerModelId(value)
   })
   const [skillPreviewResult, setSkillPreviewResult] = useState<CanvasSkillCompileResult | null>(data?.skillPreviewResult || null)
   const [skillPreviewCached, setSkillPreviewCached] = useState(Boolean(data?.skillPreviewCached))
@@ -198,10 +204,21 @@ function GenerateNodeImpl(props: NodeProps) {
     return matches.length === 1 ? matches[0] : undefined
   }, [knownSkills, parsedSkillCommand])
   const effectiveSkill = parsedSkillCommand ? commandSkill : selectedSkill
-  const effectiveSkillName = parsedSkillCommand?.name || skillName
-  const effectiveSkillPackId = parsedSkillCommand
-    ? parsedSkillCommand.packId || commandSkill?.packId || ''
-    : selectedSkill?.packId || skillPackId
+  const effectiveSkillIdentity = buildGenerateNodeSkillIdentity({
+    command: parsedSkillCommand,
+    selectedPackId: selectedSkill?.packId || skillPackId,
+    selectedName: selectedSkill?.name || skillName,
+    selectedRevision: selectedSkill?.revision || skillRevision,
+    resolvedCommandSkill: commandSkill,
+  })
+  const effectiveSkillName = effectiveSkillIdentity.name
+  const effectiveSkillPackId = effectiveSkillIdentity.packId
+  const effectiveSkillRevision = effectiveSkillIdentity.revision
+  const effectiveSkillArguments = resolveGenerateNodeSkillArguments({
+    command: parsedSkillCommand,
+    skillArguments,
+    effectiveSkillArgumentSpecs: effectiveSkill?.arguments,
+  })
   const hasEffectiveSkill = supportsPromptSkills && Boolean(effectiveSkillName)
   const effectiveCompilerModelId = skillCompilerModelId ?? (skillSettingsLoaded ? skillSettings?.skill_compiler_model_id ?? null : compilerModelId)
   const effectiveCompilerModel = compilerModels.find(model => Number(model.id) === Number(effectiveCompilerModelId))
@@ -428,8 +445,8 @@ function GenerateNodeImpl(props: NodeProps) {
   const compileInputFingerprint = JSON.stringify({
     prompt,
     mode,
-    skill: { packId: parsedSkillCommand?.packId || (!parsedSkillCommand ? effectiveSkillPackId : ''), name: effectiveSkillName || '', revision: parsedSkillCommand ? '' : skillRevision },
-    skillArguments,
+    skill: effectiveSkillIdentity,
+    skillArguments: effectiveSkillArguments,
     compilerModelId: effectiveCompilerModelId,
     incomingAssets: collectIncomingContext().incomingAssets,
     nodeParams: skillNodeParams(),
@@ -498,7 +515,7 @@ function GenerateNodeImpl(props: NodeProps) {
           ...(asset.source_asset_ids?.length ? { source_asset_ids: asset.source_asset_ids } : {}),
         })),
         node_params: skillNodeParams(),
-        ...(Object.keys(skillArguments).length ? { arguments: skillArguments } : {}),
+        ...(effectiveSkillArguments ? { arguments: effectiveSkillArguments } : {}),
         compiler_model_id: effectiveCompilerModelId,
       })
       const preview = res.data.result
@@ -543,12 +560,13 @@ function GenerateNodeImpl(props: NodeProps) {
       incomingAssets,
       externalSystemPrompt,
       systemPromptOverride: data?._systemPromptOverride,
-      skillPackId,
-      skillName,
-      skillRevision,
+      skillPackId: effectiveSkillPackId,
+      skillName: effectiveSkillName,
+      skillRevision: effectiveSkillRevision,
       skillCompileEnabled: hasEffectiveSkill ? true : undefined,
       skillCompilerModelId: hasEffectiveSkill ? effectiveCompilerModelId : undefined,
-      skillArguments: hasEffectiveSkill ? skillArguments : undefined,
+      skillArguments: hasEffectiveSkill ? effectiveSkillArguments : undefined,
+      effectiveSkillArgumentSpecs: hasEffectiveSkill ? effectiveSkill?.arguments : undefined,
       compiledInputHash: hasEffectiveSkill ? compiledInputHash : undefined,
     })
     if (hasEffectiveSkill) {
@@ -581,7 +599,7 @@ function GenerateNodeImpl(props: NodeProps) {
     if (finalResult?.compiled_prompt !== undefined) {
       const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
       const warnings = Array.isArray(finalResult.warnings) ? finalResult.warnings.map(String) : []
-      const actualCompilerModelId = Number.isSafeInteger(Number(finalResult.compiler_model_id)) ? Number(finalResult.compiler_model_id) : null
+      const actualCompilerModelId = normalizeGenerateNodeCompilerModelId(finalResult.compiler_model_id)
       setCompiledPrompt(String(finalResult.compiled_prompt || ''))
       setCompiledNegativePrompt(String(finalResult.compiled_negative_prompt || ''))
       setCompiledReferences(references)
@@ -592,7 +610,7 @@ function GenerateNodeImpl(props: NodeProps) {
       setSkillPreviewError(null)
       setSkillPreviewResult({
         skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
-        skill_version: String(finalResult.skill_revision || skillRevision || ''),
+        skill_version: String(finalResult.skill_revision || effectiveSkillRevision || ''),
         mode: mode as CanvasSkillMediaMode,
         prompt: String(finalResult.compiled_prompt || ''),
         negative_prompt: String(finalResult.compiled_negative_prompt || ''),
@@ -1116,8 +1134,8 @@ function GenerateNodeImpl(props: NodeProps) {
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       <Text strong style={{ fontSize: 12 }}>{effectiveSkillPackId ? `${effectiveSkillPackId}: ` : ''}{effectiveSkill?.displayName || effectiveSkillName}</Text>
                       <Tag color={effectiveSkillIncompatible ? 'red' : 'green'} style={{ margin: 0 }}>{effectiveSkillIncompatible ? '不兼容' : 'prompt_ready'}</Tag>
-                      {(skillPreviewResult?.skill_version || (parsedSkillCommand ? effectiveSkill?.revision : skillRevision || effectiveSkill?.revision)) && (
-                        <Tag color="blue" style={{ margin: 0 }}>锁定 {skillPreviewResult?.skill_version || (parsedSkillCommand ? effectiveSkill?.revision : skillRevision || effectiveSkill?.revision)}</Tag>
+                      {(skillPreviewResult?.skill_version || effectiveSkillRevision) && (
+                        <Tag color="blue" style={{ margin: 0 }}>锁定 {skillPreviewResult?.skill_version || effectiveSkillRevision}</Tag>
                       )}
                     </div>
                     {(effectiveSkill?.reason || effectiveSkill?.shortDescription || effectiveSkill?.description) && (
@@ -1174,7 +1192,7 @@ function GenerateNodeImpl(props: NodeProps) {
                   <div style={{ display: 'grid', gap: 6 }}>
                     <Space size={4} wrap>
                       <Tag color="geekblue" style={{ margin: 0 }}>{result?.skill_pack_id || effectiveSkillPackId || '默认 Pack'}: {result?.skill_name || skillPreviewResult?.skill_name || effectiveSkillName}</Tag>
-                      <Tag color="blue" style={{ margin: 0 }}>revision {result?.skill_revision || skillPreviewResult?.skill_version || skillRevision || '未知'}</Tag>
+                      <Tag color="blue" style={{ margin: 0 }}>revision {result?.skill_revision || skillPreviewResult?.skill_version || effectiveSkillRevision || '未知'}</Tag>
                       <Tag color={skillPreviewCached ? 'green' : 'default'} style={{ margin: 0 }}>{skillPreviewResult ? (skillPreviewCached ? '缓存命中' : '新编译') : '生成审计'}</Tag>
                     </Space>
                     <Collapse
