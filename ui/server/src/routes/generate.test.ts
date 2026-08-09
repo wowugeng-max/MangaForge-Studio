@@ -254,6 +254,94 @@ describe('canvas generate route', () => {
     ])
   })
 
+  test('preserves duplicate image bindings with the same URL in canonical message order', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const request = buildCanvasGenerateLLMRequest({
+      model: 'video-model',
+      type: 'image_to_video',
+      prompt: 'animate repeated source',
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/same.png', reference_id: 'first', reference_role: 'first_frame' },
+          { type: 'image', url: '/same.png', reference_id: 'character', reference_role: 'character' },
+        ],
+      },
+    }) as any
+
+    expect(request.reference_images).toEqual([
+      { url: '/same.png', reference_index: 1, reference_id: 'first', reference_role: 'first_frame' },
+      { url: '/same.png', reference_index: 2, reference_id: 'character', reference_role: 'character' },
+    ])
+    expect(request.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'animate repeated source' },
+      { type: 'image_url', image_url: { url: '/same.png' } },
+      { type: 'image_url', image_url: { url: '/same.png' } },
+    ])
+  })
+
+  test('rebuilds existing user image parts from the authoritative canonical bindings', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const request = buildCanvasGenerateLLMRequest({
+      model: 'video-model',
+      type: 'image_to_video',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'existing prompt' },
+          { type: 'image_url', image_url: { url: '/b.png' } },
+          { type: 'input_file', file_id: 'notes-file' },
+          { type: 'image_url', image_url: { url: '/a.png' } },
+          { type: 'image_url', image_url: { url: '/b.png' } },
+        ],
+      }],
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/a.png', reference_id: 'a-1', reference_role: 'first_frame' },
+          { type: 'image', url: '/b.png', reference_id: 'b', reference_role: 'last_frame' },
+          { type: 'image', url: '/a.png', reference_id: 'a-2', reference_role: 'character' },
+        ],
+      },
+    }) as any
+
+    expect(request.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'existing prompt' },
+      { type: 'input_file', file_id: 'notes-file' },
+      { type: 'image_url', image_url: { url: '/a.png' } },
+      { type: 'image_url', image_url: { url: '/b.png' } },
+      { type: 'image_url', image_url: { url: '/a.png' } },
+    ])
+  })
+
+  test('keeps legacy message images without a collection and preserves unrelated images for prompt-only assets', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+    const legacyMessages = [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'legacy prompt' },
+        { type: 'image_url', image_url: { url: '/legacy.png' } },
+      ],
+    }]
+
+    const legacyRequest = buildCanvasGenerateLLMRequest({ model: 'vision-model', type: 'vision', messages: legacyMessages }) as any
+    const promptOnlyRequest = buildCanvasGenerateLLMRequest({
+      model: 'vision-model',
+      type: 'vision',
+      messages: legacyMessages,
+      params: {
+        incoming_assets: [{ type: 'prompt', content: 'keep the original framing', reference_role: 'prompt_context' }],
+      },
+    }) as any
+
+    expect(legacyRequest.messages).toEqual(legacyMessages)
+    expect(legacyRequest.reference_images).toBeUndefined()
+    expect(promptOnlyRequest.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'legacy prompt\n\n[连线素材]:\nkeep the original framing' },
+      { type: 'image_url', image_url: { url: '/legacy.png' } },
+    ])
+  })
+
   test('uses reference bindings and reference images as ordered fallbacks when incoming assets are absent', async () => {
     const { buildCanvasGenerateLLMRequest } = await import('./generate')
 

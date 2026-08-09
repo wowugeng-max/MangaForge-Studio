@@ -3,7 +3,7 @@ import { readModels, type ModelRecord } from '../model-store'
 import { readKeys, type APIKeyRecord } from '../key-store'
 import { readProviders, type ProviderRecord } from '../provider-store'
 import { executeWithRuntimeModel, type RuntimeExecutionOptions } from '../llm/provider-runtime'
-import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageContent, type LLMMessage, type LLMMessageContentPart, type LLMRequest, type LLMResponse } from '../llm/types'
+import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMMessage, type LLMMessageContentPart, type LLMRequest, type LLMResponse } from '../llm/types'
 import { registerTask, taskMessageManager, unregisterTask, type CancelToken } from '../ws-manager'
 import { executeLocalComfyWorkflow, interruptLocalComfy, type ExecuteLocalComfyWorkflowOptions, type LocalComfyResult } from '../comfy-local'
 import { parseSkillCommand } from '../skills/skill-command'
@@ -121,7 +121,9 @@ function normalizeStructuredMessageContent(content: unknown): string | LLMMessag
       if (imageUrl) return { type: 'image_url', image_url: { url: imageUrl } }
       return record
     })
-    .filter((part): part is LLMMessageContentPart => Boolean(part && hasLLMMessageContent([part])))
+    .filter((part): part is LLMMessageContentPart => Boolean(
+      part && (hasLLMMessageContent([part]) || (typeof part === 'object' && Object.keys(part).length > 0)),
+    ))
 }
 
 function normalizeMessages(payload: any): LLMMessage[] {
@@ -433,10 +435,17 @@ function canonicalIncomingAssetsForPayload(payload: any): IncomingCanvasAsset[] 
   return collection ? normalizeIncomingAssets(collection.value, collection.referenceImagesOnly) : []
 }
 
-function messageContentImageUrls(content: LLMMessage['content']) {
-  return Array.isArray(content)
-    ? content.map(part => imageUrlFromLLMContentPart(part)).filter(Boolean)
-    : []
+function isImageMessagePart(part: unknown): boolean {
+  if (!part || typeof part !== 'object') return false
+  const type = String((part as Record<string, any>).type || '').toLowerCase()
+  return type === 'image_url' || type === 'input_image'
+}
+
+function isTextMessagePart(part: unknown): boolean {
+  if (typeof part === 'string') return true
+  if (!part || typeof part !== 'object') return false
+  const type = String((part as Record<string, any>).type || '').toLowerCase()
+  return type === 'text' || type === 'input_text' || type === 'output_text' || Boolean(textFromLLMContentPart(part))
 }
 
 function appendIncomingAssetsToMessages(messages: LLMMessage[], assets: IncomingCanvasAsset[]): LLMMessage[] {
@@ -456,23 +465,33 @@ function appendIncomingAssetsToMessages(messages: LLMMessage[], assets: Incoming
   }
 
   const userMessage = nextMessages[userIndex]
-  const baseText = stringifyLLMMessageContent(userMessage.content).trim()
-  const existingImages = new Set(messageContentImageUrls(userMessage.content))
+  const baseText = stringifyLLMMessageTextContent(userMessage.content).trim()
   const incomingText = textAssets.length ? `[连线素材]:\n${textAssets.join('\n')}` : ''
   const text = [baseText, incomingText].filter(Boolean).join('\n\n') || '描述这些参考素材'
-  const imageParts: Array<{ type: 'image_url'; image_url: { url: string } }> = []
-  for (const asset of imageAssets) {
-    const url = String(asset.url || '').trim()
-    if (!url || existingImages.has(url)) continue
-    existingImages.add(url)
-    imageParts.push({ type: 'image_url', image_url: { url } })
-  }
+  const imageParts = imageAssets.map(asset => ({
+    type: 'image_url' as const,
+    image_url: { url: String(asset.url) },
+  }))
 
   if (Array.isArray(userMessage.content)) {
-    const existingTextIndex = userMessage.content.findIndex(part => typeof part === 'object' && (part as any).type !== 'image_url' && (part as any).type !== 'input_image')
-    if (existingTextIndex >= 0) userMessage.content[existingTextIndex] = { ...userMessage.content[existingTextIndex], type: 'text', text }
-    else userMessage.content.unshift({ type: 'text', text })
-    userMessage.content.push(...imageParts)
+    const retainedParts = imageAssets.length
+      ? userMessage.content.filter(part => !isImageMessagePart(part))
+      : [...userMessage.content]
+    const rebuiltParts: LLMMessageContentPart[] = []
+    let textInserted = false
+    for (const part of retainedParts) {
+      if (isTextMessagePart(part)) {
+        if (!textInserted) {
+          rebuiltParts.push({ ...(part && typeof part === 'object' ? part : {}), type: 'text', text })
+          textInserted = true
+        }
+        continue
+      }
+      rebuiltParts.push(part)
+    }
+    if (!textInserted) rebuiltParts.unshift({ type: 'text', text })
+    rebuiltParts.push(...imageParts)
+    userMessage.content = rebuiltParts
   } else if (imageParts.length) {
     userMessage.content = [{ type: 'text', text }, ...imageParts]
   } else {
