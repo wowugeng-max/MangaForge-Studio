@@ -33,7 +33,12 @@ const INTERNAL_NAMES = /\b(?:activeWorkspace|compilerModelId|skillCompilerModelI
 
 function scrub(value: string, workspace: string): string {
   let result = String(value ?? '')
-  if (workspace) result = result.split(workspace).join('[WORKSPACE]')
+  if (workspace) {
+    // Redact both filesystem and URL-encoded forms so a workspace path cannot
+    // be smuggled through query strings or prompt text.
+    const variants = new Set([workspace, encodeURIComponent(workspace), encodeURI(workspace)])
+    for (const variant of variants) if (variant) result = result.split(variant).join('[WORKSPACE]')
+  }
   result = result.replace(/(?:sk|rk)-[A-Za-z0-9_-]{12,}/g, '[REDACTED_KEY]')
   result = result.replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
   result = result.replace(/([?&](?:api[_-]?key|token|secret|password)=)[^&#\s]+/gi, '$1[REDACTED]')
