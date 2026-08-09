@@ -24,6 +24,8 @@ const LIVE_BUDA_UPSERT_ORDER = [
 const BUDA_CURRENT_STAGE_LIMIT = 256 * 1_024
 const BUDA_CURRENT_STAGE_INVOCATION_LIMIT = 16_384
 const BUDA_CURRENT_STAGE_FIELD_LIMIT = 4_096
+const BUDA_DRIVE_READBACK_ATTEMPTS = 3
+const BUDA_DRIVE_READBACK_DELAY_MS = 250
 
 function sha256(value: string) {
   return createHash('sha256').update(value, 'utf8').digest('hex')
@@ -175,6 +177,25 @@ function isKnownAmbiguousMutation(error: unknown) {
   return code === 'ECONNRESET' || code === 'EPIPE'
 }
 
+async function waitForDriveReadback(deadline: McpGenerationDeadline, delayMs: number) {
+  deadline.throwIfAborted()
+  if (delayMs <= 0) return
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(done, delayMs)
+    const abort = () => {
+      clearTimeout(timer)
+      deadline.signal.removeEventListener('abort', abort)
+      reject(deadline.signal.reason)
+    }
+    function done() {
+      deadline.signal.removeEventListener('abort', abort)
+      resolve()
+    }
+    deadline.signal.addEventListener('abort', abort, { once: true })
+  })
+  deadline.throwIfAborted()
+}
+
 export async function syncBudaDriveSnapshot(input: {
   client: McpClientPort
   tools: Pick<BudaToolMap, 'listDriveFiles' | 'upsertDriveFile' | 'readDriveText'>
@@ -185,6 +206,7 @@ export async function syncBudaDriveSnapshot(input: {
   runRead?: <T>(operation: () => Promise<T>) => Promise<T>
   runMutation?: <T>(operation: () => Promise<T>) => Promise<T>
   stabilize?: () => Promise<void>
+  readBackDelayMs?: number
 }) {
   const { client, tools, agentId, snapshot, deadline } = input
   try {
@@ -266,12 +288,23 @@ export async function syncBudaDriveSnapshot(input: {
           throw writeError
         }
       }
-      const verified = driveFileState(await runRead(() => client.callTool(
-        tools.readDriveText,
-        buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
-        callOptions('read_safe'),
-      )))
-      if (!verified.known || !verified.exists || sha256(verified.content) !== snapshot.hashes[path] || verified.content !== content) {
+      let verified: ReturnType<typeof driveFileState> | undefined
+      for (let readAttempt = 0; readAttempt < BUDA_DRIVE_READBACK_ATTEMPTS; readAttempt += 1) {
+        verified = driveFileState(await runRead(() => client.callTool(
+          tools.readDriveText,
+          buildBudaToolArguments('readDriveText', tools.readDriveText, { agentId, filePath: path, maxBytes: 5_000_000 }),
+          callOptions('read_safe'),
+        )))
+        const matches = verified.known
+          && verified.exists
+          && sha256(verified.content) === snapshot.hashes[path]
+          && verified.content === content
+        if (matches) break
+        if (readAttempt + 1 < BUDA_DRIVE_READBACK_ATTEMPTS) {
+          await waitForDriveReadback(deadline, Math.max(0, Number(input.readBackDelayMs ?? BUDA_DRIVE_READBACK_DELAY_MS)))
+        }
+      }
+      if (!verified?.known || !verified.exists || sha256(verified.content) !== snapshot.hashes[path] || verified.content !== content) {
         throw new McpError('MCP_DRIVE_SYNC_FAILED', `Buda Drive 文件校验失败：${path}`, { path })
       }
     }

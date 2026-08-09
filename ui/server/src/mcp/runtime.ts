@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { McpClientManager } from './client-manager'
 import { McpError } from './errors'
+import { McpGenerationDeadline } from './deadline'
 import { readMcpKeys, updateMcpKey } from './key-store'
 import { readMcpServers } from './server-store'
 import { createMcpAdapter } from './adapters/registry'
@@ -222,7 +223,33 @@ export function createMcpRuntime(
   ) => {
     const remoteOptions = operationOptions(options)
     const resolved = await getAdapterForKey(keyId, undefined, remoteOptions, pinnedCredential)
-    return resolved.adapter.listAgents(remoteOptions)
+    const deadline = new McpGenerationDeadline(
+      resolved.server.startup_timeout_ms,
+      remoteOptions.signal,
+    )
+    try {
+      return await resolved.stability.runRead(
+        resolved.adapter.stabilityPolicy,
+        {
+          deadline,
+          phase: 'transport',
+          pollInitialMs: resolved.server.poll_initial_ms,
+          pollMaxMs: resolved.server.poll_max_ms,
+          toolTimeoutMs: resolved.server.tool_timeout_ms,
+        },
+        () => resolved.adapter.listAgents(resolved.adapter.stabilityPolicy
+          ? {
+              ...remoteOptions,
+              signal: deadline.signal,
+              get timeoutMs() {
+                return deadline.timeoutMs(resolved.server.tool_timeout_ms)
+              },
+            }
+          : remoteOptions),
+      )
+    } finally {
+      deadline.close()
+    }
   }
 
   return {

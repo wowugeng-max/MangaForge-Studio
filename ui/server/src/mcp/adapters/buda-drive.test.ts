@@ -456,6 +456,41 @@ describe('Buda Drive authority snapshot', () => {
     expectDriveOperations(calls)
   })
 
+  test('rechecks a mismatched read-back without replaying the Drive write', async () => {
+    const snapshot = snapshotFixture()
+    const remote = new Map<string, string>()
+    const readCounts = new Map<string, number>()
+    let writes = 0
+    const client = {
+      async callTool(name: string, args: any) {
+        if (name === 'list') return result({ files: [] })
+        if (name === 'write') {
+          writes += 1
+          remote.set(args.path, args.content)
+          return result({ ok: true })
+        }
+        if (name === 'read') {
+          const count = (readCounts.get(args.filePath) || 0) + 1
+          readCounts.set(args.filePath, count)
+          return result({ content: count === 1 ? 'stale during propagation' : remote.get(args.filePath) || '' })
+        }
+        throw new Error(`unexpected tool ${name}`)
+      },
+    }
+
+    const synced = await syncBudaDriveSnapshot({
+      ...deadlineOptions(),
+      client: client as any,
+      tools: { listDriveFiles: 'list', readDriveText: 'read', upsertDriveFile: 'write' } as any,
+      agentId: 'agent-1',
+      snapshot,
+    })
+
+    expect(synced.uploaded_paths).toHaveLength(5)
+    expect(writes).toBe(5)
+    expect(readCounts.get('/mangaforge/writing-bible.md')).toBe(2)
+  })
+
   test('propagates an exact not-ready probe failure from Drive sync unchanged', async () => {
     const snapshot = snapshotFixture()
     const notReady = new McpError('MCP_SERVER_NOT_READY', 'MCP 服务尚未稳定就绪', { phase: 'drive_sync' })

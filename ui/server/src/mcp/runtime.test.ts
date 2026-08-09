@@ -781,6 +781,71 @@ describe('MCP runtime', () => {
     expect((await readMcpKeys(workspace))[0]).toMatchObject({ success_count: 1, failure_count: 0, last_checked: expect.any(String) })
   })
 
+  test('stabilizes read-only Agent discovery after a transient server-not-initialized tool response', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-agent-readiness-'))
+    workspaces.push(workspace)
+    const server = {
+      ...BUDA_MCP_SERVER_TEMPLATE,
+      id: 'agent-readiness-server',
+      adapter_id: 'agent-readiness-provider',
+      startup_timeout_ms: 200,
+      tool_timeout_ms: 200,
+      poll_initial_ms: 1,
+      poll_max_ms: 2,
+    }
+    await writeMcpServers(workspace, [server])
+    const key = await createMcpKey(workspace, {
+      mcp_server_id: server.id,
+      key: 'sk_agent_readiness',
+      description: '账号',
+    })
+    const exactReadinessEvidence = {
+      kind: 'jsonrpc_http_rejection',
+      http_status: 400,
+      jsonrpc_code: -32000,
+      response_id: null,
+      reason: 'server_not_initialized',
+    }
+    let listAttempts = 0
+    const adapter = {
+      id: server.adapter_id,
+      stabilityPolicy: {
+        operationReadinessMode: 'reactive' as const,
+        requiredConsecutiveSuccesses: 1,
+        warmupWindowMs: 1,
+        classify(error: unknown, operation: 'read_safe' | 'mutation') {
+          if (operation === 'read_safe' && error instanceof McpError
+            && error.details?.failure_evidence
+            && JSON.stringify(error.details.failure_evidence) === JSON.stringify(exactReadinessEvidence)) {
+            return 'not_ready_pre_dispatch' as const
+          }
+          return operation === 'mutation' ? 'ambiguous_write_failure' as const : 'terminal_failure' as const
+        },
+        async probe() {},
+      },
+      async listAgents() {
+        listAttempts += 1
+        if (listAttempts === 1) {
+          throw new McpError('MCP_TOOL_ERROR', 'transient readiness', {
+            failure_evidence: exactReadinessEvidence,
+          })
+        }
+        return [{ id: 'agent-ready', name: 'Ready Agent' }]
+      },
+    }
+    const runtime = createMcpRuntime(() => workspace, {
+      manager: {
+        get: async () => ({ listTools: async () => [], callTool: async () => ({ content: [] }) }),
+        invalidate: async () => {}, invalidateIfCurrent: async () => {},
+        invalidateServer: async () => {}, closeAll: async () => {},
+      } as any,
+      adapterFactory: () => adapter as any,
+    })
+
+    await expect(runtime.listAgents(key.id)).resolves.toEqual([{ id: 'agent-ready', name: 'Ready Agent' }])
+    expect(listAttempts).toBe(2)
+  })
+
   test('rejects inactive or mismatched credentials before connecting', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-mcp-runtime-'))
     workspaces.push(workspace)
