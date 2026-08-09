@@ -255,6 +255,51 @@ describe('prompt compiler', () => {
     expect(executions).toBe(1 + variants.length)
   })
 
+  test('rebuilds cached provenance after a caller mutates the first returned audit metadata', async () => {
+    const root = await compilerRoot()
+    const cache = createCompileCache()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache,
+      readModels: async () => [{ id: 11, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any],
+      executeWithRuntimeModel: async () => { executions += 1; return { content: compilerResult('image_to_video') } },
+    })
+    const references: CanvasReferenceAsset[] = [
+      { type: 'image', url: '/first.png', reference_id: 'first', reference_role: 'first_frame', source_asset_ids: [41, 42] },
+      { type: 'image', url: '/last.png', reference_id: 'last', reference_role: 'last_frame', source_asset_ids: [51, 52] },
+    ]
+    const input = {
+      skillName: 'h3-prompt-writing', rawPrompt: 'immutable cache audit', mode: 'image_to_video' as const,
+      incomingAssets: references, nodeParams: {}, activeWorkspace: root, compilerModelId: 11,
+    }
+
+    const first = await compiler(input)
+    const exposedBindings = first.result.reference_bindings!
+    exposedBindings[0]!.reference_id = 'caller-mutated'
+    exposedBindings[0]!.reference_role = 'style'
+    exposedBindings[0]!.source_asset_ids![0] = 999
+    exposedBindings.push({
+      reference_index: 99,
+      reference_id: 'caller-added',
+      reference_role: 'general',
+      type: 'image',
+      url: '/caller-added.png',
+      source_asset_ids: [999],
+    })
+
+    const cached = await compiler(input)
+
+    expect(cached.cached).toBe(true)
+    expect(cached.result.reference_bindings).toEqual([
+      { type: 'image', url: '/first.png', reference_index: 1, reference_id: 'first', reference_role: 'first_frame', source_asset_ids: [41, 42] },
+      { type: 'image', url: '/last.png', reference_index: 2, reference_id: 'last', reference_role: 'last_frame', source_asset_ids: [51, 52] },
+    ])
+    expect(cached.result.reference_bindings).not.toBe(exposedBindings)
+    expect(cached.result.reference_bindings?.[0]?.source_asset_ids).not.toBe(exposedBindings[0]?.source_asset_ids)
+    expect(executions).toBe(1)
+  })
+
   test('compiles the public H3 fixture deterministically across MangaForge modes and H3 sub-mode aliases', async () => {
     const root = join(import.meta.dir, 'fixtures', 'h3-prompt-writing')
     const skillPath = join(root, 'SKILL.md')

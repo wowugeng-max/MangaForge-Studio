@@ -147,6 +147,7 @@ function userContent(
   input: PromptCompileInput,
   args: Record<string, string>,
   workspace: string,
+  referenceBindings: readonly CanvasReferenceBinding[],
   referenceModeHint?: CanvasReferenceModeHint,
 ): LLMMessage['content'] {
   const safeArgs = scrubUnknown(args, workspace)
@@ -154,7 +155,7 @@ function userContent(
   const textParts = [`RAW PROMPT:\n${scrub(input.rawPrompt, workspace)}`, `ARGUMENTS:\n${JSON.stringify(safeArgs)}`, `MODE: ${input.mode}`, `NODE PARAMETERS:\n${JSON.stringify(safeParams)}`]
   if (referenceModeHint) textParts.splice(3, 0, `REFERENCE MODE HINT: ${referenceModeHint}`)
   const content: Array<any> = [{ type: 'text', text: textParts.join('\n\n') }]
-  for (const asset of input.incomingAssets as CanvasReferenceBinding[]) {
+  for (const asset of referenceBindings) {
     if (asset.type === 'prompt') {
       const promptText = asset.content === undefined ? '' : `\nCONTENT:\n${scrub(asset.content, workspace)}`
       content.push({ type: 'text', text: `${referenceLabel('TEXT', asset)}${promptText}` })
@@ -209,8 +210,8 @@ export function createPromptCompiler(deps: PromptCompilerDeps | RegistryLike = {
     const cachedCompilerId = cache.getCachedCompile(input.activeWorkspace, inputHash)?.compilerModelId
     const cachedResult = cache.getCachedCompile(input.activeWorkspace, inputHash)
     if (cachedResult) return { result: withReferenceAudit(cachedResult.result, referenceBindings, referenceModeHint), inputHash, cached: true, compilerModelId: cachedCompilerId ?? Number(compilerModelId), skill }
-    const requestInput = { ...input, rawPrompt: effectivePrompt, incomingAssets: referenceBindings }
-    const request: LLMRequest = { model: model.model_name, messages: [{ role: 'system', content: systemPrompt(skill, refs, input.activeWorkspace) }, { role: 'user', content: userContent(requestInput, args, input.activeWorkspace, referenceModeHint) }], temperature: 0, max_tokens: 2048, response_mode: 'non_stream', response_format: { type: 'json_object' }, tool_choice: 'none' }
+    const requestInput = effectivePrompt === input.rawPrompt ? input : { ...input, rawPrompt: effectivePrompt }
+    const request: LLMRequest = { model: model.model_name, messages: [{ role: 'system', content: systemPrompt(skill, refs, input.activeWorkspace) }, { role: 'user', content: userContent(requestInput, args, input.activeWorkspace, referenceBindings, referenceModeHint) }], temperature: 0, max_tokens: 2048, response_mode: 'non_stream', response_format: { type: 'json_object' }, tool_choice: 'none' }
     let response = await execute(input.activeWorkspace, request, compilerModelId, { maxRetries: 0 })
     if (response.tool_calls?.length) throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill compiler response contained tool calls')
     let content = extractContent(response)
