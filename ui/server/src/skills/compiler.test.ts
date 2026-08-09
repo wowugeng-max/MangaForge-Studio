@@ -6,7 +6,7 @@ import { createPromptCompiler, SkillCompilerError } from './compiler'
 import { computeCompileInputHash, createCompileCache } from './compile-cache'
 import { parseSkillDocument, readOpenAIMetadata } from './frontmatter'
 import { classifySkillCompatibility } from './registry'
-import type { CanvasMediaMode } from './types'
+import type { CanvasMediaMode, CanvasReferenceAsset } from './types'
 
 const skill = (rootDir: string, compatibility: any = 'prompt_ready'): any => ({ packId: 'pack-a', directoryName: 'h3', name: 'h3', description: 'prompt', arguments: [], userInvocable: true, triggerWords: [], mediaModes: ['text_to_video'], compatibility, revision: 'a'.repeat(40), rootDir, body: 'Write a cinematic prompt.', references: ['references/base.txt'] })
 
@@ -59,7 +59,202 @@ const h3Cases: Array<{
   { resultMode: 'Ref2VA', expectedMode: 'image_to_video', prompt: H3_REF2VA_PROMPT, orderedFields: ['subject_definitions:', 'summary:', 'retention_analysis:', 'detailed_description:', 'overall_soundscape:', 'non_diegetic_music:'] },
 ]
 
+const h3PromptSkill = (rootDir: string): any => ({
+  ...skill(rootDir),
+  directoryName: 'h3-prompt-writing',
+  name: 'h3-prompt-writing',
+  mediaModes: ['text_to_video', 'image_to_video'],
+})
+
+async function compilerRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
+  await mkdir(join(root, 'references'))
+  await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
+  return root
+}
+
+function compilerResult(mode: CanvasMediaMode | 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'Ref2VA', overrides: Record<string, unknown> = {}) {
+  return JSON.stringify({
+    skill_name: 'h3-prompt-writing',
+    skill_version: 'a'.repeat(40),
+    mode,
+    prompt: 'compiled prompt',
+    negative_prompt: '',
+    parameters: {},
+    references_used: ['references/base.txt'],
+    warnings: [],
+    ...overrides,
+  })
+}
+
 describe('prompt compiler', () => {
+  test('compiles all nine ordered images with deterministic labels and compiler-owned provenance', async () => {
+    const root = await compilerRoot()
+    const calls: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      readModels: async () => [{ id: 7, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        calls.push(request)
+        return {
+          content: compilerResult('Ref2VA', {
+            reference_bindings: [{ reference_id: 'model-invented-reference' }],
+            reference_mode_hint: 'T2VA',
+          }),
+        }
+      },
+    })
+    const incomingAssets: CanvasReferenceAsset[] = Array.from({ length: 9 }, (_, index) => ({
+      type: 'image',
+      url: `/api/assets/media/ref-${index + 1}.png`,
+      reference_index: index + 1,
+      reference_id: `reference-${index + 1}`,
+      reference_role: index === 0 ? 'first_frame' : index === 8 ? 'last_frame' : 'character',
+      source_asset_ids: [index + 1, index + 101],
+    }))
+
+    const output = await compiler({
+      skillName: 'h3-prompt-writing', rawPrompt: 'multi-reference shot', mode: 'image_to_video', incomingAssets,
+      nodeParams: {}, activeWorkspace: root, compilerModelId: 7,
+    })
+
+    expect(calls).toHaveLength(1)
+    const userParts = calls[0].messages[1].content as any[]
+    const serialized = JSON.stringify(userParts)
+    expect(serialized).toContain('REFERENCE MODE HINT: Ref2VA')
+    expect(serialized).toContain('REFERENCE IMAGE 1\\nROLE: first_frame\\nSOURCE ASSET IDS: [1,101]')
+    expect(serialized).toContain('REFERENCE IMAGE 9\\nROLE: last_frame\\nSOURCE ASSET IDS: [9,109]')
+    expect(userParts.filter((part) => part.type === 'image_url').map((part) => part.image_url.url)).toEqual(
+      incomingAssets.map((asset) => asset.url),
+    )
+    expect(output.result.reference_bindings).toEqual(incomingAssets.map((asset, index) => ({
+      reference_index: index + 1,
+      reference_id: `reference-${index + 1}`,
+      reference_role: asset.reference_role,
+      type: 'image',
+      url: asset.url,
+      source_asset_ids: [index + 1, index + 101],
+    })))
+    expect(output.result.reference_mode_hint).toBe('Ref2VA')
+    expect(output.result.mode).toBe('image_to_video')
+  })
+
+  test('derives H3 hints for first, first-last, last, and text-only references', async () => {
+    const root = await compilerRoot()
+    const scenarios: Array<{
+      name: string
+      mode: Extract<CanvasMediaMode, 'text_to_video' | 'image_to_video'>
+      resultMode: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA'
+      expectedHint: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA'
+      assets: CanvasReferenceAsset[]
+    }> = [
+      {
+        name: 'first', mode: 'image_to_video', resultMode: 'I2VA', expectedHint: 'I2VA',
+        assets: [{ type: 'image', url: '/first.png', reference_role: 'first_frame', source_asset_ids: [1] }],
+      },
+      {
+        name: 'first-last', mode: 'image_to_video', resultMode: 'FL2VA', expectedHint: 'FL2VA',
+        assets: [
+          { type: 'image', url: '/first.png', reference_role: 'first_frame', source_asset_ids: [1] },
+          { type: 'image', url: '/last.png', reference_role: 'last_frame', source_asset_ids: [2] },
+        ],
+      },
+      {
+        name: 'last', mode: 'image_to_video', resultMode: 'L2VA', expectedHint: 'L2VA',
+        assets: [{ type: 'image', url: '/last.png', reference_role: 'last_frame', source_asset_ids: [2] }],
+      },
+      {
+        name: 'text-only', mode: 'text_to_video', resultMode: 'T2VA', expectedHint: 'T2VA',
+        assets: [{ type: 'prompt', content: 'keep the costume silhouette', reference_role: 'prompt_context', source_asset_ids: [31, 32] }],
+      },
+    ]
+
+    for (const scenario of scenarios) {
+      const calls: any[] = []
+      const compiler = createPromptCompiler({
+        registry: { resolve: async () => h3PromptSkill(root) } as any,
+        readModels: async () => [{ id: 8, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any],
+        executeWithRuntimeModel: async (_workspace, request) => {
+          calls.push(request)
+          return { content: compilerResult(scenario.resultMode) }
+        },
+      })
+      const output = await compiler({
+        skillName: 'h3-prompt-writing', rawPrompt: scenario.name, mode: scenario.mode, incomingAssets: scenario.assets,
+        nodeParams: {}, activeWorkspace: root, compilerModelId: 8,
+      })
+
+      expect(JSON.stringify(calls[0].messages[1].content)).toContain(`REFERENCE MODE HINT: ${scenario.expectedHint}`)
+      expect(output.result.reference_mode_hint).toBe(scenario.expectedHint)
+      expect(output.result.mode).toBe(scenario.mode)
+      if (scenario.name === 'text-only') {
+        expect(JSON.stringify(calls[0].messages[1].content)).toContain('REFERENCE TEXT 1\\nROLE: prompt_context\\nSOURCE ASSET IDS: [31,32]')
+        expect(JSON.stringify(calls[0].messages[1].content)).toContain('keep the costume silhouette')
+      }
+    }
+  })
+
+  test('rejects excessive and reserved media references before model lookup or execution', async () => {
+    const root = await compilerRoot()
+    let modelReads = 0
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      readModels: async () => { modelReads += 1; return [] },
+      executeWithRuntimeModel: async () => { executions += 1; return { content: compilerResult('image_to_video') } },
+    })
+    const common = { skillName: 'h3-prompt-writing', rawPrompt: 'references', mode: 'image_to_video' as const, nodeParams: {}, activeWorkspace: root, compilerModelId: 9 }
+
+    await expect(compiler({
+      ...common,
+      incomingAssets: Array.from({ length: 10 }, (_, index) => ({ type: 'image' as const, url: `/ref-${index}.png` })),
+    })).rejects.toThrow(expect.objectContaining({ code: 'REFERENCE_LIMIT_EXCEEDED' }))
+    for (const type of ['video', 'audio'] as const) {
+      await expect(compiler({ ...common, incomingAssets: [{ type, url: `/reference.${type}` }] }))
+        .rejects.toThrow(expect.objectContaining({ code: 'REFERENCE_MEDIA_UNSUPPORTED' }))
+    }
+    expect(modelReads).toBe(0)
+    expect(executions).toBe(0)
+  })
+
+  test('uses canonical roles, order, ids, and lineage in cache keys and cached audit metadata', async () => {
+    const root = await compilerRoot()
+    const cache = createCompileCache()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache,
+      readModels: async () => [{ id: 10, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true, vision: true } } as any],
+      executeWithRuntimeModel: async () => { executions += 1; return { content: compilerResult('image_to_video') } },
+    })
+    const references: CanvasReferenceAsset[] = [
+      { type: 'image', url: '/a.png', reference_index: 1, reference_id: 'hero', reference_role: 'first_frame', source_asset_ids: [11, 12] },
+      { type: 'image', url: '/b.png', reference_index: 2, reference_id: 'environment', reference_role: 'last_frame', source_asset_ids: [21, 22] },
+    ]
+    const base = { skillName: 'h3-prompt-writing', rawPrompt: 'cache me', mode: 'image_to_video' as const, nodeParams: {}, activeWorkspace: root, compilerModelId: 10 }
+    const first = await compiler({ ...base, incomingAssets: references })
+    const identical = await compiler({ ...base, incomingAssets: references.map((asset) => ({ ...asset, source_asset_ids: [...(asset.source_asset_ids ?? [])] })) })
+    const variants: CanvasReferenceAsset[][] = [
+      [references[1]!, references[0]!],
+      [{ ...references[0]!, reference_role: 'character' }, references[1]!],
+      [{ ...references[0]!, reference_id: 'different-hero' }, references[1]!],
+      [{ ...references[0]!, source_asset_ids: [12, 11] }, references[1]!],
+    ]
+
+    expect(first.cached).toBe(false)
+    expect(identical.cached).toBe(true)
+    expect(identical.inputHash).toBe(first.inputHash)
+    expect(first.result.reference_bindings).toEqual(references)
+    expect(first.result.reference_mode_hint).toBe('FL2VA')
+    expect(identical.result.reference_bindings).toEqual(first.result.reference_bindings)
+    for (const variant of variants) {
+      const output = await compiler({ ...base, incomingAssets: variant })
+      expect(output.inputHash).not.toBe(first.inputHash)
+      expect(output.cached).toBe(false)
+    }
+    expect(executions).toBe(1 + variants.length)
+  })
+
   test('compiles the public H3 fixture deterministically across MangaForge modes and H3 sub-mode aliases', async () => {
     const root = join(import.meta.dir, 'fixtures', 'h3-prompt-writing')
     const skillPath = join(root, 'SKILL.md')
@@ -151,21 +346,26 @@ describe('prompt compiler', () => {
     const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
     await mkdir(join(root, 'references'))
     await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
+    const requests: any[] = []
     const compiler = createPromptCompiler({
       registry: { resolve: async () => ({ ...skill(root), name: 'other-video-prompt' }) } as any,
       readModels: async () => [{ id: 22, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
-      executeWithRuntimeModel: async () => ({
-        content: JSON.stringify({
-          skill_name: 'other-video-prompt', skill_version: 'a'.repeat(40), mode: 'T2VA', prompt: 'prompt',
-          negative_prompt: '', parameters: {}, references_used: [], warnings: [],
-        }),
-      }),
+      executeWithRuntimeModel: async (_workspace, request) => {
+        requests.push(request)
+        return {
+          content: JSON.stringify({
+            skill_name: 'other-video-prompt', skill_version: 'a'.repeat(40), mode: 'T2VA', prompt: 'prompt',
+            negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+          }),
+        }
+      },
     })
 
     await expect(compiler({
       skillName: 'other-video-prompt', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
       activeWorkspace: root, compilerModelId: 22,
     })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_MODE_INCOMPATIBLE' }))
+    expect(JSON.stringify(requests[0].messages[1].content)).not.toContain('REFERENCE MODE HINT')
   })
 
   test('leading qualified command wins over selector fields', async () => {
