@@ -36,6 +36,9 @@ import { registerNovelRoutes } from './routes/novel'
 import { registerKnowledgeRoutes } from './routes/knowledge'
 import { registerFingerprintContractRoutes } from './routes/fingerprint-contracts'
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
+import { registerSkillRoutes } from './routes/skills'
+import { createSkillRegistry, type SkillRegistry } from './skills/registry'
+import { createPromptCompiler } from './skills/compiler'
 import { registerMcpRoutes } from './routes/mcp-routes'
 import { createMcpRuntime } from './mcp/runtime'
 import { acceptWebSocketKey, sseManager, taskMessageManager, interruptRegisteredTask, webSocketManager, webSocketClientIdFromPath } from './ws-manager'
@@ -96,6 +99,28 @@ const getWorkspace = workspaceState.getWorkspace
 const setWorkspace = workspaceState.setWorkspace
 let server: ReturnType<typeof app.listen> | null = null
 
+// Skill discovery is workspace-scoped and lazy. Creating the runtime does not
+// read any Skill files; registry scans happen only when a route asks for list/
+// resolve, and the same registry/compiler pair is reused by Generate routes.
+type WorkspaceSkillRuntime = {
+  registry: SkillRegistry
+  compilePromptSkill: ReturnType<typeof createPromptCompiler>
+}
+const skillRuntimes = new Map<string, WorkspaceSkillRuntime>()
+const getWorkspaceSkillRuntime = (workspace: string): WorkspaceSkillRuntime => {
+  const cached = skillRuntimes.get(workspace)
+  if (cached) return cached
+  const registry = createSkillRegistry(workspace)
+  const runtime: WorkspaceSkillRuntime = { registry, compilePromptSkill: createPromptCompiler(registry) }
+  skillRuntimes.set(workspace, runtime)
+  return runtime
+}
+const skillRuntimeBoundary = {
+  getWorkspaceRuntime: getWorkspaceSkillRuntime,
+  getRegistry: (workspace: string) => getWorkspaceSkillRuntime(workspace).registry,
+  compilePromptSkill: (input: Parameters<WorkspaceSkillRuntime['compilePromptSkill']>[0]) => getWorkspaceSkillRuntime(input.activeWorkspace).compilePromptSkill(input),
+}
+
 registerProjectRoutes(app, getWorkspace)
 registerAssetCrudRoutes(app, getWorkspace)
 registerAssetMediaRoutes(app, getWorkspace)
@@ -110,7 +135,10 @@ registerKeyRoutes(app, getWorkspace)
 registerProviderRoutes(app, getWorkspace)
 registerModelRoutes(app, getWorkspace)
 registerCanvasRoutes(app, getWorkspace)
-registerGenerateRoutes(app, getWorkspace)
+registerSkillRoutes(app, getWorkspace, skillRuntimeBoundary)
+// Keep the same runtime boundary available to GenerateNode. Task 6 consumes
+// this dependency; the current generate route intentionally ignores it.
+registerGenerateRoutes(app, getWorkspace, { skillRuntime: skillRuntimeBoundary } as any)
 registerVideoLoopRoutes(app, getWorkspace)
 registerDirectTaskRoutes(app, getWorkspace)
 registerRecommendationRoutes(app, getWorkspace)
