@@ -147,6 +147,60 @@ describe('codex responses provider runtime a b', () => {
     }
   })
 
+  test('preflights provider-level multi-reference capabilities loaded from workspace records', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-provider-capability-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'provider-multi-images',
+          display_name: 'Provider Multi Images',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          supported_modalities: ['image_to_video'],
+          default_base_url: 'https://api.example.com/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+          context_ui_params: {
+            multi_reference: { supported: true, field: 'provider_images', shape: 'urls', max: 9 },
+          },
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 49, provider: 'provider-multi-images', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 49,
+          api_key_id: 49,
+          provider: 'provider-multi-images',
+          display_name: 'Provider Capability Model',
+          model_name: 'provider-capability-model',
+          capabilities: { image_to_video: true },
+          health_status: 'healthy',
+          context_ui_params: {},
+        },
+      ]))
+
+      const selection = await preflightRuntimeRequestTransport(workspace, {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: '/first.png',
+        reference_images: [
+          { url: '/first.png', reference_index: 1 },
+          { url: '/last.png', reference_index: 2 },
+        ],
+        messages: [{ role: 'user', content: '生成视频' }],
+      } as any, 49)
+
+      expect(selection?.model.id).toBe(49)
+      expect((selection?.provider as any).context_ui_params.multi_reference.field).toBe('provider_images')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('uses API key base_url before provider default_base_url for runtime requests', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-key-base-url-'))
     try {

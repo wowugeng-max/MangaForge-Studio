@@ -1511,6 +1511,92 @@ describe('canvas generate route', () => {
     expect(workflow['11'].inputs.image).toBe('editable-last')
   })
 
+  test('maps ComfyUI images by their real canonical indices when prompt references are interleaved', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      { id: 'local-comfy', display_name: 'Local Comfy', service_type: 'comfyui', api_format: 'comfyui', auth_type: 'none', default_base_url: 'http://provider-comfy', supported_modalities: ['image_to_video'], is_active: true },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 42, provider: 'local-comfy', description: 'GPU', is_active: true, base_url: 'http://key-comfy' },
+    ]))
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let comfyCalls = 0
+    let taskCalls = 0
+    let providerCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      execute: async () => { providerCalls += 1; return { content: 'unexpected' } as any },
+      comfyExecute: async options => {
+        comfyCalls += 1
+        expect(options.workflow['20'].inputs.image).toBe('/first.png')
+        expect(options.workflow['21'].inputs.image).toBe('/last.png')
+        return { prompt_id: 'interleaved-comfy', output_files: [], history: {} }
+      },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    const workflow = {
+      '20': { inputs: { image: 'editable-first' } },
+      '21': { inputs: { image: 'editable-last' } },
+    }
+    const baseBody = {
+      api_key_id: 42,
+      provider: 'local-comfy',
+      model: 'comfyui-workflow',
+      type: 'image_to_video',
+      prompt: workflow,
+      params: {
+        incoming_assets: [
+          { type: 'prompt', content: 'keep the palette', reference_index: 1, reference_role: 'prompt_context' },
+          { type: 'image', url: '/first.png', reference_index: 2, reference_role: 'first_frame' },
+          { type: 'image', url: '/last.png', reference_index: 3, reference_role: 'last_frame' },
+        ],
+      },
+    }
+
+    for (const referenceMappings of [
+      [{ reference_index: 2, input: '20.inputs.image' }],
+      [
+        { reference_index: 1, input: '20.inputs.image' },
+        { reference_index: 3, input: '21.inputs.image' },
+      ],
+      [
+        { reference_index: 2, input: '20.inputs.image' },
+        { reference_index: 4, input: '21.inputs.image' },
+      ],
+    ]) {
+      const invalid = await call(handlers.get('POST /api/generate'), {
+        body: {
+          ...baseBody,
+          skill_comfy_mapping: { reference_images: referenceMappings },
+        },
+      })
+      expect(invalid.statusCode).toBe(422)
+      expect(invalid.body.error_code).toBe('MULTI_REFERENCE_MAPPING_REQUIRED')
+    }
+    expect(comfyCalls).toBe(0)
+    expect(taskCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+
+    const mapped = await call(handlers.get('POST /api/generate'), {
+      body: {
+        ...baseBody,
+        skill_comfy_mapping: {
+          reference_images: [
+            { reference_index: 3, input: '21.inputs.image' },
+            { reference_index: 2, input: '20.inputs.image' },
+          ],
+        },
+      },
+    })
+    expect(mapped.statusCode).toBe(200)
+    expect(comfyCalls).toBe(1)
+    expect(taskCalls).toBe(0)
+    expect(providerCalls).toBe(0)
+    expect(workflow['20'].inputs.image).toBe('editable-first')
+    expect(workflow['21'].inputs.image).toBe('editable-last')
+  })
+
   test('preflights non-Comfy multi-reference requests before sync execution or background task registration', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')

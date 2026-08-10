@@ -19,7 +19,7 @@ export type MultiReferenceFieldShape = 'metadata' | 'urls'
 
 export type MultiReferenceTransport = {
   supported: true
-  source: 'legacy_single' | 'model_capability' | 'route_template' | 'native_multimodal'
+  source: 'legacy_single' | 'model_capability' | 'provider_capability' | 'route_template' | 'native_multimodal'
   count: number
   max: number
   field?: string
@@ -38,6 +38,11 @@ export type MultiReferenceTransportSelection = {
     contextUiParams?: Record<string, unknown>
     context_ui_params?: Record<string, unknown>
   }
+  provider?: {
+    [key: string]: unknown
+    contextUiParams?: Record<string, unknown>
+    context_ui_params?: Record<string, unknown>
+  }
 }
 
 const DEFAULT_MULTI_REFERENCE_MAX = 9
@@ -48,18 +53,31 @@ function objectRecord(value: unknown): Record<string, any> | null {
     : null
 }
 
-function explicitCapability(selection: MultiReferenceTransportSelection): Record<string, any> | null {
-  const contexts = [
-    selection.model?.context_ui_params,
-    selection.model?.contextUiParams,
-    selection.context_ui_params,
-    selection.contextUiParams,
+function explicitCapability(selection: MultiReferenceTransportSelection): {
+  capability: Record<string, any>
+  source: 'model_capability' | 'provider_capability'
+} | null {
+  const groups = [
+    {
+      source: 'model_capability' as const,
+      contexts: [selection.model?.context_ui_params, selection.model?.contextUiParams],
+    },
+    {
+      source: 'provider_capability' as const,
+      contexts: [selection.provider?.context_ui_params, selection.provider?.contextUiParams],
+    },
+    {
+      source: 'model_capability' as const,
+      contexts: [selection.context_ui_params, selection.contextUiParams],
+    },
   ]
-  for (const value of contexts) {
-    const context = objectRecord(value)
-    if (!context) continue
-    const capability = objectRecord(context.multi_reference) || objectRecord(context.multiReference)
-    if (capability) return capability
+  for (const group of groups) {
+    for (const value of group.contexts) {
+      const context = objectRecord(value)
+      if (!context) continue
+      const capability = objectRecord(context.multi_reference) || objectRecord(context.multiReference)
+      if (capability) return { capability, source: group.source }
+    }
   }
   return null
 }
@@ -91,8 +109,31 @@ function templateReferencesCollection(value: unknown, seen = new Set<object>()):
   return Object.values(value as Record<string, unknown>).some(item => templateReferencesCollection(item, seen))
 }
 
-function messageImageUrls(request: LLMRequest) {
-  return (request.messages || []).flatMap(message => {
+function imageBearingMessages(
+  request: LLMRequest,
+  selection: MultiReferenceTransportSelection,
+) {
+  const apiFormat = String(selection.apiFormat ?? selection.api_format ?? '').trim().toLowerCase()
+  if (apiFormat === 'gemini_native') {
+    // Gemini moves system content into systemInstruction and only converts
+    // non-system messages into multimodal `contents[].parts`.
+    return (request.messages || []).filter(message => message.role !== 'system')
+  }
+  if (apiFormat.includes('anthropic') || apiFormat.includes('claude')) {
+    // Anthropic removes system messages from `messages`; image-bearing content
+    // must survive in one of the remaining converted message records.
+    return (request.messages || []).filter(message => message.role !== 'system')
+  }
+  if (String(selection.endpoint || '').toLowerCase().includes('chat/completions')) {
+    // OpenAI-compatible multimodal image parts are portable on conversational
+    // user/assistant records. System image arrays are not a reliable transport.
+    return (request.messages || []).filter(message => message.role === 'user' || message.role === 'assistant')
+  }
+  return []
+}
+
+function messageImageUrls(request: LLMRequest, selection: MultiReferenceTransportSelection) {
+  return imageBearingMessages(request, selection).flatMap(message => {
     if (!Array.isArray(message.content)) return []
     return message.content.map(imageUrlFromLLMContentPart).filter(Boolean)
   })
@@ -137,8 +178,9 @@ export function resolveMultiReferenceTransport(
     return { supported: true, source: 'legacy_single', count, max: 1 }
   }
 
-  const capability = explicitCapability(selection)
-  if (capability) {
+  const explicit = explicitCapability(selection)
+  if (explicit) {
+    const { capability, source } = explicit
     if (capability.supported !== true) {
       return transportError(
         'MULTI_REFERENCE_UNSUPPORTED',
@@ -168,7 +210,7 @@ export function resolveMultiReferenceTransport(
     }
     return {
       supported: true,
-      source: 'model_capability',
+      source,
       count,
       max,
       ...(field ? { field } : {}),
@@ -197,7 +239,7 @@ export function resolveMultiReferenceTransport(
   if (
     nativeMultimodalFormat(selection)
     && expectedUrls.every(Boolean)
-    && containsOrderedMultiplicity(messageImageUrls(request), expectedUrls)
+    && containsOrderedMultiplicity(messageImageUrls(request, selection), expectedUrls)
   ) {
     if (count > DEFAULT_MULTI_REFERENCE_MAX) {
       return transportError(

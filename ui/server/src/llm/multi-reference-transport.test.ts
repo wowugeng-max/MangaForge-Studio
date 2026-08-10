@@ -3,6 +3,7 @@ import type { LLMRequest } from './types'
 import {
   MultiReferenceTransportError,
   resolveMultiReferenceTransport,
+  type MultiReferenceTransportSelection,
 } from './multi-reference-transport'
 
 const references = [
@@ -71,6 +72,47 @@ describe('multi-reference provider transport', () => {
       apiFormat: 'gemini_native',
       contextUiParams: { multiReference: { supported: true, max: 2 } },
     })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('uses provider-level capability aliases after model-level declarations', () => {
+    const providerSelection: MultiReferenceTransportSelection = {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      model: { context_ui_params: {} },
+      provider: {
+        contextUiParams: {
+          multiReference: { supported: true, field: 'providerImages', shape: 'urls', max: 2 },
+        },
+      },
+    }
+    expect(resolveMultiReferenceTransport(request(), providerSelection)).toMatchObject({
+      supported: true,
+      source: 'provider_capability',
+      field: 'providerImages',
+      shape: 'urls',
+      max: 2,
+    })
+
+    expect(() => resolveMultiReferenceTransport(request({
+      reference_images: [...references, {
+        url: '/third.png',
+        reference_index: 3,
+      }],
+    }), providerSelection)).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+
+    expect(resolveMultiReferenceTransport(request(), {
+      ...providerSelection,
+      model: {
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'modelImages', shape: 'metadata', max: 9 },
+        },
+      },
+    })).toMatchObject({
+      source: 'model_capability',
+      field: 'modelImages',
+      shape: 'metadata',
+      max: 9,
+    })
   })
 
   test('requires an explicit array field for non-multimodal media endpoints', () => {
@@ -150,6 +192,71 @@ describe('multi-reference provider transport', () => {
     }), {
       apiFormat: 'gemini_native',
     })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('does not count system-only image parts as preserved native multimodal references', () => {
+    const systemOnly = request({
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'system visual context' },
+            { type: 'image_url', image_url: { url: '/first.png' } },
+            { type: 'image_url', image_url: { url: '/last.png' } },
+          ],
+        },
+        { role: 'user', content: 'animate this shot' },
+      ],
+    })
+
+    for (const selection of [
+      { apiFormat: 'gemini_native' },
+      { apiFormat: 'anthropic', endpoint: 'messages' },
+      { apiFormat: 'openai_compatible', endpoint: 'chat/completions' },
+    ]) {
+      expect(() => resolveMultiReferenceTransport(systemOnly, selection)).toThrow(
+        expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }),
+      )
+    }
+  })
+
+  test('preserves duplicate user reference URLs with exact multiplicity across native formats', () => {
+    const duplicateReferences = [
+      { url: '/same.png', reference_index: 1, reference_id: 'first' },
+      { url: '/same.png', reference_index: 2, reference_id: 'character' },
+    ]
+    const duplicateRequest = request({
+      image_url: '/same.png',
+      reference_images: duplicateReferences,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'keep both bindings' },
+          { type: 'image_url', image_url: { url: '/same.png' } },
+          { type: 'image_url', image_url: { url: '/same.png' } },
+        ],
+      }],
+    })
+    for (const selection of [
+      { apiFormat: 'gemini_native' },
+      { apiFormat: 'anthropic', endpoint: 'messages' },
+      { apiFormat: 'openai_compatible', endpoint: 'chat/completions' },
+    ]) {
+      expect(resolveMultiReferenceTransport(duplicateRequest, selection)).toMatchObject({
+        supported: true,
+        source: 'native_multimodal',
+      })
+      expect(() => resolveMultiReferenceTransport({
+        ...duplicateRequest,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'only one occurrence' },
+            { type: 'image_url', image_url: { url: '/same.png' } },
+          ],
+        }],
+      }, selection)).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+    }
   })
 
   test('accepts chat/completions only when all ordered image parts are present', () => {

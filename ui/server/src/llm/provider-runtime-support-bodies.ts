@@ -144,7 +144,11 @@ function toOpenAIBody(
       if (passthroughBlocked.has(key)) continue
       body[key] = value
     }
-    if (multiReferenceTransport.source === 'model_capability' && multiReferenceTransport.field && (request.reference_images?.length || 0) > 1) {
+    if (
+      ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
+      && multiReferenceTransport.field
+      && (request.reference_images?.length || 0) > 1
+    ) {
       const field = multiReferenceTransport.field
       if (['__proto__', 'prototype', 'constructor'].includes(field)) {
         throw new MultiReferenceTransportError(
@@ -609,7 +613,7 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
   if (payloadTemplate) {
     return renderTemplateValue(payloadTemplate, buildTemplateContext(request, selection)) ?? {}
   }
-  const nativeRequest = multiReferenceTransport.source === 'model_capability'
+  const nativeRequest = ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
     ? requestWithCanonicalReferenceMessageParts(request)
     : request
   if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(nativeRequest, selection)

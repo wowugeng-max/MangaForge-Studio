@@ -970,6 +970,26 @@ describe('gemini chat-style image generation routing', () => {
       } as any,
     }))
     expect(metadataBody.references).toEqual(baseRequest.reference_images)
+
+    const providerBody = buildProviderRequestBody(baseRequest, openaiSelection({
+      endpoint: 'videos/generations',
+      routeType: 'image_to_video',
+      provider: {
+        ...selection().provider,
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'provider_images', shape: 'urls', max: 9 },
+        },
+      } as any,
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {},
+      },
+    }))
+    expect(providerBody.provider_images).toEqual([
+      'https://example.com/first.png',
+      'https://example.com/last.png',
+    ])
   })
 
   test('undeclared media endpoints reject multiple references at body-build time', () => {
@@ -1088,6 +1108,37 @@ describe('gemini chat-style image generation routing', () => {
       { type: 'image_url', image_url: { url: 'https://example.com/first.png' } },
       { type: 'image_url', image_url: { url: 'https://example.com/last.png' } },
     ])
+  })
+
+  test('provider body preflight rejects references that exist only in system multimodal content', () => {
+    const systemOnlyRequest = {
+      model: 'x',
+      type: 'image_to_video',
+      image_url: 'https://example.com/first.png',
+      reference_images: [
+        { url: 'https://example.com/first.png', reference_index: 1 },
+        { url: 'https://example.com/last.png', reference_index: 2 },
+      ],
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'image_url', image_url: { url: 'https://example.com/first.png' } },
+            { type: 'image_url', image_url: { url: 'https://example.com/last.png' } },
+          ],
+        },
+        { role: 'user', content: '生成视频' },
+      ],
+    } as any
+    for (const runtimeSelection of [
+      openaiSelection({ apiFormat: 'gemini_native', endpoint: 'models/gemini-video:generateContent' }),
+      openaiSelection({ apiFormat: 'anthropic', endpoint: 'messages' }),
+      openaiSelection({ apiFormat: 'openai_compatible', endpoint: 'chat/completions', routeType: 'image_to_video' }),
+    ]) {
+      expect(() => buildProviderRequestBody(systemOnlyRequest, runtimeSelection)).toThrow(
+        expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }),
+      )
+    }
   })
 })
 

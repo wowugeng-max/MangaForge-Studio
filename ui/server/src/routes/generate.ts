@@ -829,6 +829,14 @@ function applyReferenceImagesToComfyWorkflow(
   }
 
   const referencesByIndex = new Map(referenceImages.map(reference => [reference.reference_index, reference]))
+  const expectedIndices = referenceImages.map(reference => reference.reference_index)
+  const expectedIndexSet = new Set(expectedIndices)
+  if (
+    expectedIndexSet.size !== referenceImages.length
+    || expectedIndices.some(referenceIndex => !Number.isSafeInteger(referenceIndex) || referenceIndex < 1)
+  ) {
+    return multiReferenceMappingError('Canonical reference image indices are invalid')
+  }
   const seen = new Set<number>()
   const mappedInputs = new Set<string>()
   const normalizedMappings = rawMappings.map((row: any) => {
@@ -837,9 +845,9 @@ function applyReferenceImagesToComfyWorkflow(
     }
     const referenceIndex = Number(row.reference_index ?? row.referenceIndex ?? row.index)
     const input = row.input ?? row.input_path ?? row.inputPath ?? row.path
-    if (!Number.isSafeInteger(referenceIndex) || referenceIndex < 1 || referenceIndex > referenceImages.length) {
+    if (!Number.isSafeInteger(referenceIndex) || referenceIndex < 1 || !expectedIndexSet.has(referenceIndex)) {
       return multiReferenceMappingError(
-        `ComfyUI reference image mapping index must be between 1 and ${referenceImages.length}`,
+        `ComfyUI reference image mapping index ${referenceIndex} does not match a canonical image reference`,
       )
     }
     if (seen.has(referenceIndex)) {
@@ -860,7 +868,7 @@ function applyReferenceImagesToComfyWorkflow(
     return { referenceIndex, input }
   })
 
-  for (let referenceIndex = 1; referenceIndex <= referenceImages.length; referenceIndex += 1) {
+  for (const referenceIndex of expectedIndices) {
     if (!seen.has(referenceIndex)) {
       return multiReferenceMappingError(`ComfyUI reference image mapping index ${referenceIndex} is missing`)
     }
