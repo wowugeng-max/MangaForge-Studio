@@ -142,4 +142,3 @@ Provider 不兼容时在 UI 显示 typed error 并禁用运行，但仍允许用
 - 无 Skill 和单图请求保持现有快照/行为。
 - 小说/MCP/Agent 范围搜索无 Skill 接入。
 - H3 acceptance harness 支持多个本地 image asset id；默认仍 skip，live 只在显式 flag 和配置齐全时运行。
-
