@@ -15,12 +15,22 @@ import {
   SkillCompilerError,
   type PromptCompilerDeps,
 } from '../skills/compiler'
+import type { CanvasReferenceErrorCode } from '../skills/reference-bindings'
 import { readSkillSettings as defaultReadSkillSettings, writeSkillSettings as defaultWriteSkillSettings, type SkillSettings } from '../skills/settings'
 import type { CanvasMediaMode, PromptCompileInput, SkillManifest } from '../skills/types'
 
 const MEDIA_MODES: readonly CanvasMediaMode[] = ['chat', 'vision', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video']
 const MAX_INCOMING_ASSET_URL_LENGTH = 64 * 1024
 const MAX_INCOMING_ASSET_CONTENT_LENGTH = 256 * 1024
+const REFERENCE_VALIDATION_ERROR_CODES: ReadonlySet<CanvasReferenceErrorCode> = new Set([
+  'REFERENCE_LIMIT_EXCEEDED',
+  'REFERENCE_ROLE_INVALID',
+  'REFERENCE_MEDIA_UNSUPPORTED',
+  'REFERENCE_TYPE_INVALID',
+  'REFERENCE_ASSET_INVALID',
+  'REFERENCE_LINEAGE_INVALID',
+  'REFERENCE_ID_INVALID',
+])
 
 type RegistryLike = Pick<SkillRegistry, 'list' | 'invalidate'>
 type PackSummary = {
@@ -151,7 +161,7 @@ function normalizePackRecord(value: unknown): PackSummary | undefined {
 
 function compilerErrorStatus(code: string): number {
   if (code === 'SKILL_COMPILER_MODEL_REQUIRED' || code === 'SKILL_COMPILER_MODEL_INCOMPATIBLE' || code === 'SKILL_COMPILER_VISION_REQUIRED' || code === 'SKILL_AMBIGUOUS') return 409
-  if (code.startsWith('SKILL_')) return 422
+  if (code.startsWith('SKILL_') || REFERENCE_VALIDATION_ERROR_CODES.has(code as CanvasReferenceErrorCode)) return 422
   return 500
 }
 

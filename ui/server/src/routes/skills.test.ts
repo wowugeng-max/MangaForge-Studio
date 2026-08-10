@@ -331,8 +331,28 @@ describe('canvas skill routes', () => {
         assets: [{ type: 'image', url: sharedUrl, reference_role: 'not-a-canvas-role' }],
       },
     })
-    expect(invalid.statusCode).not.toBe(200)
-    expect(invalid.body.error_code).toBe('REFERENCE_ROLE_INVALID')
+    const excessive = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: {
+        skill_name: h3Skill.name,
+        prompt: 'too many references',
+        mode: 'image_to_video',
+        compiler_model_id: 4,
+        assets: Array.from({ length: 10 }, (_, index) => ({
+          type: 'image',
+          url: sharedUrl,
+          reference_id: `reference-${index + 1}`,
+        })),
+      },
+    })
+    expect([invalid.statusCode, excessive.statusCode]).toEqual([422, 422])
+    expect(invalid.body).toMatchObject({
+      error_code: 'REFERENCE_ROLE_INVALID',
+      detail: 'Reference 1 has an invalid reference role',
+    })
+    expect(excessive.body).toMatchObject({
+      error_code: 'REFERENCE_LIMIT_EXCEEDED',
+      detail: 'Canvas references may contain at most 9 images',
+    })
     expect(executeCalls).toHaveLength(2)
   })
 
@@ -394,6 +414,16 @@ describe('canvas skill routes', () => {
     const invalid = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { skillName: 'prompt-skill', prompt: 'x', mode: 'image_to_video', compilerModelId: 4 } })
     expect(invalid.statusCode).toBe(422)
     expect(invalid.body.error_code).toBe('SKILL_RESULT_INVALID')
+
+    registerSkillRoutes(app as any, () => workspace, {
+      getRegistry: async () => ({ list: async () => [], invalidate() {} }),
+      compilePromptSkill: async () => {
+        throw Object.assign(new Error('reference runtime failure'), { code: 'REFERENCE_RUNTIME_FAILURE' })
+      },
+    })
+    const internal = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { skillName: 'prompt-skill', prompt: 'x', mode: 'image_to_video', compilerModelId: 4 } })
+    expect(internal.statusCode).toBe(500)
+    expect(internal.body).toMatchObject({ error_code: 'REFERENCE_RUNTIME_FAILURE', detail: 'reference runtime failure' })
   })
 
   test('reads and writes the only supported workspace Skill setting', async () => {
