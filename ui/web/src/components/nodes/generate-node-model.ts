@@ -152,6 +152,13 @@ export type GenerateNodeReferenceBinding = {
   source_handle?: string
 }
 
+export type GenerateNodeUnresolvedReferenceSource = {
+  type: GenerateNodeReferenceType
+  source_edge_id?: string
+  source_node_id?: string
+  source_handle?: string
+}
+
 export type GenerateNodeReferenceErrorCode =
   | 'REFERENCE_LIMIT_EXCEEDED'
   | 'REFERENCE_ROLE_INVALID'
@@ -338,6 +345,7 @@ export type GenerateNodeIncomingContextSnapshot = {
   referenceEdgeCount: number
   resolvedReferenceEdgeCount: number
   unresolvedReferenceEdgeCount: number
+  unresolvedReferenceSources: GenerateNodeUnresolvedReferenceSource[]
   referenceValidationError: GenerateNodeReferenceValidationState | null
   fingerprint: string
 }
@@ -353,14 +361,28 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
   const referenceEdgeCount = incomingEdges.filter(edge => edge.targetHandle === 'text' || edge.targetHandle === 'image').length
   let resolvedReferenceEdgeCount = 0
   let unresolvedReferenceEdgeCount = 0
+  const unresolvedReferenceSources: GenerateNodeUnresolvedReferenceSource[] = []
   let referenceValidationError: GenerateNodeReferenceValidationState | null = null
   let referenceIndex = 0
   incomingEdges.forEach(edge => {
-    const isReferenceEdge = edge.targetHandle === 'text' || edge.targetHandle === 'image'
+    const referenceType: GenerateNodeReferenceType | null = edge.targetHandle === 'text'
+      ? 'prompt'
+      : edge.targetHandle === 'image'
+        ? 'image'
+        : null
+    const isReferenceEdge = referenceType !== null
     if (isReferenceEdge) referenceIndex += 1
+    const sourceIdentity = {
+      ...(typeof edge.id === 'string' && edge.id.trim() ? { source_edge_id: edge.id.trim() } : {}),
+      source_node_id: edge.source,
+      ...(typeof edge.sourceHandle === 'string' && edge.sourceHandle.trim() ? { source_handle: edge.sourceHandle.trim() } : {}),
+    }
     const sourceNode = input.nodes.find(node => node.id === edge.source)
     if (!sourceNode) {
-      if (isReferenceEdge) unresolvedReferenceEdgeCount += 1
+      if (referenceType) {
+        unresolvedReferenceEdgeCount += 1
+        unresolvedReferenceSources.push({ type: referenceType, ...sourceIdentity })
+      }
       return
     }
     if (isReferenceEdge) resolvedReferenceEdgeCount += 1
@@ -368,11 +390,6 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
     const sourceContent = typeof rawSourceContent === 'string' ? rawSourceContent : ''
     const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
     const sourceAssetId = sourceAssetIds[0]
-    const sourceIdentity = {
-      ...(typeof edge.id === 'string' && edge.id.trim() ? { source_edge_id: edge.id.trim() } : {}),
-      source_node_id: edge.source,
-      ...(typeof edge.sourceHandle === 'string' && edge.sourceHandle.trim() ? { source_handle: edge.sourceHandle.trim() } : {}),
-    }
     if (isReferenceEdge && !sourceContent.trim()) {
       if (!referenceValidationError) {
         referenceValidationError = {
@@ -398,6 +415,7 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
     referenceEdgeCount,
     resolvedReferenceEdgeCount,
     unresolvedReferenceEdgeCount,
+    unresolvedReferenceSources,
     referenceValidationError,
     fingerprint: JSON.stringify({
       incomingAssets,
@@ -405,6 +423,7 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
       referenceEdgeCount,
       resolvedReferenceEdgeCount,
       unresolvedReferenceEdgeCount,
+      unresolvedReferenceSources,
       referenceValidationError,
     }),
   }
@@ -679,7 +698,7 @@ function generateNodeReferenceLineageMatches(
 
 function generateNodeReferenceSourceIdentityMatches(
   existing: GenerateNodeReferenceBinding,
-  candidate: GenerateNodeReferenceBinding,
+  candidate: Pick<GenerateNodeReferenceBinding, 'source_edge_id' | 'source_node_id' | 'source_handle'>,
 ) {
   if (existing.source_edge_id && candidate.source_edge_id) {
     return existing.source_edge_id === candidate.source_edge_id
@@ -689,12 +708,58 @@ function generateNodeReferenceSourceIdentityMatches(
     && (existing.source_handle || '') === (candidate.source_handle || '')
 }
 
+function generateNodeReferenceSourceIdentityConflicts(
+  existing: GenerateNodeReferenceBinding,
+  candidate: Pick<GenerateNodeReferenceBinding, 'source_edge_id' | 'source_node_id' | 'source_handle'>,
+) {
+  if (existing.source_edge_id && candidate.source_edge_id) {
+    return existing.source_edge_id !== candidate.source_edge_id
+  }
+  if (!existing.source_node_id || !candidate.source_node_id) return false
+  if (existing.source_node_id !== candidate.source_node_id) return true
+  return Boolean(
+    existing.source_handle
+    && candidate.source_handle
+    && existing.source_handle !== candidate.source_handle
+  )
+}
+
+function hasGenerateNodeReferenceSourceIdentity(
+  value: Pick<GenerateNodeReferenceBinding, 'source_edge_id' | 'source_node_id'>,
+) {
+  return Boolean(value.source_edge_id || value.source_node_id)
+}
+
+function normalizeGenerateNodeUnresolvedReferenceSources(
+  value: unknown,
+): GenerateNodeUnresolvedReferenceSource[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap(rawSource => {
+    if (!isGenerateNodeReferenceRecord(rawSource)) return []
+    const rawType = typeof rawSource.type === 'string' ? rawSource.type.toLowerCase() : ''
+    if (!GENERATE_NODE_REFERENCE_TYPES.has(rawType as GenerateNodeReferenceType)) return []
+    const sourceEdgeId = rawSource.source_edge_id ?? rawSource.sourceEdgeId
+    const sourceNodeId = rawSource.source_node_id ?? rawSource.sourceNodeId
+    const sourceHandle = rawSource.source_handle ?? rawSource.sourceHandle
+    const source: GenerateNodeUnresolvedReferenceSource = { type: rawType as GenerateNodeReferenceType }
+    if (typeof sourceEdgeId === 'string' && sourceEdgeId.trim()) source.source_edge_id = sourceEdgeId.trim()
+    if (typeof sourceNodeId === 'string' && sourceNodeId.trim()) source.source_node_id = sourceNodeId.trim()
+    if (typeof sourceHandle === 'string' && sourceHandle.trim()) source.source_handle = sourceHandle.trim()
+    return hasGenerateNodeReferenceSourceIdentity(source) ? [source] : []
+  })
+}
+
 export function reconcileGenerateNodeReferenceBindings(
   persisted: unknown,
   incomingAssets: readonly GenerateNodeIncomingAsset[] = [],
-  options: { incomingComplete?: boolean } = {},
+  options: {
+    incomingComplete?: boolean
+    unresolvedSources?: readonly GenerateNodeUnresolvedReferenceSource[]
+  } = {},
 ): { bindings: GenerateNodeReferenceBinding[]; validationError: GenerateNodeReferenceValidationState | null } {
   const hasPersisted = persisted !== undefined && persisted !== null
+  const hasPerSourceUnresolvedState = Array.isArray(options.unresolvedSources)
+  const unresolvedSources = normalizeGenerateNodeUnresolvedReferenceSources(options.unresolvedSources)
   let existing: GenerateNodeReferenceBinding[] = []
   if (hasPersisted) {
     try {
@@ -702,7 +767,7 @@ export function reconcileGenerateNodeReferenceBindings(
     } catch (error) {
       return { bindings: [], validationError: toGenerateNodeReferenceValidationState(error) }
     }
-    if (options.incomingComplete === false) {
+    if (options.incomingComplete === false && !hasPerSourceUnresolvedState) {
       return { bindings: cloneGenerateNodeReferenceBindings(existing), validationError: null }
     }
   }
@@ -722,28 +787,62 @@ export function reconcileGenerateNodeReferenceBindings(
 
   const explicitIncomingIds = incomingAssets.map(rawGenerateNodeReferenceId)
   const usedIncoming = new Set<number>()
+  const reservedUnresolvedSources = new Set<number>()
+  const unresolvedSourceByExistingIndex = new Map<number, number>()
+  existing.forEach((binding, existingIndex) => {
+    if (!hasGenerateNodeReferenceSourceIdentity(binding)) return
+    const unresolvedIndex = unresolvedSources.findIndex((source, index) => (
+      !reservedUnresolvedSources.has(index)
+      && source.type === binding.type
+      && generateNodeReferenceSourceIdentityMatches(binding, source)
+    ))
+    if (unresolvedIndex < 0) return
+    reservedUnresolvedSources.add(unresolvedIndex)
+    unresolvedSourceByExistingIndex.set(existingIndex, unresolvedIndex)
+  })
   const reconciled: GenerateNodeReferenceBinding[] = []
   const findIncoming = (predicate: (candidate: GenerateNodeReferenceBinding, index: number) => boolean) => (
     incoming.findIndex((candidate, index) => !usedIncoming.has(index) && predicate(candidate, index))
   )
 
-  existing.forEach(binding => {
+  existing.forEach((binding, existingIndex) => {
     let incomingIndex = findIncoming(candidate => generateNodeReferenceSourceIdentityMatches(binding, candidate))
+    const findFallbackIncoming = (predicate: (candidate: GenerateNodeReferenceBinding, index: number) => boolean) => (
+      findIncoming((candidate, index) => (
+        !generateNodeReferenceSourceIdentityConflicts(binding, candidate)
+        && predicate(candidate, index)
+      ))
+    )
     if (incomingIndex < 0) {
-      incomingIndex = findIncoming((candidate, index) => (
+      incomingIndex = findFallbackIncoming((candidate, index) => (
         Boolean(explicitIncomingIds[index]) && explicitIncomingIds[index] === binding.reference_id
       ))
     }
     if (incomingIndex < 0) {
-      incomingIndex = findIncoming(candidate => generateNodeReferenceLineageMatches(binding, candidate))
+      incomingIndex = findFallbackIncoming(candidate => generateNodeReferenceLineageMatches(binding, candidate))
     }
     if (incomingIndex < 0) {
-      incomingIndex = findIncoming(candidate => (
+      incomingIndex = findFallbackIncoming(candidate => (
         candidate.type === binding.type
         && generateNodeReferenceValue(candidate) === generateNodeReferenceValue(binding)
       ))
     }
-    if (incomingIndex < 0) return
+    if (incomingIndex < 0) {
+      if (unresolvedSourceByExistingIndex.has(existingIndex)) {
+        reconciled.push(cloneGenerateNodeReferenceBindings([binding])[0])
+        return
+      }
+      if (!hasGenerateNodeReferenceSourceIdentity(binding)) {
+        const unresolvedIndex = unresolvedSources.findIndex((source, index) => (
+          !reservedUnresolvedSources.has(index) && source.type === binding.type
+        ))
+        if (unresolvedIndex >= 0) {
+          reservedUnresolvedSources.add(unresolvedIndex)
+          reconciled.push(cloneGenerateNodeReferenceBindings([binding])[0])
+        }
+      }
+      return
+    }
     usedIncoming.add(incomingIndex)
     const candidate = incoming[incomingIndex]
     reconciled.push({
@@ -811,6 +910,23 @@ export function buildGenerateNodeReferenceBindingsFingerprint(
     url: binding.url ?? null,
     content: binding.content ?? null,
     source_asset_ids: binding.source_asset_ids ? [...binding.source_asset_ids] : [],
+  })))
+}
+
+export function buildGenerateNodeReferenceBindingsLocalFingerprint(
+  bindings: readonly GenerateNodeReferenceBinding[],
+) {
+  return JSON.stringify(normalizeGenerateNodeReferenceBindings(bindings, []).map(binding => ({
+    reference_index: binding.reference_index,
+    reference_id: binding.reference_id,
+    reference_role: binding.reference_role,
+    type: binding.type,
+    url: binding.url ?? null,
+    content: binding.content ?? null,
+    source_asset_ids: binding.source_asset_ids ? [...binding.source_asset_ids] : [],
+    source_edge_id: binding.source_edge_id ?? null,
+    source_node_id: binding.source_node_id ?? null,
+    source_handle: binding.source_handle ?? null,
   })))
 }
 

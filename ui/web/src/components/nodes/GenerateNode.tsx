@@ -39,6 +39,7 @@ import {
   buildGenerateNodeAssetPayload,
   buildGenerateNodeCanonicalReferenceBindings,
   buildGenerateNodeReferenceBindingsFingerprint,
+  buildGenerateNodeReferenceBindingsLocalFingerprint,
   buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeReferencePersistencePayload,
   buildGenerateNodeRequestPayload,
@@ -97,6 +98,7 @@ export {
   buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeReferencePayload,
   buildGenerateNodeReferenceBindingsFingerprint,
+  buildGenerateNodeReferenceBindingsLocalFingerprint,
   buildGenerateNodeReferencePersistencePayload,
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
@@ -124,6 +126,7 @@ export type {
   GenerateNodeReferenceRole,
   GenerateNodeReferenceType,
   GenerateNodeReferenceValidationState,
+  GenerateNodeUnresolvedReferenceSource,
 } from './generate-node-model'
 
 const { TextArea } = Input
@@ -239,7 +242,7 @@ function GenerateNodeImpl(props: NodeProps) {
     initialReferenceReconcileRef.current = reconcileGenerateNodeReferenceBindings(
       persistedReferenceBindings,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
+      { unresolvedSources: incomingContext.unresolvedReferenceSources },
     )
   }
   const initialReferenceBindingsChangedRef = useRef(shouldInvalidateGenerateNodeInitialCompileAudit(
@@ -389,11 +392,11 @@ function GenerateNodeImpl(props: NodeProps) {
     const reconciled = reconcileGenerateNodeReferenceBindings(
       referenceBindingsRef.current,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
+      { unresolvedSources: incomingContext.unresolvedReferenceSources },
     )
     setReferenceValidationError(incomingContext.referenceValidationError || reconciled.validationError)
-    const currentFingerprint = buildGenerateNodeReferenceBindingsFingerprint(referenceBindingsRef.current)
-    const nextFingerprint = buildGenerateNodeReferenceBindingsFingerprint(reconciled.bindings)
+    const currentFingerprint = buildGenerateNodeReferenceBindingsLocalFingerprint(referenceBindingsRef.current)
+    const nextFingerprint = buildGenerateNodeReferenceBindingsLocalFingerprint(reconciled.bindings)
     if (currentFingerprint !== nextFingerprint) setReferenceBindings(reconciled.bindings)
   }, [incomingContext.fingerprint])
 
@@ -1023,7 +1026,7 @@ function GenerateNodeImpl(props: NodeProps) {
     const reconciled = reconcileGenerateNodeReferenceBindings(
       nextBindings,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
+      { unresolvedSources: incomingContext.unresolvedReferenceSources },
     )
     setReferenceValidationError(incomingContext.referenceValidationError || reconciled.validationError)
     setReferenceBindings(reconciled.bindings)

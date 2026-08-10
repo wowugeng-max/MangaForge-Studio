@@ -1208,6 +1208,77 @@ describe('GenerateNode ordered reference bindings', () => {
     }
   })
 
+  test('does not transfer persisted roles across explicitly different graph identities', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const persisted = normalizeBindings([
+      {
+        type: 'image', url: '/shared.png', reference_id: 'old-ref', reference_role: 'character',
+        source_asset_ids: [42], source_edge_id: 'edge-old', source_node_id: 'source-old',
+      },
+      {
+        type: 'image', url: '/shared.png', reference_id: 'keep-ref', reference_role: 'style',
+        source_asset_ids: [42], source_edge_id: 'edge-keep', source_node_id: 'source-keep',
+      },
+    ], [])
+    const reconciled = reconcileBindings(persisted, [
+      {
+        type: 'image', url: '/shared.png', source_asset_ids: [42],
+        source_edge_id: 'edge-keep', source_node_id: 'source-keep',
+      },
+      {
+        type: 'image', url: '/shared.png', source_asset_ids: [42],
+        source_edge_id: 'edge-new', source_node_id: 'source-new',
+      },
+    ], { incomingComplete: true })
+
+    expect(reconciled.validationError).toBeNull()
+    expect(reconciled.bindings).toMatchObject([
+      {
+        reference_id: 'keep-ref', reference_role: 'style',
+        source_edge_id: 'edge-keep', source_node_id: 'source-keep',
+      },
+      {
+        reference_role: 'general',
+        source_edge_id: 'edge-new', source_node_id: 'source-new',
+      },
+    ])
+    expect(reconciled.bindings[1].reference_id).not.toBe('old-ref')
+    expect(new Set(reconciled.bindings.map((binding: any) => binding.source_edge_id))).toEqual(new Set(['edge-keep', 'edge-new']))
+  })
+
+  test('detects identity-only live reconciliation changes without changing canonical compile inputs', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildCanonicalFingerprint = module.buildGenerateNodeReferenceBindingsFingerprint
+    const buildLocalFingerprint = module.buildGenerateNodeReferenceBindingsLocalFingerprint
+    expect(typeof buildLocalFingerprint).toBe('function')
+    if (typeof buildLocalFingerprint !== 'function') return
+
+    const legacy = normalizeBindings([
+      {
+        type: 'image', url: '/same.png', reference_id: 'stable-ref', reference_role: 'character', source_asset_ids: [51],
+      },
+    ], [])
+    const migrated = reconcileBindings(legacy, [
+      {
+        type: 'image', url: '/same.png', source_asset_ids: [51],
+        source_edge_id: 'edge-stable', source_node_id: 'source-stable', source_handle: 'out',
+      },
+    ], { incomingComplete: true }).bindings
+
+    expect(buildCanonicalFingerprint(migrated)).toBe(buildCanonicalFingerprint(legacy))
+    expect(buildLocalFingerprint(migrated)).not.toBe(buildLocalFingerprint(legacy))
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const liveReconcileStart = source.indexOf('if (reconciledIncomingFingerprintRef.current === incomingContext.fingerprint) return')
+    const liveReconcileEnd = source.indexOf('useEffect(() => {', liveReconcileStart + 1)
+    const liveReconcileSource = source.slice(liveReconcileStart, liveReconcileEnd)
+    expect(liveReconcileSource).toContain('buildGenerateNodeReferenceBindingsLocalFingerprint')
+  })
+
   test('keeps persisted bindings while linked React Flow sources are unresolved, then removes true disconnects', async () => {
     const module = await loadGenerateNodeReferenceApi()
     const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
@@ -1231,9 +1302,12 @@ describe('GenerateNode ordered reference bindings', () => {
       resolvedReferenceEdgeCount: 0,
       unresolvedReferenceEdgeCount: 1,
       referenceValidationError: null,
+      unresolvedReferenceSources: [
+        { type: 'image', source_edge_id: 'edge-unresolved', source_node_id: 'source-not-mounted' },
+      ],
     })
     expect(reconcileBindings(persisted, unresolved.incomingAssets, {
-      incomingComplete: unresolved.unresolvedReferenceEdgeCount === 0,
+      unresolvedSources: unresolved.unresolvedReferenceSources,
     })).toEqual({ bindings: persisted, validationError: null })
 
     const disconnected = buildIncomingSnapshot({ nodeId: 'target', edges: [], nodes: [] })
@@ -1243,9 +1317,10 @@ describe('GenerateNode ordered reference bindings', () => {
       resolvedReferenceEdgeCount: 0,
       unresolvedReferenceEdgeCount: 0,
       referenceValidationError: null,
+      unresolvedReferenceSources: [],
     })
     expect(reconcileBindings(persisted, disconnected.incomingAssets, {
-      incomingComplete: disconnected.unresolvedReferenceEdgeCount === 0,
+      unresolvedSources: disconnected.unresolvedReferenceSources,
     })).toEqual({ bindings: [], validationError: null })
   })
 
@@ -1307,6 +1382,85 @@ describe('GenerateNode ordered reference bindings', () => {
         source_asset_ids: [171], source_edge_id: 'edge-valid',
       },
     ])
+  })
+
+  test('reconciles mixed valid, invalid, unresolved, disconnected, and legacy sources per binding', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildIncomingSnapshot = module.buildGenerateNodeIncomingContextSnapshot
+    const persisted = normalizeBindings([
+      {
+        type: 'image', url: '/valid-v1.png', reference_id: 'valid-ref', reference_role: 'character',
+        source_asset_ids: [101], source_edge_id: 'edge-valid', source_node_id: 'source-valid',
+      },
+      {
+        type: 'image', url: '/unresolved-v1.png', reference_id: 'unresolved-ref', reference_role: 'style',
+        source_asset_ids: [201], source_edge_id: 'edge-unresolved', source_node_id: 'source-unresolved',
+      },
+      {
+        type: 'image', url: '/invalid-v1.png', reference_id: 'invalid-ref', reference_role: 'scene',
+        source_asset_ids: [301], source_edge_id: 'edge-invalid', source_node_id: 'source-invalid',
+      },
+      {
+        type: 'image', url: '/disconnected-v1.png', reference_id: 'disconnected-ref', reference_role: 'full_reference',
+        source_asset_ids: [401], source_edge_id: 'edge-disconnected', source_node_id: 'source-disconnected',
+      },
+      {
+        type: 'image', url: '/legacy-keep.png', reference_id: 'legacy-keep', reference_role: 'general', source_asset_ids: [501],
+      },
+      {
+        type: 'image', url: '/legacy-drop.png', reference_id: 'legacy-drop', reference_role: 'general', source_asset_ids: [502],
+      },
+    ], [])
+    const persistedSnapshot = JSON.parse(JSON.stringify(persisted))
+    const snapshot = buildIncomingSnapshot({
+      nodeId: 'target',
+      edges: [
+        { id: 'edge-valid', source: 'source-valid', target: 'target', targetHandle: 'image' },
+        { id: 'edge-unresolved', source: 'source-unresolved', target: 'target', targetHandle: 'image' },
+        { id: 'edge-unresolved-legacy', source: 'source-unresolved-legacy', target: 'target', targetHandle: 'image' },
+        { id: 'edge-invalid', source: 'source-invalid', target: 'target', targetHandle: 'image' },
+      ],
+      nodes: [
+        { id: 'source-valid', data: { result: { content: '/valid-v2.png', source_asset_ids: [111] } } },
+        { id: 'source-invalid', data: { result: { content: '', source_asset_ids: [311] } } },
+      ],
+    })
+
+    expect(snapshot).toMatchObject({
+      referenceEdgeCount: 4,
+      resolvedReferenceEdgeCount: 2,
+      unresolvedReferenceEdgeCount: 2,
+      referenceValidationError: { error_code: 'REFERENCE_ASSET_INVALID' },
+      unresolvedReferenceSources: [
+        { type: 'image', source_edge_id: 'edge-unresolved', source_node_id: 'source-unresolved' },
+        { type: 'image', source_edge_id: 'edge-unresolved-legacy', source_node_id: 'source-unresolved-legacy' },
+      ],
+    })
+    const reconciled = reconcileBindings(persisted, snapshot.incomingAssets, {
+      incomingComplete: snapshot.unresolvedReferenceEdgeCount === 0,
+      unresolvedSources: snapshot.unresolvedReferenceSources,
+    })
+
+    expect(reconciled.validationError).toBeNull()
+    expect(reconciled.bindings).toMatchObject([
+      {
+        reference_id: 'valid-ref', reference_role: 'character', url: '/api/assets/media/valid-v2.png',
+        source_asset_ids: [111], source_edge_id: 'edge-valid',
+      },
+      {
+        reference_id: 'unresolved-ref', reference_role: 'style', url: '/api/assets/media/unresolved-v1.png',
+        source_edge_id: 'edge-unresolved',
+      },
+      {
+        reference_id: 'legacy-keep', reference_role: 'general', url: '/api/assets/media/legacy-keep.png',
+      },
+    ])
+    expect(reconciled.bindings.map((binding: any) => binding.reference_id)).not.toContain('invalid-ref')
+    expect(reconciled.bindings.map((binding: any) => binding.reference_id)).not.toContain('disconnected-ref')
+    expect(reconciled.bindings.map((binding: any) => binding.reference_id)).not.toContain('legacy-drop')
+    expect(persisted).toEqual(persistedSnapshot)
   })
 
   test('flows role and order edits through persistence, hydration, preview assets, request payload, and compile fingerprint', async () => {
