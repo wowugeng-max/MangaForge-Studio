@@ -356,6 +356,114 @@ describe('canvas skill routes', () => {
     expect(executeCalls).toHaveLength(2)
   })
 
+  test('routes reserved audio and video references through shared validation before model execution', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const compileInputs: any[] = []
+    const modelExecutions: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => manifest() } as any,
+      readModels: async () => [{
+        id: 4,
+        model_name: 'fixture-compiler',
+        provider: 'fixture',
+        display_name: 'Fixture Compiler',
+        capabilities: { chat: true, vision: true },
+      } as any],
+      executeWithRuntimeModel: async (...args) => {
+        modelExecutions.push(args)
+        throw new Error('reserved media must fail before compiler model execution')
+      },
+    })
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileInputs.push(input)
+        return compiler(input)
+      },
+    })
+
+    const cases = [
+      { payloadKey: 'incoming_assets', type: 'audio', url: 'https://example.com/reference.wav' },
+      { payloadKey: 'incoming_assets', type: 'video', url: 'https://example.com/reference.mp4' },
+      { payloadKey: 'assets', type: 'audio', url: '/api/assets/media/reference.wav' },
+      { payloadKey: 'assets', type: 'video', url: '/api/files/reference.mp4' },
+    ] as const
+    const expectedAssets: any[] = []
+    const responses: Array<{ response: any; type: 'audio' | 'video' }> = []
+
+    for (const [index, reservedCase] of cases.entries()) {
+      const asset = {
+        type: reservedCase.type,
+        url: reservedCase.url,
+        source_asset_ids: [index + 101],
+        reference_index: index + 11,
+        reference_id: `reserved-${reservedCase.payloadKey}-${reservedCase.type}`,
+        reference_role: index % 2 === 0 ? 'scene' : 'style',
+        ignored_transport_key: 'do-not-forward',
+      }
+      expectedAssets.push({
+        type: asset.type,
+        url: asset.url,
+        source_asset_ids: asset.source_asset_ids,
+        reference_index: asset.reference_index,
+        reference_id: asset.reference_id,
+        reference_role: asset.reference_role,
+      })
+      const response = await call(handlers.get('POST /api/skills/compile-preview')!, {
+        body: {
+          skill_name: 'prompt-skill',
+          prompt: `compile ${reservedCase.type} reference`,
+          mode: 'image_to_video',
+          compiler_model_id: 4,
+          [reservedCase.payloadKey]: [asset],
+        },
+      })
+      responses.push({ response, type: reservedCase.type })
+    }
+
+    expect(responses.map(({ response }) => response.statusCode)).toEqual([422, 422, 422, 422])
+    for (const { response, type } of responses) {
+      expect(response.body).toMatchObject({
+        error_code: 'REFERENCE_MEDIA_UNSUPPORTED',
+        detail: `Reference media type ${type} is not executable yet`,
+      })
+    }
+
+    expect(compileInputs.map(input => input.incomingAssets[0])).toEqual(expectedAssets)
+    expect(modelExecutions).toHaveLength(0)
+  })
+
+  test('keeps unknown preview reference types as malformed requests', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    let compilerCalls = 0
+    registerSkillRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compilerCalls += 1
+        return { result: { skill_name: 'prompt-skill', skill_version: 'abc123', mode: input.mode, prompt: 'unexpected', negative_prompt: '', parameters: {}, references_used: [], warnings: [] }, inputHash: 'unexpected', cached: false, compilerModelId: 4, skill: manifest() }
+      },
+    })
+
+    const response = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: {
+        skill_name: 'prompt-skill',
+        prompt: 'compile unknown reference',
+        mode: 'image_to_video',
+        compiler_model_id: 4,
+        incoming_assets: [{ type: 'document', url: 'https://example.com/reference.pdf' }],
+      },
+    })
+
+    expect(response.statusCode).toBe(400)
+    expect(response.body).toMatchObject({ error_code: 'SKILL_REQUEST_INVALID' })
+    expect(response.body.detail).toContain('assets[0].type')
+    expect(compilerCalls).toBe(0)
+  })
+
   test('restricts incoming asset URLs and bounds asset text', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
     workspaces.push(workspace)

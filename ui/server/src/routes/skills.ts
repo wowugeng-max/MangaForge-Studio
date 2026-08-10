@@ -181,7 +181,7 @@ function normalizeIncomingAssets(value: unknown): PromptCompileInput['incomingAs
   return value.map((raw, index) => {
     if (!isPlainRecord(raw)) throw new TypeError(`assets[${index}] must be an object`)
     const type = raw.type ?? raw.asset_type
-    if (type !== 'image' && type !== 'prompt') throw new TypeError(`assets[${index}].type must be image or prompt`)
+    if (type !== 'image' && type !== 'prompt' && type !== 'video' && type !== 'audio') throw new TypeError(`assets[${index}].type must be image, prompt, video, or audio`)
     const sourceAssetIds = raw.source_asset_ids ?? raw.sourceAssetIds
     if (sourceAssetIds !== undefined && (!Array.isArray(sourceAssetIds) || sourceAssetIds.some(item => !Number.isSafeInteger(item)))) {
       throw new TypeError(`assets[${index}].source_asset_ids must be an array of integers`)
