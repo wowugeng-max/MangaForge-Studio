@@ -1117,6 +1117,19 @@ export function buildGenerateNodeAssetPayload(input: {
   }
 }
 
+export function resolveGenerateNodeResultReferenceBindings(
+  result: unknown,
+): GenerateNodeReferenceBinding[] | undefined {
+  if (!isGenerateNodeReferenceRecord(result) || !Array.isArray(result.reference_bindings)) return undefined
+  try {
+    return buildGenerateNodeCanonicalReferenceBindings(
+      normalizeGenerateNodeReferenceBindings(result.reference_bindings, []),
+    )
+  } catch {
+    return undefined
+  }
+}
+
 export function normalizeGenerateNodeGenerationPacket(packet: any) {
   const root = packet && typeof packet === 'object' ? packet : {}
   const data = root?.data
@@ -1165,6 +1178,44 @@ export function normalizeGenerateNodeGenerationPacket(packet: any) {
   return typeof content === 'string'
     ? { content, ...compileAudit, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
     : content || packet
+}
+
+export type GenerateNodeRunToken = Readonly<{
+  runId: number
+  referenceBindings: readonly GenerateNodeReferenceBinding[]
+}>
+
+export function createGenerateNodeRunTracker() {
+  let nextRunId = 1
+  let activeRun: GenerateNodeRunToken | null = null
+  return {
+    start(bindings: readonly GenerateNodeReferenceBinding[]): GenerateNodeRunToken | null {
+      if (activeRun) return null
+      const referenceBindings = buildGenerateNodeCanonicalReferenceBindings(bindings).map(binding => {
+        const sourceAssetIds = binding.source_asset_ids ? [...binding.source_asset_ids] : undefined
+        if (sourceAssetIds) Object.freeze(sourceAssetIds)
+        return Object.freeze({
+          ...binding,
+          ...(sourceAssetIds ? { source_asset_ids: sourceAssetIds } : {}),
+        })
+      })
+      Object.freeze(referenceBindings)
+      activeRun = Object.freeze({ runId: nextRunId, referenceBindings })
+      nextRunId += 1
+      return activeRun
+    },
+    isCurrent(token: GenerateNodeRunToken | null | undefined) {
+      return Boolean(token && activeRun === token)
+    },
+    complete(token: GenerateNodeRunToken | null | undefined) {
+      if (!token || activeRun !== token) return false
+      activeRun = null
+      return true
+    },
+    invalidate() {
+      activeRun = null
+    },
+  }
 }
 
 export function freezeGenerateNodeExecutionReferences(

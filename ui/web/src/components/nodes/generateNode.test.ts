@@ -1670,37 +1670,147 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(frozen.source_asset_ids).toEqual([99, 11, 22, 33])
   })
 
+  test('guards manual and run-signal overlap and rejects stale out-of-order completions', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const createRunTracker = module.createGenerateNodeRunTracker
+    expect(typeof createRunTracker).toBe('function')
+    if (typeof createRunTracker !== 'function') return
+
+    const tracker = createRunTracker()
+    const manualBindings = [{
+      type: 'image', url: '/manual.png', reference_id: 'manual-ref', reference_role: 'character',
+      reference_index: 1, source_asset_ids: [11],
+    }]
+    const signalBindings = [{
+      type: 'image', url: '/signal.png', reference_id: 'signal-ref', reference_role: 'style',
+      reference_index: 1, source_asset_ids: [22],
+    }]
+
+    const manualRun = tracker.start(manualBindings)
+    expect(manualRun).not.toBeNull()
+    const overlappingRunSignal = tracker.start(signalBindings)
+    expect(overlappingRunSignal).toBeNull()
+    manualBindings[0].url = '/edited-after-start.png'
+    manualBindings[0].source_asset_ids[0] = 999
+    expect(manualRun.referenceBindings[0]).toMatchObject({
+      url: '/api/assets/media/manual.png', source_asset_ids: [11],
+    })
+
+    expect(tracker.complete(manualRun)).toBe(true)
+    const nextRunSignal = tracker.start(signalBindings)
+    expect(nextRunSignal).not.toBeNull()
+    expect(tracker.complete(manualRun)).toBe(false)
+    expect(tracker.isCurrent(nextRunSignal)).toBe(true)
+    expect(tracker.complete(nextRunSignal)).toBe(true)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())')
+    const handleRunStart = source.indexOf('const handleRun = async () => {')
+    const runSignalEffectStart = source.indexOf('useEffect(() => {', handleRunStart)
+    const handleRunSource = source.slice(handleRunStart, runSignalEffectStart)
+    expect(handleRunSource).toContain('generateRunTrackerRef.current.start(executionReferenceBindings)')
+    expect(handleRunSource).toContain('if (!runToken) return')
+    expect(handleRunSource).toContain('msg => handleSSEMessage(msg, runToken)')
+    expect(handleRunSource).toContain('finishGeneration(res.data, runToken)')
+    expect(handleRunSource).toContain('failGeneration(error, runToken)')
+    const afterConnectSource = handleRunSource.slice(
+      handleRunSource.indexOf('await sseClient.connect()'),
+      handleRunSource.indexOf("setProgressMsg('正在唤醒云端大脑...')"),
+    )
+    expect(afterConnectSource).toContain('if (!generateRunTrackerRef.current.isCurrent(runToken)) return')
+    const afterRequestSource = handleRunSource.slice(
+      handleRunSource.indexOf("await apiClient.request({ url: '/generate'"),
+      handleRunSource.indexOf('if (res.data?.client_id'),
+    )
+    expect(afterRequestSource).toContain('if (!generateRunTrackerRef.current.isCurrent(runToken)) return')
+
+    const finishStart = source.indexOf('const finishGeneration =')
+    const failStart = source.indexOf('const failGeneration =', finishStart)
+    const finishSource = source.slice(finishStart, failStart)
+    expect(finishSource).toContain('generateRunTrackerRef.current.isCurrent(runToken)')
+    expect(finishSource).toContain('runToken.referenceBindings')
+    const failSource = source.slice(failStart, source.indexOf('const handleSSEMessage', failStart))
+    expect(failSource).toContain('generateRunTrackerRef.current.complete(runToken)')
+  })
+
   test('uses the active run reference snapshot for result, downstream, and saved provenance', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
-    expect(source).toContain('const activeRunReferenceBindingsRef = useRef<GenerateNodeReferenceBinding[] | null>(null)')
+    expect(source).toContain('const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())')
 
     const handleRunStart = source.indexOf('const handleRun = async () => {')
     const runSignalEffectStart = source.indexOf('useEffect(() => {', handleRunStart)
     const handleRunSource = source.slice(handleRunStart, runSignalEffectStart)
-    expect(handleRunSource.indexOf('activeRunReferenceBindingsRef.current =')).toBeGreaterThan(-1)
-    expect(handleRunSource.indexOf('activeRunReferenceBindingsRef.current =')).toBeLessThan(handleRunSource.indexOf('createSSEClient'))
+    expect(handleRunSource.indexOf('generateRunTrackerRef.current.start(executionReferenceBindings)')).toBeGreaterThan(-1)
+    expect(handleRunSource.indexOf('generateRunTrackerRef.current.start(executionReferenceBindings)')).toBeLessThan(handleRunSource.indexOf('createSSEClient'))
 
     const finishStart = source.indexOf('const finishGeneration =')
     const failStart = source.indexOf('const failGeneration =', finishStart)
     const finishSource = source.slice(finishStart, failStart)
     expect(finishSource).toContain('freezeGenerateNodeExecutionReferences')
-    expect(finishSource).toContain('activeRunReferenceBindingsRef.current')
+    expect(finishSource).toContain('runToken.referenceBindings')
     expect(finishSource).toContain('result: finalResult')
     expect(finishSource).toContain('incoming_data: finalResult')
-    expect(finishSource).toContain('activeRunReferenceBindingsRef.current = null')
+    expect(finishSource).toContain('generateRunTrackerRef.current.complete(runToken)')
 
     const failSource = source.slice(failStart, source.indexOf('const handleSSEMessage', failStart))
-    expect(failSource).toContain('activeRunReferenceBindingsRef.current = null')
+    expect(failSource).toContain('generateRunTrackerRef.current.complete(runToken)')
 
     const saveStart = source.indexOf('const handleSaveToAsset =')
     const saveEnd = source.indexOf('const commitReferenceBindings =', saveStart)
     const saveSource = source.slice(saveStart, saveEnd)
-    expect(saveSource).toContain('Array.isArray(result?.reference_bindings)')
+    expect(saveSource).toContain('resolveGenerateNodeResultReferenceBindings(result)')
     expect(saveSource).toContain('const savedReferenceBindings =')
     expect(saveSource).toContain('referenceBindings: savedReferenceBindings')
 
     const skillAuditKeysSource = source.slice(source.indexOf('const SKILL_AUDIT_KEYS ='), source.indexOf('function withoutSkillAudit'))
     expect(skillAuditKeysSource).not.toContain("'reference_bindings'")
+  })
+
+  test('does not fabricate saved provenance from live bindings when the result snapshot is missing or invalid', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const resolveResultBindings = module.resolveGenerateNodeResultReferenceBindings
+    expect(typeof resolveResultBindings).toBe('function')
+    if (typeof resolveResultBindings !== 'function') return
+
+    const editedLiveBindings = [{
+      type: 'image', url: '/edited-after-generation.png', reference_id: 'edited-ref', reference_role: 'style',
+      reference_index: 1, source_asset_ids: [999],
+    }]
+    const legacyResult = { content: '/legacy-output.png', source_asset_ids: [41] }
+    const missingSnapshot = resolveResultBindings(legacyResult)
+    expect(missingSnapshot).toBeUndefined()
+    const invalidSnapshot = resolveResultBindings({
+      ...legacyResult,
+      reference_bindings: [{ type: 'image', url: '', reference_id: 'broken-ref', reference_role: 'character' }],
+    })
+    expect(invalidSnapshot).toBeUndefined()
+
+    const savedAsset = buildGenerateNodeAssetPayload({
+      resultContent: legacyResult.content,
+      mode: 'image_to_image',
+      prompt: 'legacy result',
+      selectedModel: 'image-model',
+      provider: 'provider-a',
+      selectedRolePrompt: 'director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '1:1',
+      ratioSize: '1024*1024',
+      sourceAssetIds: legacyResult.source_asset_ids,
+      referenceBindings: missingSnapshot,
+    })
+    expect(savedAsset.source_asset_ids).toEqual([41])
+    expect(savedAsset.data.reference_bindings).toBeUndefined()
+    expect(JSON.stringify(savedAsset)).not.toContain('edited-ref')
+    expect(JSON.stringify(savedAsset)).not.toContain('999')
+    expect(editedLiveBindings[0].reference_id).toBe('edited-ref')
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const saveStart = source.indexOf('const handleSaveToAsset =')
+    const saveEnd = source.indexOf('const commitReferenceBindings =', saveStart)
+    const saveSource = source.slice(saveStart, saveEnd)
+    expect(saveSource).toContain('resolveGenerateNodeResultReferenceBindings(result)')
+    expect(saveSource).not.toContain(': referenceBindings')
   })
 
   test('preserves compiler-owned reference audit fields across packets and asset provenance', async () => {

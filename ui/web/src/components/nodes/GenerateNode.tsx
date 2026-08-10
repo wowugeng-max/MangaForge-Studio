@@ -47,6 +47,7 @@ import {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
+  createGenerateNodeRunTracker,
   freezeGenerateNodeExecutionReferences,
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
@@ -62,6 +63,7 @@ import {
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodePreviewMediaSrc,
+  resolveGenerateNodeResultReferenceBindings,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
   shouldInvalidateGenerateNodeInitialCompileAudit,
@@ -73,6 +75,7 @@ import type {
   GenerateNodeReferenceBinding,
   GenerateNodeReferenceRole,
   GenerateNodeReferenceValidationState,
+  GenerateNodeRunToken,
 } from './generate-node-model'
 
 export {
@@ -103,6 +106,7 @@ export {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
+  createGenerateNodeRunTracker,
   freezeGenerateNodeExecutionReferences,
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
@@ -113,6 +117,7 @@ export {
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeSkillArguments,
+  resolveGenerateNodeResultReferenceBindings,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
@@ -126,6 +131,7 @@ export type {
   GenerateNodeReferenceRole,
   GenerateNodeReferenceType,
   GenerateNodeReferenceValidationState,
+  GenerateNodeRunToken,
   GenerateNodeUnresolvedReferenceSource,
 } from './generate-node-model'
 
@@ -260,7 +266,7 @@ function GenerateNodeImpl(props: NodeProps) {
   ))
   const referenceBindingsRef = useRef(referenceBindings)
   referenceBindingsRef.current = referenceBindings
-  const activeRunReferenceBindingsRef = useRef<GenerateNodeReferenceBinding[] | null>(null)
+  const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())
   const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
@@ -569,7 +575,7 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => () => {
     sseClientRef.current?.disconnect()
     sseClientRef.current = null
-    activeRunReferenceBindingsRef.current = null
+    generateRunTrackerRef.current.invalidate()
   }, [])
 
   useEffect(() => {
@@ -772,7 +778,8 @@ function GenerateNodeImpl(props: NodeProps) {
     packet?.data?.result?.content != null
   )
 
-  const finishGeneration = (packet: any) => {
+  const finishGeneration = (packet: any, runToken: GenerateNodeRunToken) => {
+    if (!generateRunTrackerRef.current.isCurrent(runToken)) return
     const currentNodeData = useCanvasStore.getState().nodes.find(node => node.id === id)?.data || data
     const expectedCountRaw = currentNodeData?._fissionExpectedCount
     const expectedCount = Number.isFinite(Number(expectedCountRaw)) ? Number(expectedCountRaw) : null
@@ -782,9 +789,7 @@ function GenerateNodeImpl(props: NodeProps) {
       expectedCount,
       onCountMismatch: ({ expected, actual }) => message.warning(`裂变数量校验失败：期望 ${expected} 条，实际 ${actual} 条，已回退普通输出`),
     })
-    const activeRunReferenceBindings = activeRunReferenceBindingsRef.current
-      ? buildGenerateNodeCanonicalReferenceBindings(activeRunReferenceBindingsRef.current)
-      : buildGenerateNodeCanonicalReferenceBindings(referenceBindingsRef.current)
+    const activeRunReferenceBindings = runToken.referenceBindings
     const resultReferenceAudit = Array.isArray(packetResult?.reference_bindings)
       ? reconcileGenerateNodeReferenceBindings(undefined, packetResult.reference_bindings)
       : null
@@ -793,6 +798,7 @@ function GenerateNodeImpl(props: NodeProps) {
       : activeRunReferenceBindings
     const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
     const compilerOwnedBindings = finalResult.reference_bindings
+    if (!generateRunTrackerRef.current.complete(runToken)) return
 
     if (finalResult?.compiled_prompt !== undefined) {
       const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
@@ -847,7 +853,6 @@ function GenerateNodeImpl(props: NodeProps) {
         compiler_model_id: finalResult.compiler_model_id,
       } : {}),
     })
-    activeRunReferenceBindingsRef.current = null
     setNodeStatus(id, 'success')
     setGenerating(false)
     setProgressMsg('')
@@ -869,8 +874,8 @@ function GenerateNodeImpl(props: NodeProps) {
     }
   }
 
-  const failGeneration = (error: unknown) => {
-    activeRunReferenceBindingsRef.current = null
+  const failGeneration = (error: unknown, runToken: GenerateNodeRunToken) => {
+    if (!generateRunTrackerRef.current.complete(runToken)) return
     const compatibilityError = parseGenerateNodeExecutionCompatibilityError(error)
     if (compatibilityError) setExecutionCompatibilityError(compatibilityError)
     const value = error as any
@@ -891,21 +896,22 @@ function GenerateNodeImpl(props: NodeProps) {
     sseClientRef.current = null
   }
 
-  const handleSSEMessage = (msg: SSEMessage) => {
+  const handleSSEMessage = (msg: SSEMessage, runToken: GenerateNodeRunToken) => {
+    if (!generateRunTrackerRef.current.isCurrent(runToken)) return
     if (msg.type === 'status') {
       setProgressMsg(String(msg.message || msg.progress || '云端正在生成...'))
       return
     }
     if (msg.type === 'result') {
-      finishGeneration(msg.data ?? msg.result ?? msg)
+      finishGeneration(msg.data ?? msg.result ?? msg, runToken)
       return
     }
     if (msg.type === 'error') {
-      failGeneration(msg)
+      failGeneration(msg, runToken)
       return
     }
     if (msg.type === 'interrupted') {
-      failGeneration(msg)
+      failGeneration(msg, runToken)
     }
   }
 
@@ -933,37 +939,33 @@ function GenerateNodeImpl(props: NodeProps) {
     const executableReferenceBindings = prepareReferenceBindingsForExecution()
     if (executableReferenceBindings === null) return
     const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(executableReferenceBindings)
-    activeRunReferenceBindingsRef.current = executionReferenceBindings
+    const runToken = generateRunTrackerRef.current.start(executionReferenceBindings)
+    if (!runToken) return message.info('当前节点已有生成任务运行中')
     setGenerating(true)
     setProgressMsg('正在连接实时通道...')
     setNodeStatus(id, 'running')
     updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })
 
-    let waitingForSSE = false
     try {
       sseClientRef.current?.disconnect()
-      const sseClient = createSSEClient(id, handleSSEMessage)
+      const sseClient = createSSEClient(id, msg => handleSSEMessage(msg, runToken))
       sseClientRef.current = sseClient
       await sseClient.connect()
+      if (!generateRunTrackerRef.current.isCurrent(runToken)) return
 
       setProgressMsg('正在唤醒云端大脑...')
       const payload = buildPayload(executionReferenceBindings)
       const res = await apiClient.request({ url: '/generate', method: 'POST', data: payload })
+      if (!generateRunTrackerRef.current.isCurrent(runToken)) return
 
       if (res.data?.client_id && !hasImmediateGenerationResult(res.data)) {
-        waitingForSSE = true
         setProgressMsg('已进入后台生成，等待模型返回...')
         return
       }
 
-      finishGeneration(res.data)
+      finishGeneration(res.data, runToken)
     } catch (error: any) {
-      failGeneration(error)
-    } finally {
-      if (!waitingForSSE) {
-        setGenerating(false)
-        setProgressMsg('')
-      }
+      failGeneration(error, runToken)
     }
   }
 
@@ -979,12 +981,7 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const handleSaveToAsset = async () => {
     if (!result?.content) return
-    const resultReferenceAudit = Array.isArray(result?.reference_bindings)
-      ? reconcileGenerateNodeReferenceBindings(undefined, result.reference_bindings)
-      : null
-    const savedReferenceBindings = resultReferenceAudit && !resultReferenceAudit.validationError
-      ? resultReferenceAudit.bindings
-      : referenceBindings
+    const savedReferenceBindings = resolveGenerateNodeResultReferenceBindings(result)
     try {
       await apiClient.post('/assets/', buildGenerateNodeAssetPayload({
         resultContent: String(result.content),
