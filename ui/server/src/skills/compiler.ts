@@ -1,7 +1,11 @@
 import type { LLMMessage, LLMRequest, LLMResponse, LLMImageContentPart } from '../llm/types'
 import { executeWithRuntimeModel } from '../llm/provider-runtime'
 import { readModels, type ModelRecord } from '../model-store'
-import { loadSkillReferences, SkillPathError } from './path-safety'
+import {
+  loadSkillReferences,
+  MAX_SKILL_COMPILATION_MATERIAL_BYTES,
+  SkillPathError,
+} from './path-safety'
 import { createCompileCache, computeCompileInputHash, type CompileCacheInput } from './compile-cache'
 import { deriveH3ReferenceModeHint, validateCanvasReferenceAssets } from './reference-bindings'
 import { readSkillSettings } from './settings'
@@ -13,6 +17,7 @@ export type SkillCompilerErrorCode =
   | 'SKILL_COMPILER_MODEL_REQUIRED' | 'SKILL_COMPILER_MODEL_INCOMPATIBLE' | 'SKILL_COMPILER_VISION_REQUIRED'
   | 'SKILL_MODE_INCOMPATIBLE' | 'SKILL_RESULT_EMPTY' | 'SKILL_RESULT_INVALID' | 'SKILL_REFERENCE_MISSING'
   | 'SKILL_ARGUMENT_UNKNOWN' | 'SKILL_ARGUMENT_REQUIRED' | 'SKILL_ARGUMENT_INVALID' | 'SKILL_NOT_FOUND' | 'SKILL_AMBIGUOUS'
+  | 'SKILL_FILE_TOO_LARGE'
 
 export class SkillCompilerError extends Error {
   readonly code: SkillCompilerErrorCode
@@ -205,6 +210,14 @@ export function createPromptCompiler(deps: PromptCompilerDeps | RegistryLike = {
     try { refs = await loadSkillReferences(skill.rootDir, skill.references) } catch (error: any) {
       if (error instanceof SkillPathError || error?.code === 'SKILL_REFERENCE_MISSING') throw new SkillCompilerError('SKILL_REFERENCE_MISSING', error.message, error)
       throw error
+    }
+    const compilationMaterialBytes = Buffer.byteLength(skill.body, 'utf8')
+      + refs.reduce((total, ref) => total + Buffer.byteLength(ref.content, 'utf8'), 0)
+    if (compilationMaterialBytes > MAX_SKILL_COMPILATION_MATERIAL_BYTES) {
+      throw new SkillCompilerError(
+        'SKILL_FILE_TOO_LARGE',
+        `Skill compilation material exceeds the per-compilation limit of ${MAX_SKILL_COMPILATION_MATERIAL_BYTES} bytes (${compilationMaterialBytes} bytes loaded)`,
+      )
     }
     let args: Record<string, string>
     try { args = resolveSkillArguments(skill, parseSkillCommand(input.rawPrompt)?.argumentsText ?? '', input.arguments ?? {}) } catch (error: any) { throw new SkillCompilerError(error.code ?? 'SKILL_ARGUMENT_INVALID', error.message, error) }

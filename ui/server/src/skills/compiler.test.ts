@@ -693,6 +693,142 @@ describe('prompt compiler', () => {
     expect(JSON.stringify(calls[0])).not.toContain('secret')
   })
 
+  test('rejects combined compiler-bound Skill material over 512 KiB before model or cache access', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-budget-'))
+    await mkdir(join(root, 'references'))
+    const body = 'BODY'
+    const firstReference = 'a'.repeat(300 * 1024)
+    const secondReference = 'b'.repeat(300 * 1024)
+    await writeFile(join(root, 'references/first.txt'), firstReference)
+    await writeFile(join(root, 'references/second.txt'), secondReference)
+    const manifest = {
+      ...skill(root),
+      body,
+      references: ['references/first.txt', 'references/second.txt'],
+    }
+    const cacheRecords = new Map<string, any>()
+    let cacheReads = 0
+    let cacheWrites = 0
+    let modelReads = 0
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => manifest } as any,
+      cache: {
+        getCachedCompile: (_workspace: string, key: string) => {
+          cacheReads += 1
+          return cacheRecords.get(key)
+        },
+        putCachedCompile: (_workspace: string, record: any) => {
+          cacheWrites += 1
+          cacheRecords.set(record.key, record)
+        },
+        clear: () => cacheRecords.clear(),
+      },
+      readModels: async () => {
+        modelReads += 1
+        return [{ id: 30, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any]
+      },
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        return { content: '{}' }
+      },
+    })
+
+    const error = await compiler({
+      skillName: 'h3', rawPrompt: 'too much material', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 30,
+    }).catch((reason) => reason)
+
+    expect(Buffer.byteLength(body, 'utf8') + Buffer.byteLength(firstReference, 'utf8') + Buffer.byteLength(secondReference, 'utf8')).toBe(614404)
+    expect(error).toBeInstanceOf(SkillCompilerError)
+    expect(error).toMatchObject({ code: 'SKILL_FILE_TOO_LARGE' })
+    expect(error.message).toContain('per-compilation')
+    expect(error.message).toContain('524288')
+    expect({ cacheReads, cacheWrites, modelReads, executions, cacheEntries: cacheRecords.size }).toEqual({
+      cacheReads: 0,
+      cacheWrites: 0,
+      modelReads: 0,
+      executions: 0,
+      cacheEntries: 0,
+    })
+  })
+
+  test('accepts exactly 512 KiB of compiler-bound Skill material, caches it, and rejects one extra byte', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-budget-'))
+    await mkdir(join(root, 'references'))
+    const body = 'BODY'
+    const referencePath = join(root, 'references/boundary.txt')
+    const exactReferenceBytes = (512 * 1024) - Buffer.byteLength(body, 'utf8')
+    await writeFile(referencePath, Buffer.alloc(exactReferenceBytes, 'x'))
+    const manifest = { ...skill(root), body, references: ['references/boundary.txt'] }
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => manifest } as any,
+      cache: createCompileCache(),
+      readModels: async () => [{ id: 31, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        return {
+          content: JSON.stringify({
+            skill_name: 'h3', skill_version: 'a'.repeat(40), mode: 'text_to_video', prompt: 'compiled',
+            negative_prompt: '', parameters: {}, references_used: ['references/boundary.txt'], warnings: [],
+          }),
+        }
+      },
+    })
+    const input = {
+      skillName: 'h3', rawPrompt: 'boundary', mode: 'text_to_video' as const, incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 31,
+    }
+
+    expect(Buffer.byteLength(body, 'utf8') + exactReferenceBytes).toBe(512 * 1024)
+    const first = await compiler(input)
+    const cached = await compiler(input)
+    expect(first.cached).toBe(false)
+    expect(cached.cached).toBe(true)
+    expect(executions).toBe(1)
+
+    await writeFile(referencePath, Buffer.alloc(exactReferenceBytes + 1, 'x'))
+    const error = await compiler(input).catch((reason) => reason)
+    expect(Buffer.byteLength(body, 'utf8') + exactReferenceBytes + 1).toBe((512 * 1024) + 1)
+    expect(error).toBeInstanceOf(SkillCompilerError)
+    expect(error).toMatchObject({ code: 'SKILL_FILE_TOO_LARGE' })
+    expect(executions).toBe(1)
+  })
+
+  test('counts multibyte compiler-bound Skill material by UTF-8 bytes instead of JavaScript characters', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-budget-'))
+    await mkdir(join(root, 'references'))
+    const body = '界'
+    const reference = '界'.repeat(87381)
+    await writeFile(join(root, 'references/first.txt'), reference)
+    await writeFile(join(root, 'references/second.txt'), reference)
+    const manifest = {
+      ...skill(root),
+      body,
+      references: ['references/first.txt', 'references/second.txt'],
+    }
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => manifest } as any,
+      readModels: async () => [{ id: 32, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        return { content: '{}' }
+      },
+    })
+
+    const characterCount = body.length + reference.length + reference.length
+    const utf8Bytes = Buffer.byteLength(body, 'utf8') + Buffer.byteLength(reference, 'utf8') * 2
+    expect(characterCount).toBe(174763)
+    expect(utf8Bytes).toBe((512 * 1024) + 1)
+    await expect(compiler({
+      skillName: 'h3', rawPrompt: 'multibyte', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 32,
+    })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_FILE_TOO_LARGE' }))
+    expect(executions).toBe(0)
+  })
+
   test('requires vision for image inputs and caches identical input', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
     await mkdir(join(root, 'references'))

@@ -4,6 +4,7 @@ import { isAbsolute, relative, resolve, sep, win32 } from 'node:path'
 export const MAX_SKILL_FILE_BYTES = 512 * 1024
 export const MAX_SKILL_DOCUMENT_BYTES = 256 * 1024
 export const MAX_SKILL_AGGREGATE_BYTES = 2 * 1024 * 1024
+export const MAX_SKILL_COMPILATION_MATERIAL_BYTES = 512 * 1024
 
 export type SkillPathErrorCode =
   | 'SKILL_PATH_ESCAPE'
