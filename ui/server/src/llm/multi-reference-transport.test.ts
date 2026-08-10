@@ -1,0 +1,204 @@
+import { describe, expect, test } from 'bun:test'
+import type { LLMRequest } from './types'
+import {
+  MultiReferenceTransportError,
+  resolveMultiReferenceTransport,
+} from './multi-reference-transport'
+
+const references = [
+  {
+    url: '/first.png',
+    reference_index: 1,
+    reference_id: 'first-frame',
+    reference_role: 'first_frame',
+  },
+  {
+    url: '/last.png',
+    reference_index: 2,
+    reference_id: 'last-frame',
+    reference_role: 'last_frame',
+  },
+]
+
+function request(overrides: Partial<LLMRequest> = {}): LLMRequest {
+  return {
+    model: 'video-model',
+    type: 'image_to_video',
+    image_url: '/first.png',
+    reference_images: references,
+    messages: [{ role: 'user', content: 'animate this shot' }],
+    ...overrides,
+  } as LLMRequest
+}
+
+function multimodalRequest(overrides: Partial<LLMRequest> = {}): LLMRequest {
+  return request({
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'text', text: 'animate this shot' },
+        { type: 'image_url', image_url: { url: '/first.png' } },
+        { type: 'image_url', image_url: { url: '/last.png' } },
+      ],
+    }],
+    ...overrides,
+  })
+}
+
+describe('multi-reference provider transport', () => {
+  test('rejects an undeclared media transport instead of silently using image_url', () => {
+    expect(() => resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      contextUiParams: {},
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('uses an explicit model capability and enforces its maximum', () => {
+    expect(resolveMultiReferenceTransport(request(), {
+      apiFormat: 'gemini_native',
+      contextUiParams: { multi_reference: { supported: true, max: 9 } },
+    })).toMatchObject({ supported: true, max: 9, source: 'model_capability' })
+
+    expect(() => resolveMultiReferenceTransport(request({
+      reference_images: [...references, {
+        url: '/character.png',
+        reference_index: 3,
+        reference_id: 'character',
+        reference_role: 'character',
+      }],
+    }), {
+      apiFormat: 'gemini_native',
+      contextUiParams: { multiReference: { supported: true, max: 2 } },
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('requires an explicit array field for non-multimodal media endpoints', () => {
+    expect(() => resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      contextUiParams: { multi_reference: { supported: true, max: 9 } },
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+
+    expect(resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      contextUiParams: { multi_reference: { supported: true, max: 9 } },
+      routeConfig: {
+        payload_template: { references: '{{reference_images}}' },
+      },
+    })).toMatchObject({ supported: true, source: 'model_capability' })
+
+    expect(resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      model: {
+        context_ui_params: {},
+        contextUiParams: {
+          multiReference: { supported: true, field: 'inputImages', shape: 'urls' },
+        },
+      },
+    })).toMatchObject({
+      supported: true,
+      source: 'model_capability',
+      field: 'inputImages',
+      shape: 'urls',
+    })
+  })
+
+  test('treats a recursively nested route template token as an explicit full-array mapping', () => {
+    const transport = resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      routeConfig: {
+        payload_template: {
+          input: {
+            references: ['{{reference_images}}'],
+          },
+        },
+      },
+    })
+
+    expect(transport).toMatchObject({ supported: true, source: 'route_template' })
+
+    expect(() => resolveMultiReferenceTransport(request(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      routeConfig: { payloadTemplate: { image: '{{image_url}}' } },
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('accepts native Gemini and Anthropic message formats only when every reference survives in order', () => {
+    expect(resolveMultiReferenceTransport(multimodalRequest(), {
+      apiFormat: 'gemini_native',
+    })).toMatchObject({ supported: true, source: 'native_multimodal' })
+
+    expect(resolveMultiReferenceTransport(multimodalRequest(), {
+      apiFormat: 'anthropic',
+      endpoint: 'messages',
+    })).toMatchObject({ supported: true, source: 'native_multimodal' })
+
+    expect(() => resolveMultiReferenceTransport(multimodalRequest({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'animate this shot' },
+          { type: 'image_url', image_url: { url: '/last.png' } },
+          { type: 'image_url', image_url: { url: '/first.png' } },
+        ],
+      }],
+    }), {
+      apiFormat: 'gemini_native',
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('accepts chat/completions only when all ordered image parts are present', () => {
+    expect(resolveMultiReferenceTransport(multimodalRequest(), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'chat/completions',
+    })).toMatchObject({ supported: true, source: 'native_multimodal' })
+
+    expect(() => resolveMultiReferenceTransport(multimodalRequest({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'animate this shot' },
+          { type: 'image_url', image_url: { url: '/first.png' } },
+        ],
+      }],
+    }), {
+      apiFormat: 'openai_compatible',
+      endpoint: 'chat/completions',
+    })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('keeps single-image legacy transport without requiring a declaration', () => {
+    const single = request({
+      image_url: '/first.png',
+      reference_images: [references[0]],
+    })
+
+    expect(resolveMultiReferenceTransport(single, {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      contextUiParams: {},
+    })).toEqual({
+      supported: true,
+      source: 'legacy_single',
+      count: 1,
+      max: 1,
+    })
+    expect((single as any).image_url).toBe('/first.png')
+  })
+
+  test('exports a typed transport error with a stable 422 code contract', () => {
+    const error = new MultiReferenceTransportError(
+      'MULTI_REFERENCE_UNSUPPORTED',
+      'Provider does not support multiple references',
+    )
+
+    expect(error).toBeInstanceOf(Error)
+    expect(error.code).toBe('MULTI_REFERENCE_UNSUPPORTED')
+    expect(error.status).toBe(422)
+  })
+})

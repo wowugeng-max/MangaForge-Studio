@@ -2,8 +2,13 @@ import type { Express } from 'express'
 import { readModels, type ModelRecord } from '../model-store'
 import { readKeys, type APIKeyRecord } from '../key-store'
 import { readProviders, type ProviderRecord } from '../provider-store'
-import { executeWithRuntimeModel, type RuntimeExecutionOptions } from '../llm/provider-runtime'
+import {
+  executeWithRuntimeModel,
+  preflightRuntimeRequestTransport,
+  type RuntimeExecutionOptions,
+} from '../llm/provider-runtime'
 import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMMessage, type LLMMessageContentPart, type LLMRequest, type LLMResponse } from '../llm/types'
+import { MultiReferenceTransportError } from '../llm/multi-reference-transport'
 import { registerTask, taskMessageManager, unregisterTask, type CancelToken } from '../ws-manager'
 import { executeLocalComfyWorkflow, interruptLocalComfy, type ExecuteLocalComfyWorkflowOptions, type LocalComfyResult } from '../comfy-local'
 import { parseSkillCommand } from '../skills/skill-command'
@@ -27,6 +32,11 @@ type ExecuteGenerate = (
 
 type GenerateRouteDeps = {
   execute?: ExecuteGenerate
+  preflightTransport?: (
+    activeWorkspace: string,
+    request: LLMRequest,
+    preferredModelId?: number,
+  ) => Promise<unknown>
   comfyExecute?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<LocalComfyResult>
   comfyInterrupt?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<boolean> | boolean
   /** Workspace-scoped Skill compiler boundary supplied by index.ts. */
@@ -81,7 +91,7 @@ function skillErrorStatus(code: string): number {
   // Ambiguous selectors and duplicate leading commands are client choices;
   // callers can resolve them without retrying a provider request.
   if (code === 'SKILL_AMBIGUOUS' || code === 'SKILL_COMMAND_DUPLICATE') return 409
-  if (code.startsWith('SKILL_') || code.startsWith('REFERENCE_')) return 422
+  if (code.startsWith('SKILL_') || code.startsWith('REFERENCE_') || code.startsWith('MULTI_REFERENCE_')) return 422
   return 500
 }
 
@@ -798,33 +808,106 @@ function setWorkflowMappedValue(workflow: Record<string, any>, selector: unknown
   return true
 }
 
-function applyCompiledSkillToComfyPayload(payload: any, compiled: PromptCompileResult): any {
+function multiReferenceMappingError(message: string): never {
+  throw new MultiReferenceTransportError('MULTI_REFERENCE_MAPPING_REQUIRED', message)
+}
+
+function applyReferenceImagesToComfyWorkflow(
+  workflow: Record<string, any>,
+  mapping: Record<string, any> | null,
+  referenceImages: readonly NonNullable<LLMRequest['reference_images']>[number][],
+) {
+  if (referenceImages.length <= 1) return
+  const rawMappings = mapping && (mapping.reference_images ?? mapping.referenceImages)
+  if (!Array.isArray(rawMappings)) {
+    return multiReferenceMappingError('ComfyUI workflow must explicitly map every reference image')
+  }
+  if (rawMappings.length !== referenceImages.length) {
+    return multiReferenceMappingError(
+      `ComfyUI workflow must map exactly ${referenceImages.length} reference images`,
+    )
+  }
+
+  const referencesByIndex = new Map(referenceImages.map(reference => [reference.reference_index, reference]))
+  const seen = new Set<number>()
+  const mappedInputs = new Set<string>()
+  const normalizedMappings = rawMappings.map((row: any) => {
+    if (!row || typeof row !== 'object' || Array.isArray(row)) {
+      return multiReferenceMappingError('ComfyUI reference image mappings must be objects')
+    }
+    const referenceIndex = Number(row.reference_index ?? row.referenceIndex ?? row.index)
+    const input = row.input ?? row.input_path ?? row.inputPath ?? row.path
+    if (!Number.isSafeInteger(referenceIndex) || referenceIndex < 1 || referenceIndex > referenceImages.length) {
+      return multiReferenceMappingError(
+        `ComfyUI reference image mapping index must be between 1 and ${referenceImages.length}`,
+      )
+    }
+    if (seen.has(referenceIndex)) {
+      return multiReferenceMappingError(`ComfyUI reference image mapping index ${referenceIndex} is duplicated`)
+    }
+    if (!referencesByIndex.has(referenceIndex)) {
+      return multiReferenceMappingError(`ComfyUI reference image ${referenceIndex} is missing from the canonical request`)
+    }
+    if (typeof input !== 'string' || !input.trim()) {
+      return multiReferenceMappingError(`ComfyUI reference image ${referenceIndex} input path is required`)
+    }
+    const inputKey = workflowPathParts(input).join('.')
+    if (inputKey && mappedInputs.has(inputKey)) {
+      return multiReferenceMappingError(`ComfyUI reference image input mapping ${input} is duplicated`)
+    }
+    seen.add(referenceIndex)
+    if (inputKey) mappedInputs.add(inputKey)
+    return { referenceIndex, input }
+  })
+
+  for (let referenceIndex = 1; referenceIndex <= referenceImages.length; referenceIndex += 1) {
+    if (!seen.has(referenceIndex)) {
+      return multiReferenceMappingError(`ComfyUI reference image mapping index ${referenceIndex} is missing`)
+    }
+  }
+
+  for (const row of normalizedMappings) {
+    const reference = referencesByIndex.get(row.referenceIndex)!
+    if (!setWorkflowMappedValue(workflow, row.input, reference.url)) {
+      return multiReferenceMappingError(`ComfyUI reference image ${row.referenceIndex} input mapping is invalid`)
+    }
+  }
+}
+
+function applyCompiledSkillToComfyPayload(
+  payload: any,
+  compiled?: PromptCompileResult,
+  referenceImages: readonly NonNullable<LLMRequest['reference_images']>[number][] = [],
+): any {
   const mapping = workflowSkillMapping(payload)
-  const promptSelector = mapping && (mapping.compiled_prompt ?? mapping.compiledPrompt ?? mapping.prompt)
-  const negativeSelector = mapping && (mapping.compiled_negative_prompt ?? mapping.compiledNegativePrompt ?? mapping.negative_prompt ?? mapping.negativePrompt)
-  if (!promptSelector) {
-    const error = new Error('ComfyUI workflow must explicitly map compiled_prompt')
-    ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
-    throw error
-  }
   const workflow = JSON.parse(JSON.stringify(parseWorkflowPayload(payload)))
-  if (!setWorkflowMappedValue(workflow, promptSelector, compiled.prompt)) {
-    const error = new Error('ComfyUI workflow compiled_prompt mapping is invalid')
-    ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
-    throw error
-  }
-  if (compiled.negative_prompt) {
-    if (!negativeSelector) {
-      const error = new Error('ComfyUI workflow must explicitly map compiled_negative_prompt')
+  if (compiled) {
+    const promptSelector = mapping && (mapping.compiled_prompt ?? mapping.compiledPrompt ?? mapping.prompt)
+    const negativeSelector = mapping && (mapping.compiled_negative_prompt ?? mapping.compiledNegativePrompt ?? mapping.negative_prompt ?? mapping.negativePrompt)
+    if (!promptSelector) {
+      const error = new Error('ComfyUI workflow must explicitly map compiled_prompt')
       ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
       throw error
     }
-    if (!setWorkflowMappedValue(workflow, negativeSelector, compiled.negative_prompt)) {
-      const error = new Error('ComfyUI workflow compiled_negative_prompt mapping is invalid')
+    if (!setWorkflowMappedValue(workflow, promptSelector, compiled.prompt)) {
+      const error = new Error('ComfyUI workflow compiled_prompt mapping is invalid')
       ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
       throw error
     }
+    if (compiled.negative_prompt) {
+      if (!negativeSelector) {
+        const error = new Error('ComfyUI workflow must explicitly map compiled_negative_prompt')
+        ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+        throw error
+      }
+      if (!setWorkflowMappedValue(workflow, negativeSelector, compiled.negative_prompt)) {
+        const error = new Error('ComfyUI workflow compiled_negative_prompt mapping is invalid')
+        ;(error as any).code = 'SKILL_COMFY_MAPPING_REQUIRED'
+        throw error
+      }
+    }
   }
+  applyReferenceImagesToComfyWorkflow(workflow, mapping, referenceImages)
   const nextPayload = { ...payload, workflow_json: workflow }
   // Keep `prompt` as the editable original/workflow field. resolveComfy uses
   // workflow_json first, so the compiled text never leaks as a guessed node.
@@ -855,6 +938,7 @@ async function resolveComfyExecutionOptions(
   activeWorkspace: string,
   payload: any,
   compiledSkill?: PromptCompileResult,
+  referenceImages: readonly NonNullable<LLMRequest['reference_images']>[number][] = [],
 ): Promise<ExecuteLocalComfyWorkflowOptions | null> {
   const apiKeyId = Number(payload?.api_key_id ?? payload?.keyId ?? payload?.key_id ?? 0)
   const providers = await readProviders(activeWorkspace)
@@ -872,7 +956,9 @@ async function resolveComfyExecutionOptions(
 
   const baseUrl = normalizeComfyBaseUrl((key as any)?.base_url || payload?.base_url || payload?.baseUrl || payload?.comfy_base_url || payload?.comfyBaseUrl || provider.default_base_url || '', key, payload)
   if (!baseUrl) throw new Error('ComfyUI base URL is not configured')
-  const workflowPayload = compiledSkill ? applyCompiledSkillToComfyPayload(payload, compiledSkill) : payload
+  const workflowPayload = compiledSkill || referenceImages.length > 1
+    ? applyCompiledSkillToComfyPayload(payload, compiledSkill, referenceImages)
+    : payload
 
   return {
     workspace: activeWorkspace,
@@ -910,6 +996,7 @@ function comfyResponsePayload(response: LocalComfyResult, sourceAssetIds: number
 
 export function registerGenerateRoutes(app: Express, getWorkspace: () => string, deps: GenerateRouteDeps = {}) {
   const execute = deps.execute || executeWithRuntimeModel
+  const preflightTransport = deps.preflightTransport || preflightRuntimeRequestTransport
   const comfyExecute = deps.comfyExecute || executeLocalComfyWorkflow
   const comfyInterrupt = deps.comfyInterrupt || ((options: ExecuteLocalComfyWorkflowOptions) => interruptLocalComfy({ baseUrl: options.baseUrl, headers: options.headers }))
   const compile = deps.compilePromptSkill || deps.skillRuntime?.compilePromptSkill
@@ -945,10 +1032,17 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     }
 
     try {
-      comfyOptions = await resolveComfyExecutionOptions(activeWorkspace, payload, compiledSkill?.result)
+      comfyOptions = await resolveComfyExecutionOptions(
+        activeWorkspace,
+        payload,
+        compiledSkill?.result,
+        request?.reference_images || [],
+      )
     } catch (error) {
       const code = error && typeof error === 'object' ? (error as any).code : undefined
-      if (typeof code === 'string' && code.startsWith('SKILL_')) return skillErrorResponse(res, error)
+      if (typeof code === 'string' && (code.startsWith('SKILL_') || code.startsWith('MULTI_REFERENCE_'))) {
+        return skillErrorResponse(res, error)
+      }
       return res.status(400).json(errorBody(error))
     }
 
@@ -999,7 +1093,18 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
 
     if (!request) request = buildCanvasGenerateLLMRequest(payload)
     const sourceAssetIds = normalizeSourceAssetIds((request as any).source_asset_ids)
-    const preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
+    let preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
+    if ((request.reference_images?.length || 0) > 1) {
+      try {
+        const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId)
+        const selectedModelId = Number((preflightSelection as any)?.model?.id)
+        if (Number.isSafeInteger(selectedModelId) && selectedModelId > 0) preferredModelId = selectedModelId
+      } catch (error) {
+        const code = error && typeof error === 'object' ? String((error as any).code || '') : ''
+        if (code.startsWith('MULTI_REFERENCE_')) return skillErrorResponse(res, error)
+        return res.status(500).json(errorBody(error))
+      }
+    }
 
     if (!clientId) {
       try {
@@ -1007,6 +1112,8 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
         if (response.error) return res.status(500).json(errorBody(response.error, { runtimeSelection: response.runtimeSelection }))
         return res.json(responsePayload(response, sourceAssetIds, compiledSkill?.audit))
       } catch (error) {
+        const code = error && typeof error === 'object' ? String((error as any).code || '') : ''
+        if (code.startsWith('MULTI_REFERENCE_')) return skillErrorResponse(res, error)
         return res.status(500).json(errorBody(error))
       }
     }

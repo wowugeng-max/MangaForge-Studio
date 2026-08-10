@@ -23,6 +23,11 @@ import {
 } from './model-runtime-overrides'
 import type { RuntimeModelSelection } from './provider-runtime-support-types'
 import { routeDslValue } from './provider-runtime-support-route-dsl'
+import {
+  MultiReferenceTransportError,
+  resolveMultiReferenceTransport,
+  type MultiReferenceTransport,
+} from './multi-reference-transport'
 
 // ── Request Body ────────────────────────────────────────────
 
@@ -71,7 +76,11 @@ export function requestRouteType(request: LLMRequest, model: ModelRecord) {
   return activeModalities.length === 1 ? activeModalities[0] : ''
 }
 
-function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+function toOpenAIBody(
+  request: LLMRequest,
+  selection: RuntimeModelSelection,
+  multiReferenceTransport: MultiReferenceTransport,
+): Record<string, any> {
   const routeType = requestRouteType(request, selection.model)
   const passthroughBlocked = new Set([
     'model',
@@ -91,6 +100,8 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     'routingStrategy',
     'incoming_assets',
     'source_asset_ids',
+    'reference_images',
+    'referenceImages',
     // Negative prompts are a media-only transport field. Do not leak this
     // internal canvas field into chat/text requests.
     'negative_prompt',
@@ -101,9 +112,18 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
     // return the image inside the message content.
     if (String(selection.endpoint || '').includes('chat/completions')) {
       const prompt = ((request as any).prompt || textPromptFromMessages(request.messages)) + mediaSizePromptHint((request as any).size)
-      const imageUrl = (request as any).image_url
-      const userContent = imageUrl
-        ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: imageUrl } }]
+      const referenceParts = (request.reference_images || []).map(reference => ({
+        type: 'image_url',
+        image_url: { url: reference.url },
+      }))
+      const imageUrl = String((request as any).image_url || '').trim()
+      const imageParts = referenceParts.length
+        ? referenceParts
+        : imageUrl
+          ? [{ type: 'image_url', image_url: { url: imageUrl } }]
+          : []
+      const userContent = imageParts.length
+        ? [{ type: 'text', text: prompt }, ...imageParts]
         : prompt
       return {
         model: selection.model.model_name || request.model,
@@ -123,6 +143,21 @@ function toOpenAIBody(request: LLMRequest, selection: RuntimeModelSelection): Re
       if (value === undefined || value === null) continue
       if (passthroughBlocked.has(key)) continue
       body[key] = value
+    }
+    if (multiReferenceTransport.source === 'model_capability' && multiReferenceTransport.field && (request.reference_images?.length || 0) > 1) {
+      const field = multiReferenceTransport.field
+      if (['__proto__', 'prototype', 'constructor'].includes(field)) {
+        throw new MultiReferenceTransportError(
+          'MULTI_REFERENCE_UNSUPPORTED',
+          'Multi-reference provider field is unsafe',
+        )
+      }
+      body[field] = multiReferenceTransport.shape === 'urls'
+        ? request.reference_images!.map(reference => reference.url)
+        : request.reference_images!.map(reference => ({
+          ...reference,
+          ...(reference.source_asset_ids ? { source_asset_ids: [...reference.source_asset_ids] } : {}),
+        }))
     }
     // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
     if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
@@ -356,6 +391,21 @@ export async function requestWithLocalAssetDataUris(activeWorkspace: string, req
       changed = true
     }
   }
+  if (Array.isArray(request.reference_images) && request.reference_images.length) {
+    let referencesChanged = false
+    const nextReferences = await Promise.all(request.reference_images.map(async reference => {
+      const referenceUrl = String(reference.url || '').trim()
+      if (!referenceUrl) return reference
+      const converted = await localImageUrlToDataUri(activeWorkspace, referenceUrl)
+      if (converted === referenceUrl) return reference
+      referencesChanged = true
+      return { ...reference, url: converted }
+    }))
+    if (referencesChanged) {
+      nextRequest.reference_images = nextReferences
+      changed = true
+    }
+  }
   const nextMessages = await Promise.all((request.messages || []).map(async message => {
     if (!Array.isArray(message.content)) return message
     const nextContent = await Promise.all(message.content.map(async part => {
@@ -416,6 +466,46 @@ function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelect
   // generic `{{negative_prompt}}` context lookup.
   if (!isMediaRouteType(requestRouteType(request, selection.model))) delete context.negative_prompt
   return context
+}
+
+function requestWithCanonicalReferenceMessageParts(request: LLMRequest): LLMRequest {
+  const references = request.reference_images || []
+  if (references.length <= 1) return request
+  const expectedUrls = references.map(reference => reference.url)
+  const actualUrls = (request.messages || []).flatMap(message => Array.isArray(message.content)
+    ? message.content.map(imageUrlFromLLMContentPart).filter(Boolean)
+    : [])
+  let cursor = 0
+  for (const url of actualUrls) {
+    if (url === expectedUrls[cursor]) cursor += 1
+    if (cursor === expectedUrls.length) return request
+  }
+
+  const messages = (request.messages || []).map(message => ({
+    ...message,
+    content: Array.isArray(message.content) ? [...message.content] : message.content,
+  }))
+  let userIndex = messages.findLastIndex(message => message.role === 'user')
+  if (userIndex < 0) {
+    messages.push({ role: 'user', content: '' })
+    userIndex = messages.length - 1
+  }
+  const userMessage = messages[userIndex]
+  const referenceParts = references.map(reference => ({
+    type: 'image_url' as const,
+    image_url: { url: reference.url },
+  }))
+  if (Array.isArray(userMessage.content)) {
+    const nonImageParts = userMessage.content.filter(part => !imageUrlFromLLMContentPart(part))
+    userMessage.content = [...nonImageParts, ...referenceParts]
+  } else {
+    const text = stringifyLLMMessageTextContent(userMessage.content).trim()
+    userMessage.content = [
+      ...(text ? [{ type: 'text' as const, text }] : []),
+      ...referenceParts,
+    ]
+  }
+  return { ...request, messages }
 }
 
 function getValueByPath(data: any, path: string) {
@@ -514,14 +604,18 @@ export function parseGeminiGenerateContentResponse<T = any>(raw: any): LLMRespon
 }
 
 export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
+  const multiReferenceTransport = resolveMultiReferenceTransport(request, selection)
   const payloadTemplate = routeDslValue(selection.routeConfig, 'payload_template', 'payloadTemplate')
   if (payloadTemplate) {
     return renderTemplateValue(payloadTemplate, buildTemplateContext(request, selection)) ?? {}
   }
-  if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(request, selection)
-  if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(request)
+  const nativeRequest = multiReferenceTransport.source === 'model_capability'
+    ? requestWithCanonicalReferenceMessageParts(request)
+    : request
+  if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(nativeRequest, selection)
+  if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(nativeRequest)
   if (isCodexResponsesFormat(selection.apiFormat)) return toCodexResponsesBody(request, selection)
-  return toOpenAIBody(request, selection)
+  return toOpenAIBody(request, selection, multiReferenceTransport)
 }
 
 export function runtimeRequestCanceledError() {

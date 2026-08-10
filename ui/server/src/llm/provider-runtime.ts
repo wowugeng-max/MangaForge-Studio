@@ -77,6 +77,7 @@ import {
   parseProviderResponsePayload,
   readProviderStream,
 } from './provider-runtime-stream'
+import { resolveMultiReferenceTransport } from './multi-reference-transport'
 
 export type {
   RuntimeExecutionOptions,
@@ -133,7 +134,7 @@ async function postProviderJson<T = any>(
   request: LLMRequest,
   options: RuntimeExecutionOptions = {},
 ): Promise<LLMResponse<T>> {
-  const routedSelection = selectionForRequestRoute(selection, request)
+  const routedSelection = preflightSelectedRuntimeRequestTransport(selection, request)
   const url = buildUrl(routedSelection.baseUrl, routedSelection.endpoint, routedSelection.apiFormat)
   const body = buildProviderRequestBody(request, routedSelection)
   const isStreaming = Boolean((body as any).stream)
@@ -475,6 +476,28 @@ export async function selectRuntimeModel(
     routeConfig,
     apiFormat,
   }
+}
+
+export function preflightSelectedRuntimeRequestTransport(
+  selection: RuntimeModelSelection,
+  request: LLMRequest,
+): RuntimeModelSelection {
+  const routedSelection = selectionForRequestRoute(selection, request)
+  resolveMultiReferenceTransport(request, routedSelection)
+  return routedSelection
+}
+
+export async function preflightRuntimeRequestTransport(
+  activeWorkspace: string,
+  request: LLMRequest,
+  preferredModelId?: number,
+  options: RuntimeModelSelectionOptions = {},
+): Promise<RuntimeModelSelection | null> {
+  const selection = await selectRuntimeModel(activeWorkspace, preferredModelId, {
+    routingStrategy: options.routingStrategy || (request as any).routingStrategy || (request as any).routing_strategy,
+  })
+  if (!selection) return null
+  return preflightSelectedRuntimeRequestTransport(selection, request)
 }
 
 // ── Main Entry Point ────────────────────────────────────────

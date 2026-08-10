@@ -7,6 +7,7 @@ import {
   endpointForProvider,
   executeWithRuntimeModel,
   parseProviderResponsePayload,
+  preflightRuntimeRequestTransport,
   readProviderStream,
   selectRuntimeModel,
   summarizeProviderRequestBodyForLog,
@@ -66,6 +67,86 @@ afterEach(() => {
 })
 
 describe('codex responses provider runtime a b', () => {
+  test('preflights unsupported multi-reference requests without provider execution', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-multi-preflight-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'single-image-provider',
+          display_name: 'Single Image Provider',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          supported_modalities: ['image_to_video'],
+          default_base_url: 'https://api.example.com/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 39, provider: 'single-image-provider', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 39,
+          api_key_id: 39,
+          provider: 'single-image-provider',
+          display_name: 'Single Image Video',
+          model_name: 'single-image-video',
+          capabilities: { image_to_video: true },
+          health_status: 'healthy',
+          context_ui_params: {},
+        },
+      ]))
+
+      let fetchCalls = 0
+      globalThis.fetch = (async () => {
+        fetchCalls += 1
+        throw new Error('provider must not be called during preflight')
+      }) as typeof fetch
+
+      await expect(preflightRuntimeRequestTransport(workspace, {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: '/first.png',
+        reference_images: [
+          { url: '/first.png', reference_index: 1 },
+          { url: '/last.png', reference_index: 2 },
+        ],
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: '生成视频' },
+            { type: 'image_url', image_url: { url: '/first.png' } },
+            { type: 'image_url', image_url: { url: '/last.png' } },
+          ],
+        }],
+      } as any, 39)).rejects.toMatchObject({ code: 'MULTI_REFERENCE_UNSUPPORTED' })
+      expect(fetchCalls).toBe(0)
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('preflight leaves existing no-runtime-model handling unchanged', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-empty-preflight-'))
+    try {
+      await expect(preflightRuntimeRequestTransport(workspace, {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: '/first.png',
+        reference_images: [
+          { url: '/first.png', reference_index: 1 },
+          { url: '/last.png', reference_index: 2 },
+        ],
+        messages: [{ role: 'user', content: '生成视频' }],
+      } as any)).resolves.toBeNull()
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('uses API key base_url before provider default_base_url for runtime requests', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-key-base-url-'))
     try {
@@ -482,6 +563,81 @@ describe('codex responses provider runtime a b', () => {
         prompt: '让画面动起来',
       })
       expect(capturedBody.image_url).toBe('data:image/png;base64,iVBORw==')
+      expect(result.content).toBe('https://cdn.example/render.mp4')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+  test('converts every canonical local reference image before explicit array provider calls', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-local-references-'))
+    try {
+      await mkdir(join(workspace, 'assets'), { recursive: true })
+      await writeFile(join(workspace, 'assets', 'first.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+      await writeFile(join(workspace, 'assets', 'last.png'), Buffer.from([0x89, 0x50, 0x4e, 0x48]))
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'cloud-multi-media-provider',
+          display_name: 'Cloud Multi Media Provider',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          supported_modalities: ['image_to_video'],
+          default_base_url: 'https://api.example.com/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 29, provider: 'cloud-multi-media-provider', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 29,
+          api_key_id: 29,
+          provider: 'cloud-multi-media-provider',
+          display_name: 'Multi I2V Model',
+          model_name: 'multi-i2v-model',
+          capabilities: { image_to_video: true },
+          health_status: 'healthy',
+          context_ui_params: {
+            multi_reference: { supported: true, field: 'input_images', shape: 'urls', max: 9 },
+          },
+        },
+      ]))
+
+      let capturedBody: any = null
+      globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+        capturedBody = JSON.parse(String(init?.body || '{}'))
+        return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/render.mp4' }] }), { status: 200 })
+      }) as typeof fetch
+
+      const firstUrl = '/api/assets/media/assets%2Ffirst.png'
+      const lastUrl = '/api/assets/media/assets%2Flast.png'
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: firstUrl,
+        reference_images: [
+          { url: firstUrl, reference_index: 1, reference_role: 'first_frame' },
+          { url: lastUrl, reference_index: 2, reference_role: 'last_frame' },
+        ],
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: '让首尾帧动起来' },
+            { type: 'image_url', image_url: { url: firstUrl } },
+            { type: 'image_url', image_url: { url: lastUrl } },
+          ],
+        }],
+        response_format: 'text',
+      } as any, 29, { maxRetries: 0 })
+
+      expect(capturedBody.image_url).toBe('data:image/png;base64,iVBORw==')
+      expect(capturedBody.input_images).toEqual([
+        'data:image/png;base64,iVBORw==',
+        'data:image/png;base64,iVBOSA==',
+      ])
       expect(result.content).toBe('https://cdn.example/render.mp4')
     } finally {
       await rm(workspace, { recursive: true, force: true })
