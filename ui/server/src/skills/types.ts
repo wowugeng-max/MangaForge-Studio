@@ -103,6 +103,7 @@ export type PromptCompileResult = {
 export type PromptCompileInput = {
   packId?: string
   skillName?: string
+  revision?: string
   rawPrompt: string
   mode: CanvasMediaMode
   incomingAssets: CanvasReferenceAsset[]

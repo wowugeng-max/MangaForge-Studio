@@ -348,6 +348,7 @@ export async function runH3Acceptance({
   const common = {
     pack_id: packId,
     skill_name: H3_SKILL_NAME,
+    skill_revision: revision,
     compiler_model_id: compilerModelId,
     node_params: { aspect_ratio: '16:9' },
   }

@@ -33,6 +33,23 @@ allowed-tools:
 # Brand Promo Video Generator
 
 Run a multi-stage workflow with tools: verify brand facts, plan shots, generate video, edit, and review delivery.
+  `)
+}
+
+async function installLockedPromptSkillRevision(workspace: string, revision: string) {
+  const root = join(workspace, '.mangaforge', 'skill-packs', 'locked-pack', revision)
+  const skillRoot = join(root, 'skills', 'locked-skill')
+  await mkdir(skillRoot, { recursive: true })
+  await writeFile(join(root, 'pack.json'), JSON.stringify({
+    id: 'locked-pack', sourceUrl: 'https://github.com/example/locked-pack', revision,
+    installedAt: '2026-08-09T00:00:00.000Z', status: 'installed',
+  }))
+  await writeFile(join(skillRoot, 'SKILL.md'), `---
+name: locked-skill
+description: Compile a locked image prompt revision.
+media_modes: [text_to_image]
+---
+Return only a compiled visual prompt for an image. Revision ${revision}.
 `)
 }
 
@@ -876,6 +893,128 @@ describe('canvas generate route', () => {
     })
   })
 
+  test('executes an explicitly pinned duplicate revision and rejects an unpinned duplicate before side effects', async () => {
+    const workspace = await tempWorkspace()
+    await installLockedPromptSkillRevision(workspace, 'rev-a')
+    await installLockedPromptSkillRevision(workspace, 'rev-b')
+    const { createSkillRegistry } = await import('../skills/registry')
+    const { createPromptCompiler } = await import('../skills/compiler')
+    const { registerGenerateRoutes } = await import('./generate')
+    const registry = createSkillRegistry(workspace)
+    let resolvedRevision = ''
+    let modelReads = 0
+    let compilerExecutions = 0
+    let providerExecutions = 0
+    let taskCalls = 0
+    const compiler = createPromptCompiler({
+      registry: {
+        resolve: async (query: any) => {
+          const resolved = await registry.resolve(query)
+          resolvedRevision = resolved.revision
+          return resolved
+        },
+      } as any,
+      readModels: async () => {
+        modelReads += 1
+        return [{ id: 7, model_name: 'compiler', provider: 'fixture', display_name: 'Compiler', capabilities: { chat: true } } as any]
+      },
+      executeWithRuntimeModel: async () => {
+        compilerExecutions += 1
+        return { content: JSON.stringify({
+          skill_name: 'locked-skill',
+          skill_version: resolvedRevision,
+          mode: 'text_to_image',
+          prompt: `compiled ${resolvedRevision}`,
+          negative_prompt: '',
+          parameters: {},
+          references_used: [],
+          warnings: [],
+        }) }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: compiler,
+      execute: async (_activeWorkspace, request) => {
+        providerExecutions += 1
+        return { content: request.prompt, finish_reason: 'stop', parsed: null } as any
+      },
+      registerTask: () => { taskCalls += 1 },
+      sendMessage: async () => true,
+    })
+    const baseBody = {
+      model: 'image-provider',
+      type: 'text_to_image',
+      prompt: 'same editable prompt',
+      skill_name: 'locked-skill',
+      skill_pack_id: 'locked-pack',
+      skill_compiler_model_id: 7,
+    }
+
+    const ambiguous = await call(handlers.get('POST /api/generate'), { body: { ...baseBody, params: { client_id: 'ambiguous-revision' } } })
+    expect(ambiguous.statusCode).toBe(409)
+    expect(ambiguous.body).toMatchObject({ error_code: 'SKILL_AMBIGUOUS' })
+    expect(modelReads).toBe(0)
+    expect(compilerExecutions).toBe(0)
+    expect(providerExecutions).toBe(0)
+    expect(taskCalls).toBe(0)
+
+    const pinned = await call(handlers.get('POST /api/generate'), { body: { ...baseBody, skill_revision: 'rev-b' } })
+    expect(pinned.statusCode).toBe(200)
+    expect(pinned.body).toMatchObject({
+      content: 'compiled rev-b',
+      skill_name: 'locked-skill',
+      skill_pack_id: 'locked-pack',
+      skill_revision: 'rev-b',
+      compiled_prompt: 'compiled rev-b',
+      result: { skill_revision: 'rev-b', compiled_prompt: 'compiled rev-b' },
+    })
+    expect(modelReads).toBe(1)
+    expect(compilerExecutions).toBe(1)
+    expect(providerExecutions).toBe(1)
+    expect(taskCalls).toBe(0)
+  })
+
+  test('normalizes generate revision aliases for sync and background flows and rejects malformed values early', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const compileInputs: any[] = []
+    let providerExecutions = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileInputs.push(input)
+        return compiledSkillResult({ revision: input.revision, skillName: input.skillName, packId: input.packId, mode: input.mode }) as any
+      },
+      execute: async () => {
+        providerExecutions += 1
+        return { content: 'generated', finish_reason: 'stop', parsed: null } as any
+      },
+      registerTask: () => { taskCalls += 1 },
+      unregisterTask: () => {},
+      sendMessage: async () => true,
+    })
+    const baseBody = { model: 'image-provider', type: 'text_to_image', prompt: 'draw', skill_name: 'locked-skill', skill_pack_id: 'locked-pack' }
+
+    const sync = await call(handlers.get('POST /api/generate'), { body: { ...baseBody, skill_revision: 'rev-snake' } })
+    const background = await call(handlers.get('POST /api/generate'), {
+      body: { ...baseBody, params: { client_id: 'revision-background', skillRevision: 'rev-camel' } },
+    })
+    expect(sync.statusCode).toBe(200)
+    expect(background.statusCode).toBe(200)
+    expect(compileInputs.slice(0, 2).map(input => input.revision)).toEqual(['rev-snake', 'rev-camel'])
+    expect(taskCalls).toBe(1)
+
+    const sideEffectsBeforeMalformed = { compile: compileInputs.length, provider: providerExecutions, task: taskCalls }
+    const malformed = await call(handlers.get('POST /api/generate'), {
+      body: { ...baseBody, skill_revision: { arbitrary: true }, params: { client_id: 'malformed-revision' } },
+    })
+    expect(malformed.statusCode).toBe(422)
+    expect(malformed.body).toMatchObject({ error_code: 'SKILL_REVISION_INVALID' })
+    expect({ compile: compileInputs.length, provider: providerExecutions, task: taskCalls }).toEqual(sideEffectsBeforeMalformed)
+  })
+
   test('preserves ordered canonical reference images through Skill compilation, provider execution, audit, and lineage', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')
@@ -1178,6 +1317,7 @@ describe('canvas generate route', () => {
         messages: [{ role: 'user', content: '/command-pack:command-skill orbit around the hero' }],
         skill_name: 'dropdown-skill',
         skill_pack_id: 'dropdown-pack',
+        skill_revision: 'stale-dropdown-revision',
       },
     })
 
@@ -1194,6 +1334,7 @@ describe('canvas generate route', () => {
       packId: 'command-pack',
       rawPrompt: '/command-pack:command-skill orbit around the hero',
     })
+    expect(compileInputs[1]).not.toHaveProperty('revision')
   })
 
   test('short-circuits unsupported route modes and compiler-reported media incompatibility before provider work', async () => {

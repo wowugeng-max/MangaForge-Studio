@@ -2001,6 +2001,7 @@ describe('GenerateNode Skill review regressions', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     expect(source).toContain('skillPreviewRequestTrackerRef.current.isCurrent')
     expect(source).toContain('compileInputFingerprintRef.current')
+    expect(source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))).toContain('skill_revision: effectiveSkillRevision')
   })
 
   test('subscribes to a semantic incoming-context snapshot for Skill audit invalidation', async () => {

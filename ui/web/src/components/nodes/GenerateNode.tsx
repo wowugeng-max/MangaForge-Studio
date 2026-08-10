@@ -696,6 +696,7 @@ function GenerateNodeImpl(props: NodeProps) {
       const res = await compileSkillPreview({
         skill_name: effectiveSkillName,
         ...(effectiveSkillPackId ? { pack_id: effectiveSkillPackId } : {}),
+        ...(effectiveSkillRevision ? { skill_revision: effectiveSkillRevision } : {}),
         raw_prompt: prompt,
         mode: mode as CanvasSkillMediaMode,
         incoming_assets: previewAssets,

@@ -587,8 +587,31 @@ describe('prompt compiler', () => {
       registry: { resolve: async (query: any) => { queries.push(query); return { ...skill(root), packId: 'pack-a', name: 'h3' } } } as any,
       readModels: async () => [],
     })
-    await expect(compiler({ skillName: 'wrong', packId: 'wrong-pack', rawPrompt: '/pack-a:h3 hero', mode: 'text_to_video', incomingAssets: [], nodeParams: {}, activeWorkspace: root, compilerModelId: 1 })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_COMPILER_MODEL_INCOMPATIBLE' }))
+    await expect(compiler({ skillName: 'wrong', packId: 'wrong-pack', revision: 'stale-dropdown-revision', rawPrompt: '/pack-a:h3 hero', mode: 'text_to_video', incomingAssets: [], nodeParams: {}, activeWorkspace: root, compilerModelId: 1 } as any)).rejects.toThrow(expect.objectContaining({ code: 'SKILL_COMPILER_MODEL_INCOMPATIBLE' }))
     expect(queries[0]).toMatchObject({ packId: 'pack-a', name: 'h3' })
+    expect(queries[0]).not.toHaveProperty('revision')
+  })
+
+  test('passes the locked selector revision to registry resolution', async () => {
+    const root = await compilerRoot()
+    const queries: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async (query: any) => { queries.push(query); return skill(root) } } as any,
+      readModels: async () => [],
+    })
+
+    await expect(compiler({
+      skillName: 'h3',
+      packId: 'pack-a',
+      revision: 'rev-b',
+      rawPrompt: 'hero',
+      mode: 'text_to_video',
+      incomingAssets: [],
+      nodeParams: {},
+      activeWorkspace: root,
+      compilerModelId: 1,
+    } as any)).rejects.toThrow(expect.objectContaining({ code: 'SKILL_COMPILER_MODEL_INCOMPATIBLE' }))
+    expect(queries[0]).toMatchObject({ packId: 'pack-a', name: 'h3', revision: 'rev-b' })
   })
 
   test('empty prompt in a valid JSON result is typed as empty', async () => {

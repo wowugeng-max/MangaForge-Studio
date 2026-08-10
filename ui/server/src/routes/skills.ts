@@ -238,6 +238,8 @@ function normalizeCompileInput(body: unknown, workspace: string): PromptCompileI
   if (skillName !== undefined && (typeof skillName !== 'string' || !skillName.trim())) throw new TypeError('skill_name must be a non-empty string')
   const packId = body.pack_id ?? body.skillPackId
   if (packId !== undefined && (typeof packId !== 'string' || !packId.trim())) throw new TypeError('pack_id must be a non-empty string')
+  const revision = body.skill_revision ?? body.skillRevision
+  if (revision !== undefined && (typeof revision !== 'string' || !revision.trim())) throw new TypeError('skill_revision must be a non-empty string')
   const rawPrompt = body.prompt ?? body.raw_prompt
   if (typeof rawPrompt !== 'string' || !rawPrompt.trim()) throw new TypeError('prompt/raw_prompt must be a non-empty string')
   const mode = body.mode
@@ -250,6 +252,7 @@ function normalizeCompileInput(body: unknown, workspace: string): PromptCompileI
   return {
     ...(typeof skillName === 'string' ? { skillName: skillName.trim() } : {}),
     ...(typeof packId === 'string' ? { packId: packId.trim() } : {}),
+    ...(typeof revision === 'string' ? { revision: revision.trim() } : {}),
     rawPrompt,
     mode,
     incomingAssets,

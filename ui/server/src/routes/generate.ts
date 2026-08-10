@@ -217,10 +217,21 @@ function leadingSkillCommandCount(rawPrompt: string): number {
   return count
 }
 
+function normalizeSkillRevision(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string' || !value.trim()) {
+    const error = new Error('skill_revision must be a non-empty string')
+    ;(error as any).code = 'SKILL_REVISION_INVALID'
+    throw error
+  }
+  return value.trim()
+}
+
 function skillSelectorForPayload(payload: any, params: Record<string, any>, rawPrompt: string) {
   const command = parseSkillCommand(rawPrompt)
   const skillName = payloadValue(payload, params, 'skill_name', 'skillName')
   const packId = payloadValue(payload, params, 'skill_pack_id', 'skillPackId', 'pack_id', 'packId')
+  const revision = normalizeSkillRevision(payloadValue(payload, params, 'skill_revision', 'skillRevision'))
   const enabled = payloadValue(payload, params, 'skill_compile_enabled', 'skillCompileEnabled')
   const selected = typeof skillName === 'string' && skillName.trim()
     || typeof packId === 'string' && packId.trim()
@@ -238,9 +249,10 @@ function skillSelectorForPayload(payload: any, params: Record<string, any>, rawP
     command,
     // A leading command is the explicit invocation. Its qualified Pack ID
     // must be forwarded to the compiler even when the dropdown selected a
-    // different/default Pack.
+    // different/default Pack, while a stale dropdown revision must not be.
     skillName: command?.name || (typeof skillName === 'string' && skillName.trim() ? skillName.trim() : undefined),
     packId: command?.packId || (typeof packId === 'string' && packId.trim() ? packId.trim() : undefined),
+    ...(!command && revision ? { revision } : {}),
   }
 }
 
@@ -665,6 +677,7 @@ async function compileCanvasSkillIfSelected(
   const input: PromptCompileInput = {
     ...(selector.skillName ? { skillName: selector.skillName } : {}),
     ...(selector.packId ? { packId: selector.packId } : {}),
+    ...(selector.revision ? { revision: selector.revision } : {}),
     rawPrompt,
     mode,
     incomingAssets: incomingAssets.map(asset => ({

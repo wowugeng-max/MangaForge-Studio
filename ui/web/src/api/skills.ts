@@ -73,6 +73,7 @@ export type CanvasSkillCompileAsset = {
 export type CanvasSkillCompileInput = {
   skill_name?: string
   pack_id?: string
+  skill_revision?: string
   raw_prompt: string
   mode: CanvasSkillMediaMode
   incoming_assets?: CanvasSkillCompileAsset[]

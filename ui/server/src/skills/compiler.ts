@@ -182,7 +182,17 @@ export function createPromptCompiler(deps: PromptCompilerDeps | RegistryLike = {
     const skillName = command?.name ?? input.skillName
     if (!skillName || !resolveRegistry) throw new SkillCompilerError('SKILL_NOT_FOUND', 'No explicit Skill selected')
     let skill: SkillManifest
-    try { skill = await resolveRegistry.resolve({ packId: command?.packId ?? input.packId, name: skillName, mode: input.mode, readyOnly: true }) } catch (error: any) {
+    try {
+      skill = await resolveRegistry.resolve({
+        packId: command?.packId ?? input.packId,
+        name: skillName,
+        // A leading command owns Skill selection. Never constrain it with a
+        // revision persisted for a different dropdown selection.
+        ...(!command && input.revision ? { revision: input.revision } : {}),
+        mode: input.mode,
+        readyOnly: true,
+      })
+    } catch (error: any) {
       const code = error?.code === 'SKILL_MODE_INCOMPATIBLE' ? 'SKILL_MODE_INCOMPATIBLE' : error?.code === 'SKILL_AMBIGUOUS' ? 'SKILL_AMBIGUOUS' : 'SKILL_NOT_FOUND'
       throw new SkillCompilerError(code, error?.message ?? 'Skill not found', error)
     }

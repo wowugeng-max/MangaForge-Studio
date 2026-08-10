@@ -83,6 +83,26 @@ allowed-tools:
 # Brand Promo Video Generator
 
 Run a multi-stage workflow with tools: verify brand facts, plan shots, generate video, edit, and review delivery.
+  `)
+}
+
+async function installLockedPromptSkillRevision(workspace: string, revision: string) {
+  const root = join(workspace, '.mangaforge', 'skill-packs', 'locked-pack', revision)
+  const skillRoot = join(root, 'skills', 'locked-skill')
+  await mkdir(skillRoot, { recursive: true })
+  await writeFile(join(root, 'pack.json'), JSON.stringify({
+    id: 'locked-pack',
+    sourceUrl: 'https://github.com/example/locked-pack',
+    revision,
+    installedAt: '2026-08-09T00:00:00.000Z',
+    status: 'installed',
+  }))
+  await writeFile(join(skillRoot, 'SKILL.md'), `---
+name: locked-skill
+description: Compile a locked image prompt revision.
+media_modes: [text_to_image]
+---
+Return only a compiled visual prompt for an image. Revision ${revision}.
 `)
 }
 
@@ -213,6 +233,95 @@ describe('canvas skill routes', () => {
     expect(response.body).toMatchObject({ cache_key: 'hash-1', cached: false, result: { prompt: 'compiled' } })
     expect(compileCalls[0]).toMatchObject({ skillName: 'prompt-skill', packId: 'h3', rawPrompt: 'make a shot', mode: 'image_to_video', compilerModelId: 4, activeWorkspace: workspace })
     expect(compileCalls[0].incomingAssets).toEqual([{ type: 'prompt', content: 'hero' }])
+  })
+
+  test('pins duplicate installed revisions through preview compilation while unpinned requests stay ambiguous', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    await installLockedPromptSkillRevision(workspace, 'rev-a')
+    await installLockedPromptSkillRevision(workspace, 'rev-b')
+    const registry = createSkillRegistry(workspace)
+    const registryQueries: any[] = []
+    const compileInputs: any[] = []
+    let resolvedRevision = ''
+    let compilerExecutions = 0
+    const compiler = createPromptCompiler({
+      registry: {
+        resolve: async (query: any) => {
+          registryQueries.push(query)
+          const resolved = await registry.resolve(query)
+          resolvedRevision = resolved.revision
+          return resolved
+        },
+      } as any,
+      readModels: async () => [{ id: 7, model_name: 'compiler', provider: 'fixture', display_name: 'Compiler', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        compilerExecutions += 1
+        return { content: JSON.stringify({
+          skill_name: 'locked-skill',
+          skill_version: resolvedRevision,
+          mode: 'text_to_image',
+          prompt: `compiled ${resolvedRevision}`,
+          negative_prompt: '',
+          parameters: {},
+          references_used: [],
+          warnings: [],
+        }) }
+      },
+    })
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      getRegistry: async () => registry,
+      compilePromptSkill: async input => {
+        compileInputs.push(input)
+        return compiler(input)
+      },
+    })
+    const baseBody = {
+      skill_name: 'locked-skill',
+      pack_id: 'locked-pack',
+      raw_prompt: 'same editable prompt',
+      mode: 'text_to_image',
+      compiler_model_id: 7,
+    }
+
+    const revB = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { ...baseBody, skill_revision: 'rev-b' } })
+    const revA = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { ...baseBody, skillRevision: 'rev-a' } })
+    const ambiguous = await call(handlers.get('POST /api/skills/compile-preview')!, { body: baseBody })
+
+    expect(revB.statusCode).toBe(200)
+    expect(revB.body.result).toMatchObject({ skill_name: 'locked-skill', skill_version: 'rev-b', prompt: 'compiled rev-b' })
+    expect(revA.statusCode).toBe(200)
+    expect(revA.body.result).toMatchObject({ skill_name: 'locked-skill', skill_version: 'rev-a', prompt: 'compiled rev-a' })
+    expect(revA.body.cache_key).not.toBe(revB.body.cache_key)
+    expect(ambiguous.statusCode).toBe(409)
+    expect(ambiguous.body).toMatchObject({ error_code: 'SKILL_AMBIGUOUS' })
+    expect(compileInputs.map(input => input.revision)).toEqual(['rev-b', 'rev-a', undefined])
+    expect(registryQueries.map(query => query.revision)).toEqual(['rev-b', 'rev-a', undefined])
+    expect(compilerExecutions).toBe(2)
+  })
+
+  test('rejects malformed preview revision aliases before compilation', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    registerSkillRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileCalls += 1
+        return { result: { skill_name: 'prompt-skill', skill_version: 'abc123', mode: input.mode, prompt: 'compiled', negative_prompt: '', parameters: {}, references_used: [], warnings: [] }, inputHash: 'hash-1', cached: false, compilerModelId: 4, skill: manifest() }
+      },
+    })
+    const baseBody = { skill_name: 'prompt-skill', raw_prompt: 'make a shot', mode: 'image_to_video', compiler_model_id: 4 }
+
+    for (const revisionFields of [{ skill_revision: 7 }, { skillRevision: { arbitrary: true } }, { skill_revision: '   ' }]) {
+      const response = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { ...baseBody, ...revisionFields } })
+      expect(response.statusCode).toBe(400)
+      expect(response.body).toMatchObject({ error_code: 'SKILL_REQUEST_INVALID' })
+    }
+    expect(compileCalls).toBe(0)
   })
 
   test('preserves ordered reference metadata through preview compilation while legacy assets keep defaults', async () => {

@@ -41,6 +41,24 @@ describe('workspace canvas Skill registry', () => {
     await expect(registry.resolve({ packId: 'pack-a', name: 'same-name' })).resolves.toMatchObject({ packId: 'pack-a', revision: 'rev-a' })
   })
 
+  test('resolves an exact installed revision without choosing a latest duplicate', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
+    await installedPack(workspace, 'pack-a', 'rev-a', [
+      { name: 'locked-skill', body: 'Return only a compiled visual prompt for an image. Revision A.', frontmatter: 'media_modes: [text_to_image]\n' },
+    ])
+    await installedPack(workspace, 'pack-a', 'rev-b', [
+      { name: 'locked-skill', body: 'Return only a compiled visual prompt for an image. Revision B.', frontmatter: 'media_modes: [text_to_image]\n' },
+    ])
+
+    const registry = createSkillRegistry(workspace)
+    await expect(registry.resolve({ packId: 'pack-a', name: 'locked-skill' })).rejects.toMatchObject({ code: 'SKILL_AMBIGUOUS' })
+    await expect(registry.resolve({ packId: 'pack-a', name: 'locked-skill', revision: 'rev-b' })).resolves.toMatchObject({
+      packId: 'pack-a',
+      name: 'locked-skill',
+      revision: 'rev-b',
+    })
+  })
+
   test('classifies H3 modes and excludes incompatible ready-only results', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-registry-'))
     const h3 = join(import.meta.dir, 'fixtures', 'h3-prompt-writing')
