@@ -118,6 +118,21 @@ describe('canvas reference bindings', () => {
     expect(computeCompileInputHash(base)).not.toBe(computeCompileInputHash(lineageChanged))
   })
 
+  test('changes the canonical compile hash when the effective compiler model changes', () => {
+    const base: CompileCacheInput = {
+      packId: 'pack',
+      revision: 'rev',
+      skillName: 'skill',
+      rawPrompt: 'prompt',
+      mode: 'text_to_video',
+      incomingAssets: [],
+      nodeParams: {},
+    }
+
+    expect(computeCompileInputHash({ ...base, compilerModelId: 1 })).toBe(computeCompileInputHash({ ...base, compilerModelId: 1 }))
+    expect(computeCompileInputHash({ ...base, compilerModelId: 1 })).not.toBe(computeCompileInputHash({ ...base, compilerModelId: 2 }))
+  })
+
   test('keeps legacy inputs without reference metadata byte-compatible with the parent contract', () => {
     const legacyImageInput: CompileCacheInput = {
       packId: 'p',

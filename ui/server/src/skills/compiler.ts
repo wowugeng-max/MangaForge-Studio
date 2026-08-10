@@ -199,35 +199,35 @@ export function createPromptCompiler(deps: PromptCompilerDeps | RegistryLike = {
     let args: Record<string, string>
     try { args = resolveSkillArguments(skill, parseSkillCommand(input.rawPrompt)?.argumentsText ?? '', input.arguments ?? {}) } catch (error: any) { throw new SkillCompilerError(error.code ?? 'SKILL_ARGUMENT_INVALID', error.message, error) }
     const effectivePrompt = command && command.name === skill.name ? command.argumentsText : input.rawPrompt
-    const hashInput: CompileCacheInput = { ...input, rawPrompt: effectivePrompt, incomingAssets: referenceBindings, skillName: skill.name, packId: skill.packId, revision: skill.revision, arguments: args }
-    const inputHash = computeCompileInputHash(hashInput)
     const settings = input.compilerModelId === undefined ? await readSkillSettings(input.activeWorkspace) : null
     const compilerModelId = input.compilerModelId ?? settings?.skill_compiler_model_id ?? null
     if (compilerModelId === null) throw new SkillCompilerError('SKILL_COMPILER_MODEL_REQUIRED', 'A chat compiler model is required')
-    const model = (await read(input.activeWorkspace)).find((item) => Number(item.id) === Number(compilerModelId))
+    const effectiveCompilerModelId = Number(compilerModelId)
+    const hashInput: CompileCacheInput = { ...input, rawPrompt: effectivePrompt, incomingAssets: referenceBindings, skillName: skill.name, packId: skill.packId, revision: skill.revision, arguments: args, compilerModelId: effectiveCompilerModelId }
+    const inputHash = computeCompileInputHash(hashInput)
+    const model = (await read(input.activeWorkspace)).find((item) => Number(item.id) === effectiveCompilerModelId)
     if (!model || model.capabilities?.chat !== true) throw new SkillCompilerError('SKILL_COMPILER_MODEL_INCOMPATIBLE', 'Selected compiler model does not support chat')
     if (referenceBindings.some((asset) => asset.type === 'image') && model.capabilities?.vision !== true) throw new SkillCompilerError('SKILL_COMPILER_VISION_REQUIRED', 'Selected compiler model does not support vision inputs')
-    const cachedCompilerId = cache.getCachedCompile(input.activeWorkspace, inputHash)?.compilerModelId
     const cachedResult = cache.getCachedCompile(input.activeWorkspace, inputHash)
-    if (cachedResult) return { result: withReferenceAudit(cachedResult.result, referenceBindings, referenceModeHint), inputHash, cached: true, compilerModelId: cachedCompilerId ?? Number(compilerModelId), skill }
+    if (cachedResult) return { result: withReferenceAudit(cachedResult.result, referenceBindings, referenceModeHint), inputHash, cached: true, compilerModelId: effectiveCompilerModelId, skill }
     const requestInput = effectivePrompt === input.rawPrompt ? input : { ...input, rawPrompt: effectivePrompt }
     const request: LLMRequest = { model: model.model_name, messages: [{ role: 'system', content: systemPrompt(skill, refs, input.activeWorkspace) }, { role: 'user', content: userContent(requestInput, args, input.activeWorkspace, referenceBindings, referenceModeHint) }], temperature: 0, max_tokens: 2048, response_mode: 'non_stream', response_format: { type: 'json_object' }, tool_choice: 'none' }
-    let response = await execute(input.activeWorkspace, request, compilerModelId, { maxRetries: 0 })
+    let response = await execute(input.activeWorkspace, request, effectiveCompilerModelId, { maxRetries: 0 })
     if (response.tool_calls?.length) throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill compiler response contained tool calls')
     let content = extractContent(response)
     let result: PromptCompileResult
     try { result = parseResult(content, skill, input.mode) } catch (error) {
       if ((error as SkillCompilerError).code !== 'SKILL_RESULT_INVALID' || !content) throw error
       const repairRequest: LLMRequest = { ...request, messages: [{ role: 'system', content: `${request.messages[0].content}\nRepair the following invalid JSON data and return only a valid JSON object matching the contract.` }, { role: 'user', content: `INVALID_RESULT_DATA:\n${JSON.stringify(content)}` }] }
-      response = await execute(input.activeWorkspace, repairRequest, compilerModelId, { maxRetries: 0 })
+      response = await execute(input.activeWorkspace, repairRequest, effectiveCompilerModelId, { maxRetries: 0 })
       if (response.tool_calls?.length) throw new SkillCompilerError('SKILL_RESULT_INVALID', 'Skill compiler repair response contained tool calls')
       content = extractContent(response)
       result = parseResult(content, skill, input.mode)
     }
     result = withReferenceAudit(result, referenceBindings, referenceModeHint)
     if (result.negative_prompt && !supportsNegativePrompt(model, input.mode)) { result = { ...result, prompt: `${result.prompt}\n\nNegative prompt: ${result.negative_prompt}`, warnings: [...result.warnings, 'Model does not support a separate negative prompt; merged it into prompt.'] } }
-    cache.putCachedCompile(input.activeWorkspace, { key: inputHash, result, createdAt: Date.now(), compilerModelId: Number(compilerModelId) })
-    return { result, inputHash, cached: false, compilerModelId: Number(compilerModelId), skill }
+    cache.putCachedCompile(input.activeWorkspace, { key: inputHash, result, createdAt: Date.now(), compilerModelId: effectiveCompilerModelId })
+    return { result, inputHash, cached: false, compilerModelId: effectiveCompilerModelId, skill }
   }
 }
 

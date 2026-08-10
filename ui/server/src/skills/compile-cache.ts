@@ -10,6 +10,7 @@ export type CompileCacheInput = {
   incomingAssets?: CanvasReferenceAsset[]
   nodeParams?: Record<string, unknown>
   arguments?: Record<string, string>
+  compilerModelId?: number
 }
 
 export type CompileCacheRecord = { key: string; result: PromptCompileResult; createdAt: number; compilerModelId?: number }
@@ -50,7 +51,11 @@ export function canonicalCompileInput(input: CompileCacheInput): string {
   for (const key of NODE_PARAM_KEYS) if (input.nodeParams && input.nodeParams[key] !== undefined) params[key] = input.nodeParams[key]
   const assets = (input.incomingAssets ?? []).map(normalizedAsset)
   const args = Object.fromEntries(Object.entries(input.arguments ?? {}).sort(([a], [b]) => a.localeCompare(b)))
-  return canonical({ packId: input.packId ?? '', revision: input.revision ?? '', skillName: input.skillName ?? '', rawPrompt: input.rawPrompt, mode: input.mode, arguments: args, incomingAssets: assets, nodeParams: params })
+  const canonicalInput: Record<string, unknown> = { packId: input.packId ?? '', revision: input.revision ?? '', skillName: input.skillName ?? '', rawPrompt: input.rawPrompt, mode: input.mode, arguments: args, incomingAssets: assets, nodeParams: params }
+  // Keep legacy callers that do not yet supply model identity byte-compatible,
+  // while compiler execution always supplies the resolved effective model id.
+  if (input.compilerModelId !== undefined) canonicalInput.compilerModelId = input.compilerModelId
+  return canonical(canonicalInput)
 }
 
 export function computeCompileInputHash(input: CompileCacheInput): string {

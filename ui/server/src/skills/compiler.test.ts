@@ -6,6 +6,7 @@ import { createPromptCompiler, SkillCompilerError } from './compiler'
 import { computeCompileInputHash, createCompileCache } from './compile-cache'
 import { parseSkillDocument, readOpenAIMetadata } from './frontmatter'
 import { classifySkillCompatibility } from './registry'
+import { writeSkillSettings } from './settings'
 import type { CanvasMediaMode, CanvasReferenceAsset } from './types'
 
 const skill = (rootDir: string, compatibility: any = 'prompt_ready'): any => ({ packId: 'pack-a', directoryName: 'h3', name: 'h3', description: 'prompt', arguments: [], userInvocable: true, triggerWords: [], mediaModes: ['text_to_video'], compatibility, revision: 'a'.repeat(40), rootDir, body: 'Write a cinematic prompt.', references: ['references/base.txt'] })
@@ -253,6 +254,72 @@ describe('prompt compiler', () => {
       expect(output.cached).toBe(false)
     }
     expect(executions).toBe(1 + variants.length)
+  })
+
+  test('keys cached compiles by the explicit effective compiler model', async () => {
+    const root = await compilerRoot()
+    const modelCalls: number[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache: createCompileCache(),
+      readModels: async () => [
+        { id: 1, model_name: 'compiler-one', provider: 'x', display_name: 'Compiler One', capabilities: { chat: true } } as any,
+        { id: 2, model_name: 'compiler-two', provider: 'x', display_name: 'Compiler Two', capabilities: { chat: true } } as any,
+      ],
+      executeWithRuntimeModel: async (_workspace, _request, modelId) => {
+        modelCalls.push(Number(modelId))
+        return { content: compilerResult('text_to_video', { prompt: `compiled by model ${modelId}` }) }
+      },
+    })
+    const input = {
+      skillName: 'h3-prompt-writing', rawPrompt: 'model-specific cache', mode: 'text_to_video' as const,
+      incomingAssets: [], nodeParams: {}, activeWorkspace: root,
+    }
+
+    const first = await compiler({ ...input, compilerModelId: 1 })
+    const repeated = await compiler({ ...input, compilerModelId: 1 })
+    const secondModel = await compiler({ ...input, compilerModelId: 2 })
+
+    expect(modelCalls).toEqual([1, 2])
+    expect(first).toMatchObject({ cached: false, compilerModelId: 1, result: { prompt: 'compiled by model 1' } })
+    expect(repeated).toMatchObject({ cached: true, compilerModelId: 1, result: { prompt: 'compiled by model 1' } })
+    expect(repeated.inputHash).toBe(first.inputHash)
+    expect(secondModel).toMatchObject({ cached: false, compilerModelId: 2, result: { prompt: 'compiled by model 2' } })
+    expect(secondModel.inputHash).not.toBe(first.inputHash)
+  })
+
+  test('re-reads the configured compiler model before generating the cache key', async () => {
+    const root = await compilerRoot()
+    const modelCalls: number[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache: createCompileCache(),
+      readModels: async () => [
+        { id: 1, model_name: 'compiler-one', provider: 'x', display_name: 'Compiler One', capabilities: { chat: true } } as any,
+        { id: 2, model_name: 'compiler-two', provider: 'x', display_name: 'Compiler Two', capabilities: { chat: true } } as any,
+      ],
+      executeWithRuntimeModel: async (_workspace, _request, modelId) => {
+        modelCalls.push(Number(modelId))
+        return { content: compilerResult('text_to_video', { prompt: `compiled by model ${modelId}` }) }
+      },
+    })
+    const input = {
+      skillName: 'h3-prompt-writing', rawPrompt: 'configured model cache', mode: 'text_to_video' as const,
+      incomingAssets: [], nodeParams: {}, activeWorkspace: root,
+    }
+
+    await writeSkillSettings(root, 1)
+    const first = await compiler(input)
+    await writeSkillSettings(root, 2)
+    const second = await compiler(input)
+    const repeatedSecond = await compiler(input)
+
+    expect(modelCalls).toEqual([1, 2])
+    expect(first).toMatchObject({ cached: false, compilerModelId: 1, result: { prompt: 'compiled by model 1' } })
+    expect(second).toMatchObject({ cached: false, compilerModelId: 2, result: { prompt: 'compiled by model 2' } })
+    expect(second.inputHash).not.toBe(first.inputHash)
+    expect(repeatedSecond).toMatchObject({ cached: true, compilerModelId: 2, result: { prompt: 'compiled by model 2' } })
+    expect(repeatedSecond.inputHash).toBe(second.inputHash)
   })
 
   test('rebuilds cached provenance after a caller mutates the first returned audit metadata', async () => {
