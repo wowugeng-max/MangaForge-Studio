@@ -234,6 +234,17 @@ function imageAcceptancePrompt(assets) {
   return `${alias}: Use every supplied image reference in this exact order: ${roleSummary}. Create a coherent 8-second cinematic action that visibly incorporates every reference.`
 }
 
+function expectedCanonicalReferenceBindings(assets) {
+  return assets.map((asset, index) => ({
+    reference_index: asset.reference_index,
+    reference_id: `reference-${index + 1}`,
+    reference_role: asset.reference_role,
+    type: asset.type,
+    url: asset.url,
+    source_asset_ids: [...asset.source_asset_ids],
+  }))
+}
+
 function assertReferenceAudit(result, expectedHint, expectedBindings) {
   if (result.reference_mode_hint !== expectedHint) {
     throw new H3AcceptanceError('H3_E2E_ASSERTION', `image_to_video preview returned mismatched reference_mode_hint; expected ${expectedHint}`)
@@ -250,6 +261,7 @@ function assertReferenceAudit(result, expectedHint, expectedBindings) {
       && actual.source_asset_ids.every((id, lineageIndex) => id === expected.source_asset_ids[lineageIndex])
     if (!actual || typeof actual !== 'object' || Array.isArray(actual)
       || actual.reference_index !== expected.reference_index
+      || actual.reference_id !== expected.reference_id
       || actual.reference_role !== expected.reference_role
       || actual.type !== expected.type
       || actual.url !== expected.url
@@ -360,7 +372,7 @@ export async function runH3Acceptance({
   }
   const imageReferenceAudit = {
     referenceModeHint: imageAcceptanceAlias(imageAssets),
-    referenceBindings: imageAssets,
+    referenceBindings: expectedCanonicalReferenceBindings(imageAssets),
   }
   const textPreview = assertPreview(
     await requestJson(fetchImpl, baseUrl, '/skills/compile-preview', { method: 'POST', body: textBody, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),

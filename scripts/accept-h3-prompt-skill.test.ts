@@ -22,6 +22,7 @@ const ORDERED_IMAGE_ASSETS = [
 ]
 const ORDERED_REFERENCE_BINDINGS = ORDERED_IMAGE_ASSETS.map((asset, index) => ({
   ...asset,
+  source_asset_ids: [...asset.source_asset_ids],
   reference_id: `reference-${index + 1}`,
 }))
 
@@ -378,6 +379,21 @@ describe('MiniMax H3 live acceptance harness', () => {
     ['mismatched reference lineage', { imageReferenceBindings: [
       ORDERED_REFERENCE_BINDINGS[0],
       { ...ORDERED_REFERENCE_BINDINGS[1], source_asset_ids: [999] },
+      ORDERED_REFERENCE_BINDINGS[2],
+    ] }],
+    ['a missing canonical reference id', { imageReferenceBindings: [
+      ORDERED_REFERENCE_BINDINGS[0],
+      { ...ORDERED_REFERENCE_BINDINGS[1], reference_id: undefined },
+      ORDERED_REFERENCE_BINDINGS[2],
+    ] }],
+    ['a corrupted canonical reference id', { imageReferenceBindings: [
+      ORDERED_REFERENCE_BINDINGS[0],
+      { ...ORDERED_REFERENCE_BINDINGS[1], reference_id: 'CORRUPTED-ID' },
+      ORDERED_REFERENCE_BINDINGS[2],
+    ] }],
+    ['a duplicate canonical reference id', { imageReferenceBindings: [
+      ORDERED_REFERENCE_BINDINGS[0],
+      { ...ORDERED_REFERENCE_BINDINGS[1], reference_id: 'reference-1' },
       ORDERED_REFERENCE_BINDINGS[2],
     ] }],
   ] as Array<[string, AssertionFaults]>)('rejects %s with a typed assertion error', async (_label, faults) => {
