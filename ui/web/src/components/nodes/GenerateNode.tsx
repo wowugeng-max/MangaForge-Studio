@@ -46,6 +46,7 @@ import {
   buildGenerateNodeResultWithFission,
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
+  completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
   freezeGenerateNodeExecutionReferences,
@@ -105,6 +106,7 @@ export {
   buildGenerateNodeReferencePersistencePayload,
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
+  completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
   freezeGenerateNodeExecutionReferences,
@@ -798,80 +800,81 @@ function GenerateNodeImpl(props: NodeProps) {
       : activeRunReferenceBindings
     const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
     const compilerOwnedBindings = finalResult.reference_bindings
-    if (!generateRunTrackerRef.current.complete(runToken)) return
-
-    if (finalResult?.compiled_prompt !== undefined) {
-      const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
-      const warnings = Array.isArray(finalResult.warnings) ? finalResult.warnings.map(String) : []
-      const actualCompilerModelId = normalizeGenerateNodeCompilerModelId(finalResult.compiler_model_id)
-      setCompiledPrompt(String(finalResult.compiled_prompt || ''))
-      setCompiledNegativePrompt(String(finalResult.compiled_negative_prompt || ''))
-      setCompiledReferences(references)
-      setCompiledReferenceBindings(compilerOwnedBindings)
-      setReferenceModeHint(String(finalResult.reference_mode_hint || ''))
-      setCompiledInputHash(String(finalResult.compiled_input_hash || ''))
-      setCompileWarnings(warnings)
-      setSkillPackSource(String(finalResult.skill_pack_source || ''))
-      setCompilerModelId(actualCompilerModelId)
-      setSkillPreviewError(null)
-      setSkillPreviewResult({
-        skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
-        skill_version: String(finalResult.skill_revision || effectiveSkillRevision || ''),
-        mode: mode as CanvasSkillMediaMode,
-        prompt: String(finalResult.compiled_prompt || ''),
-        negative_prompt: String(finalResult.compiled_negative_prompt || ''),
-        parameters: {},
-        references_used: references.map(String),
-        warnings,
-        reference_bindings: compilerOwnedBindings,
-        ...(finalResult.reference_mode_hint ? { reference_mode_hint: finalResult.reference_mode_hint } : {}),
-      })
-    }
-    setResult(finalResult)
-    updateNodeData(id, {
-      result: finalResult,
-      ...(finalResult?.compiled_prompt !== undefined ? {
-        compiledPrompt: finalResult.compiled_prompt,
-        compiledNegativePrompt: finalResult.compiled_negative_prompt || '',
-        compiledReferences: finalResult.compiled_references || [],
-        compiledReferenceBindings: compilerOwnedBindings,
-        referenceModeHint: finalResult.reference_mode_hint || '',
-        compiledInputHash: finalResult.compiled_input_hash || '',
-        compileWarnings: finalResult.warnings || [],
-        skillPackSource: finalResult.skill_pack_source || '',
-        compilerModelId: finalResult.compiler_model_id,
-        skill_pack_id: finalResult.skill_pack_id,
-        skill_pack_source: finalResult.skill_pack_source,
-        skill_name: finalResult.skill_name,
-        skill_revision: finalResult.skill_revision,
-        compiled_prompt: finalResult.compiled_prompt,
-        compiled_negative_prompt: finalResult.compiled_negative_prompt || '',
-        compiled_references: finalResult.compiled_references || [],
-        reference_mode_hint: finalResult.reference_mode_hint,
-        compiled_input_hash: finalResult.compiled_input_hash,
-        warnings: finalResult.warnings || [],
-        compiler_model_id: finalResult.compiler_model_id,
-      } : {}),
-    })
-    setNodeStatus(id, 'success')
-    setGenerating(false)
-    setProgressMsg('')
-    sseClientRef.current?.disconnect()
-    sseClientRef.current = null
-    message.success('🧠 AI 思考完成！')
-
-    if (finalResult?._fission && Array.isArray(finalResult.items)) {
-      const store = useCanvasStore.getState()
-      if (!store.isGlobalRunning) {
-        const outcome = expandFissionAndDistribute({ nodeId: id, items: finalResult.items, store: useCanvasStore })
-        if (outcome.expanded) message.info(`裂变完成，已创建 ${finalResult.items.length} 个并行分支`, 3)
-        else if (outcome.reason === 'no_downstream') message.warning('裂变结果已生成，但没有下游节点可展开')
+    const commitSuccessfulGeneration = () => {
+      if (finalResult?.compiled_prompt !== undefined) {
+        const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
+        const warnings = Array.isArray(finalResult.warnings) ? finalResult.warnings.map(String) : []
+        const actualCompilerModelId = normalizeGenerateNodeCompilerModelId(finalResult.compiler_model_id)
+        setCompiledPrompt(String(finalResult.compiled_prompt || ''))
+        setCompiledNegativePrompt(String(finalResult.compiled_negative_prompt || ''))
+        setCompiledReferences(references)
+        setCompiledReferenceBindings(compilerOwnedBindings)
+        setReferenceModeHint(String(finalResult.reference_mode_hint || ''))
+        setCompiledInputHash(String(finalResult.compiled_input_hash || ''))
+        setCompileWarnings(warnings)
+        setSkillPackSource(String(finalResult.skill_pack_source || ''))
+        setCompilerModelId(actualCompilerModelId)
+        setSkillPreviewError(null)
+        setSkillPreviewResult({
+          skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
+          skill_version: String(finalResult.skill_revision || effectiveSkillRevision || ''),
+          mode: mode as CanvasSkillMediaMode,
+          prompt: String(finalResult.compiled_prompt || ''),
+          negative_prompt: String(finalResult.compiled_negative_prompt || ''),
+          parameters: {},
+          references_used: references.map(String),
+          warnings,
+          reference_bindings: compilerOwnedBindings,
+          ...(finalResult.reference_mode_hint ? { reference_mode_hint: finalResult.reference_mode_hint } : {}),
+        })
       }
-    } else {
-      getEdges().filter(e => e.source === id).forEach(edge => {
-        updateNodeData(edge.target, { incoming_data: finalResult })
+      setResult(finalResult)
+      updateNodeData(id, {
+        result: finalResult,
+        ...(finalResult?.compiled_prompt !== undefined ? {
+          compiledPrompt: finalResult.compiled_prompt,
+          compiledNegativePrompt: finalResult.compiled_negative_prompt || '',
+          compiledReferences: finalResult.compiled_references || [],
+          compiledReferenceBindings: compilerOwnedBindings,
+          referenceModeHint: finalResult.reference_mode_hint || '',
+          compiledInputHash: finalResult.compiled_input_hash || '',
+          compileWarnings: finalResult.warnings || [],
+          skillPackSource: finalResult.skill_pack_source || '',
+          compilerModelId: finalResult.compiler_model_id,
+          skill_pack_id: finalResult.skill_pack_id,
+          skill_pack_source: finalResult.skill_pack_source,
+          skill_name: finalResult.skill_name,
+          skill_revision: finalResult.skill_revision,
+          compiled_prompt: finalResult.compiled_prompt,
+          compiled_negative_prompt: finalResult.compiled_negative_prompt || '',
+          compiled_references: finalResult.compiled_references || [],
+          reference_mode_hint: finalResult.reference_mode_hint,
+          compiled_input_hash: finalResult.compiled_input_hash,
+          warnings: finalResult.warnings || [],
+          compiler_model_id: finalResult.compiler_model_id,
+        } : {}),
       })
+      setNodeStatus(id, 'success')
+      setGenerating(false)
+      setProgressMsg('')
+      sseClientRef.current?.disconnect()
+      sseClientRef.current = null
+      message.success('🧠 AI 思考完成！')
+
+      if (finalResult?._fission && Array.isArray(finalResult.items)) {
+        const store = useCanvasStore.getState()
+        if (!store.isGlobalRunning) {
+          const outcome = expandFissionAndDistribute({ nodeId: id, items: finalResult.items, store: useCanvasStore })
+          if (outcome.expanded) message.info(`裂变完成，已创建 ${finalResult.items.length} 个并行分支`, 3)
+          else if (outcome.reason === 'no_downstream') message.warning('裂变结果已生成，但没有下游节点可展开')
+        }
+      } else {
+        getEdges().filter(e => e.source === id).forEach(edge => {
+          updateNodeData(edge.target, { incoming_data: finalResult })
+        })
+      }
     }
+    completeGenerateNodeRunAfterEffects(generateRunTrackerRef.current, runToken, commitSuccessfulGeneration)
   }
 
   const failGeneration = (error: unknown, runToken: GenerateNodeRunToken) => {
@@ -903,7 +906,11 @@ function GenerateNodeImpl(props: NodeProps) {
       return
     }
     if (msg.type === 'result') {
-      finishGeneration(msg.data ?? msg.result ?? msg, runToken)
+      try {
+        finishGeneration(msg.data ?? msg.result ?? msg, runToken)
+      } catch (error) {
+        failGeneration(error, runToken)
+      }
       return
     }
     if (msg.type === 'error') {
@@ -916,6 +923,7 @@ function GenerateNodeImpl(props: NodeProps) {
   }
 
   const handleRun = async () => {
+    if (generateRunTrackerRef.current.hasActive()) return
     if (runBlocked) {
       setNodeStatus(id, 'error')
       if (executionCompatibilityError) {

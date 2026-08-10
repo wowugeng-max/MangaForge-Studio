@@ -1733,6 +1733,80 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(failSource).toContain('generateRunTrackerRef.current.complete(runToken)')
   })
 
+  test('skips invalid run-signal reentry before validation or node-status side effects', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const tracker = module.createGenerateNodeRunTracker()
+    expect(typeof tracker.hasActive).toBe('function')
+    if (typeof tracker.hasActive !== 'function') return
+
+    const activeRun = tracker.start([{
+      type: 'image', url: '/active.png', reference_id: 'active-ref', reference_role: 'general',
+      reference_index: 1, source_asset_ids: [31],
+    }])
+    expect(activeRun).not.toBeNull()
+    const sideEffects: string[] = []
+    const simulateInvalidRunSignal = () => {
+      if (tracker.hasActive()) return
+      sideEffects.push('validate-current-config')
+      sideEffects.push('set-node-status-error')
+    }
+
+    simulateInvalidRunSignal()
+    expect(sideEffects).toEqual([])
+    expect(tracker.isCurrent(activeRun)).toBe(true)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const handleRunStart = source.indexOf('const handleRun = async () => {')
+    const handleRunBody = source.slice(
+      handleRunStart + 'const handleRun = async () => {'.length,
+      source.indexOf('if (runBlocked) {', handleRunStart),
+    )
+    expect(handleRunBody.trim()).toBe('if (generateRunTrackerRef.current.hasActive()) return')
+  })
+
+  test('keeps a run active until terminal side effects succeed so failures can clear it', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const completeAfterEffects = module.completeGenerateNodeRunAfterEffects
+    expect(typeof completeAfterEffects).toBe('function')
+    if (typeof completeAfterEffects !== 'function') return
+
+    const tracker = module.createGenerateNodeRunTracker()
+    const failedRun = tracker.start([{
+      type: 'image', url: '/failed.png', reference_id: 'failed-ref', reference_role: 'general',
+      reference_index: 1, source_asset_ids: [51],
+    }])
+    expect(failedRun).not.toBeNull()
+    let sideEffectCount = 0
+    expect(() => completeAfterEffects(tracker, failedRun, () => {
+      sideEffectCount += 1
+      throw new Error('downstream persistence failed')
+    })).toThrow('downstream persistence failed')
+    expect(sideEffectCount).toBe(1)
+    expect(tracker.isCurrent(failedRun)).toBe(true)
+    expect(tracker.complete(failedRun)).toBe(true)
+
+    const successfulRun = tracker.start([{
+      type: 'image', url: '/success.png', reference_id: 'success-ref', reference_role: 'style',
+      reference_index: 1, source_asset_ids: [52],
+    }])
+    expect(successfulRun).not.toBeNull()
+    expect(completeAfterEffects(tracker, successfulRun, () => { sideEffectCount += 1 })).toBe(true)
+    expect(sideEffectCount).toBe(2)
+    expect(tracker.isCurrent(successfulRun)).toBe(false)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const finishStart = source.indexOf('const finishGeneration =')
+    const failStart = source.indexOf('const failGeneration =', finishStart)
+    const finishSource = source.slice(finishStart, failStart)
+    expect(finishSource).toContain('completeGenerateNodeRunAfterEffects(')
+    expect(finishSource).not.toContain('generateRunTrackerRef.current.complete(runToken)')
+    const sseStart = source.indexOf('const handleSSEMessage =', failStart)
+    const sseEnd = source.indexOf('const handleRun = async () => {', sseStart)
+    const sseSource = source.slice(sseStart, sseEnd)
+    expect(sseSource).toContain('catch (error)')
+    expect(sseSource).toContain('failGeneration(error, runToken)')
+  })
+
   test('uses the active run reference snapshot for result, downstream, and saved provenance', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     expect(source).toContain('const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())')
@@ -1750,7 +1824,7 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(finishSource).toContain('runToken.referenceBindings')
     expect(finishSource).toContain('result: finalResult')
     expect(finishSource).toContain('incoming_data: finalResult')
-    expect(finishSource).toContain('generateRunTrackerRef.current.complete(runToken)')
+    expect(finishSource).toContain('completeGenerateNodeRunAfterEffects(')
 
     const failSource = source.slice(failStart, source.indexOf('const handleSSEMessage', failStart))
     expect(failSource).toContain('generateRunTrackerRef.current.complete(runToken)')

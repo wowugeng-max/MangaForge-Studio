@@ -1189,6 +1189,9 @@ export function createGenerateNodeRunTracker() {
   let nextRunId = 1
   let activeRun: GenerateNodeRunToken | null = null
   return {
+    hasActive() {
+      return activeRun !== null
+    },
     start(bindings: readonly GenerateNodeReferenceBinding[]): GenerateNodeRunToken | null {
       if (activeRun) return null
       const referenceBindings = buildGenerateNodeCanonicalReferenceBindings(bindings).map(binding => {
@@ -1216,6 +1219,16 @@ export function createGenerateNodeRunTracker() {
       activeRun = null
     },
   }
+}
+
+export function completeGenerateNodeRunAfterEffects(
+  tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'isCurrent' | 'complete'>,
+  token: GenerateNodeRunToken,
+  effects: () => void,
+) {
+  if (!tracker.isCurrent(token)) return false
+  effects()
+  return tracker.complete(token)
 }
 
 export function freezeGenerateNodeExecutionReferences(
