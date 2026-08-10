@@ -63,12 +63,12 @@ function explicitCapability(selection: MultiReferenceTransportSelection): {
       contexts: [selection.model?.context_ui_params, selection.model?.contextUiParams],
     },
     {
-      source: 'provider_capability' as const,
-      contexts: [selection.provider?.context_ui_params, selection.provider?.contextUiParams],
-    },
-    {
       source: 'model_capability' as const,
       contexts: [selection.context_ui_params, selection.contextUiParams],
+    },
+    {
+      source: 'provider_capability' as const,
+      contexts: [selection.provider?.context_ui_params, selection.provider?.contextUiParams],
     },
   ]
   for (const group of groups) {

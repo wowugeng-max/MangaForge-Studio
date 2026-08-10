@@ -115,6 +115,53 @@ describe('multi-reference provider transport', () => {
     })
   })
 
+  test('prioritizes nested and direct model capability entries before provider declarations', () => {
+    const threeReferenceRequest = request({
+      reference_images: [...references, {
+        url: '/third.png',
+        reference_index: 3,
+      }],
+    })
+    const provider = {
+      context_ui_params: {
+        multi_reference: { supported: true, field: 'provider_images', shape: 'urls', max: 2 },
+      },
+    }
+
+    expect(resolveMultiReferenceTransport(threeReferenceRequest, {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      contextUiParams: {
+        multi_reference: { supported: true, field: 'model_images', shape: 'metadata', max: 9 },
+      },
+      provider,
+    })).toMatchObject({
+      source: 'model_capability',
+      field: 'model_images',
+      shape: 'metadata',
+      max: 9,
+    })
+
+    expect(resolveMultiReferenceTransport(threeReferenceRequest, {
+      apiFormat: 'openai_compatible',
+      endpoint: 'videos/generations',
+      model: {
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'nested_model_images', shape: 'urls', max: 8 },
+        },
+      },
+      context_ui_params: {
+        multi_reference: { supported: true, field: 'direct_model_images', shape: 'metadata', max: 9 },
+      },
+      provider,
+    })).toMatchObject({
+      source: 'model_capability',
+      field: 'nested_model_images',
+      shape: 'urls',
+      max: 8,
+    })
+  })
+
   test('requires an explicit array field for non-multimodal media endpoints', () => {
     expect(() => resolveMultiReferenceTransport(request(), {
       apiFormat: 'openai_compatible',
