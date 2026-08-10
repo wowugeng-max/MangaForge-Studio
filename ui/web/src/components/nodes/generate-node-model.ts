@@ -109,11 +109,14 @@ export function resolveGenerateNodeSourceContent(sourceData: any) {
 
 export type GenerateNodeIncomingAsset = {
   id?: number
-  type: 'image' | 'prompt'
+  type: GenerateNodeReferenceType
   content?: string
   file_path?: string
   url?: string
   source_asset_ids?: number[]
+  reference_index?: number
+  reference_id?: string
+  reference_role?: GenerateNodeReferenceRole
 }
 
 export type GenerateNodeReferenceRole =
@@ -148,6 +151,17 @@ export type GenerateNodeReferenceErrorCode =
   | 'REFERENCE_LINEAGE_INVALID'
   | 'REFERENCE_ID_INVALID'
 
+export type GenerateNodeReferenceValidationState = {
+  error_code: GenerateNodeReferenceErrorCode
+  detail: string
+  reference_index?: number
+}
+
+export type GenerateNodeExecutionCompatibilityError = {
+  error_code: 'MULTI_REFERENCE_UNSUPPORTED' | 'MULTI_REFERENCE_MAPPING_REQUIRED'
+  detail: string
+}
+
 export class GenerateNodeReferenceError extends Error {
   readonly code: GenerateNodeReferenceErrorCode
   readonly reference_index?: number
@@ -172,6 +186,17 @@ const GENERATE_NODE_REFERENCE_ROLES: ReadonlySet<GenerateNodeReferenceRole> = ne
   'full_reference',
   'prompt_context',
 ])
+
+export const GENERATE_NODE_REFERENCE_ROLE_OPTIONS: Array<{ label: string; value: GenerateNodeReferenceRole }> = [
+  { label: '通用参考', value: 'general' },
+  { label: '首帧', value: 'first_frame' },
+  { label: '尾帧', value: 'last_frame' },
+  { label: '角色', value: 'character' },
+  { label: '场景', value: 'scene' },
+  { label: '风格', value: 'style' },
+  { label: '完整参考', value: 'full_reference' },
+  { label: '提示上下文', value: 'prompt_context' },
+]
 
 const GENERATE_NODE_REFERENCE_TYPES: ReadonlySet<GenerateNodeReferenceType> = new Set([
   'image',
@@ -300,6 +325,7 @@ export function resolveGenerateNodeSourceAssetIds(sourceData: any): number[] {
 export type GenerateNodeIncomingContextSnapshot = {
   incomingAssets: GenerateNodeIncomingAsset[]
   externalSystemPrompt: string
+  referenceEdgeCount: number
   fingerprint: string
 }
 
@@ -310,7 +336,9 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
 }): GenerateNodeIncomingContextSnapshot {
   const incomingAssets: GenerateNodeIncomingAsset[] = []
   let externalSystemPrompt = ''
-  input.edges.filter(edge => edge.target === input.nodeId).forEach(edge => {
+  const incomingEdges = input.edges.filter(edge => edge.target === input.nodeId)
+  const referenceEdgeCount = incomingEdges.filter(edge => edge.targetHandle === 'text' || edge.targetHandle === 'image').length
+  incomingEdges.forEach(edge => {
     const sourceNode = input.nodes.find(node => node.id === edge.source)
     if (!sourceNode) return
     const sourceContent = resolveGenerateNodeSourceContent(sourceNode.data)
@@ -328,7 +356,8 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
   return {
     incomingAssets,
     externalSystemPrompt,
-    fingerprint: JSON.stringify({ incomingAssets, externalSystemPrompt }),
+    referenceEdgeCount,
+    fingerprint: JSON.stringify({ incomingAssets, externalSystemPrompt, referenceEdgeCount }),
   }
 }
 
@@ -387,6 +416,29 @@ function enforceGenerateNodeReferenceConstraints(bindings: readonly GenerateNode
   }
   if (bindings.filter(binding => binding.reference_role === 'last_frame').length > 1) {
     throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one last_frame reference is allowed')
+  }
+}
+
+function cloneGenerateNodeReferenceBindings(
+  bindings: readonly GenerateNodeReferenceBinding[],
+): GenerateNodeReferenceBinding[] {
+  return bindings.map(binding => ({
+    ...binding,
+    ...(binding.source_asset_ids ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+  }))
+}
+
+function toGenerateNodeReferenceValidationState(error: unknown): GenerateNodeReferenceValidationState {
+  if (error instanceof GenerateNodeReferenceError) {
+    return {
+      error_code: error.code,
+      detail: error.message,
+      ...(error.reference_index === undefined ? {} : { reference_index: error.reference_index }),
+    }
+  }
+  return {
+    error_code: 'REFERENCE_ASSET_INVALID',
+    detail: error instanceof Error ? error.message : 'Invalid GenerateNode reference bindings',
   }
 }
 
@@ -514,6 +566,218 @@ export function reorderGenerateNodeReferenceBindings(
   }))
 }
 
+export function updateGenerateNodeReferenceBindingRole(
+  bindings: readonly GenerateNodeReferenceBinding[],
+  referenceId: string,
+  referenceRole: GenerateNodeReferenceRole,
+): { bindings: GenerateNodeReferenceBinding[]; validationError: GenerateNodeReferenceValidationState | null } {
+  let normalized: GenerateNodeReferenceBinding[]
+  try {
+    normalized = normalizeGenerateNodeReferenceBindings(bindings, [])
+  } catch (error) {
+    return { bindings: [], validationError: toGenerateNodeReferenceValidationState(error) }
+  }
+  const targetIndex = normalized.findIndex(binding => binding.reference_id === referenceId)
+  if (targetIndex < 0) {
+    return {
+      bindings: normalized,
+      validationError: {
+        error_code: 'REFERENCE_ID_INVALID',
+        detail: `Unknown reference id: ${referenceId}`,
+      },
+    }
+  }
+  try {
+    const next = normalized.map((binding, index) => index === targetIndex
+      ? { ...binding, reference_role: referenceRole }
+      : binding)
+    return {
+      bindings: normalizeGenerateNodeReferenceBindings(next, []),
+      validationError: null,
+    }
+  } catch (error) {
+    return {
+      bindings: normalized,
+      validationError: toGenerateNodeReferenceValidationState(error),
+    }
+  }
+}
+
+function rawGenerateNodeReferenceId(value: unknown) {
+  if (!isGenerateNodeReferenceRecord(value)) return ''
+  const rawReferenceId = value.reference_id ?? value.referenceId
+  return typeof rawReferenceId === 'string' ? rawReferenceId.trim() : ''
+}
+
+function generateNodeReferenceValue(binding: GenerateNodeReferenceBinding) {
+  return binding.type === 'prompt' ? binding.content || '' : binding.url || ''
+}
+
+function generateNodeReferenceLineageMatches(
+  existing: GenerateNodeReferenceBinding,
+  candidate: GenerateNodeReferenceBinding,
+) {
+  if (existing.type !== candidate.type) return false
+  const candidateIds = new Set(candidate.source_asset_ids || [])
+  return Boolean(existing.source_asset_ids?.some(id => candidateIds.has(id)))
+}
+
+export function reconcileGenerateNodeReferenceBindings(
+  persisted: unknown,
+  incomingAssets: readonly GenerateNodeIncomingAsset[] = [],
+  options: { incomingComplete?: boolean } = {},
+): { bindings: GenerateNodeReferenceBinding[]; validationError: GenerateNodeReferenceValidationState | null } {
+  const hasPersisted = persisted !== undefined && persisted !== null
+  let existing: GenerateNodeReferenceBinding[] = []
+  if (hasPersisted) {
+    try {
+      existing = normalizeGenerateNodeReferenceBindings(persisted, [])
+    } catch (error) {
+      return { bindings: [], validationError: toGenerateNodeReferenceValidationState(error) }
+    }
+    if (options.incomingComplete === false) {
+      return { bindings: cloneGenerateNodeReferenceBindings(existing), validationError: null }
+    }
+  }
+
+  let incoming: GenerateNodeReferenceBinding[]
+  try {
+    incoming = normalizeGenerateNodeReferenceBindings(undefined, incomingAssets)
+  } catch (error) {
+    return {
+      bindings: cloneGenerateNodeReferenceBindings(existing),
+      validationError: toGenerateNodeReferenceValidationState(error),
+    }
+  }
+  if (!hasPersisted) {
+    return { bindings: incoming, validationError: null }
+  }
+
+  const explicitIncomingIds = incomingAssets.map(rawGenerateNodeReferenceId)
+  const usedIncoming = new Set<number>()
+  const reconciled: GenerateNodeReferenceBinding[] = []
+  const findIncoming = (predicate: (candidate: GenerateNodeReferenceBinding, index: number) => boolean) => (
+    incoming.findIndex((candidate, index) => !usedIncoming.has(index) && predicate(candidate, index))
+  )
+
+  existing.forEach(binding => {
+    let incomingIndex = findIncoming((candidate, index) => (
+      Boolean(explicitIncomingIds[index]) && explicitIncomingIds[index] === binding.reference_id
+    ))
+    if (incomingIndex < 0) {
+      incomingIndex = findIncoming(candidate => generateNodeReferenceLineageMatches(binding, candidate))
+    }
+    if (incomingIndex < 0) {
+      incomingIndex = findIncoming(candidate => (
+        candidate.type === binding.type
+        && generateNodeReferenceValue(candidate) === generateNodeReferenceValue(binding)
+      ))
+    }
+    if (incomingIndex < 0) return
+    usedIncoming.add(incomingIndex)
+    const candidate = incoming[incomingIndex]
+    reconciled.push({
+      ...candidate,
+      reference_id: binding.reference_id,
+      reference_role: binding.reference_role,
+      ...(candidate.source_asset_ids ? { source_asset_ids: [...candidate.source_asset_ids] } : {}),
+    })
+  })
+
+  const allocatedReferenceIds = new Set(reconciled.map(binding => binding.reference_id))
+  let nextReferenceId = 1
+  const allocateReferenceId = (preferred: string) => {
+    if (preferred && !allocatedReferenceIds.has(preferred)) {
+      allocatedReferenceIds.add(preferred)
+      return preferred
+    }
+    while (allocatedReferenceIds.has(`reference-${nextReferenceId}`)) nextReferenceId += 1
+    const referenceId = `reference-${nextReferenceId}`
+    allocatedReferenceIds.add(referenceId)
+    nextReferenceId += 1
+    return referenceId
+  }
+  incoming.forEach((candidate, index) => {
+    if (usedIncoming.has(index)) return
+    reconciled.push({
+      ...candidate,
+      reference_id: allocateReferenceId(explicitIncomingIds[index]),
+      reference_role: 'general',
+      ...(candidate.source_asset_ids ? { source_asset_ids: [...candidate.source_asset_ids] } : {}),
+    })
+  })
+
+  try {
+    return {
+      bindings: normalizeGenerateNodeReferenceBindings(reconciled, []),
+      validationError: null,
+    }
+  } catch (error) {
+    return {
+      bindings: cloneGenerateNodeReferenceBindings(existing),
+      validationError: toGenerateNodeReferenceValidationState(error),
+    }
+  }
+}
+
+export function buildGenerateNodeReferencePersistencePayload(
+  bindings: readonly GenerateNodeReferenceBinding[],
+) {
+  const normalized = normalizeGenerateNodeReferenceBindings(bindings, [])
+  return {
+    referenceBindings: cloneGenerateNodeReferenceBindings(normalized),
+    reference_bindings: cloneGenerateNodeReferenceBindings(normalized),
+  }
+}
+
+export function buildGenerateNodeReferenceBindingsFingerprint(
+  bindings: readonly GenerateNodeReferenceBinding[],
+) {
+  return JSON.stringify(normalizeGenerateNodeReferenceBindings(bindings, []).map(binding => ({
+    reference_index: binding.reference_index,
+    reference_id: binding.reference_id,
+    reference_role: binding.reference_role,
+    type: binding.type,
+    url: binding.url ?? null,
+    content: binding.content ?? null,
+    source_asset_ids: binding.source_asset_ids ? [...binding.source_asset_ids] : [],
+  })))
+}
+
+export function buildGenerateNodeSkillCompileAssets(
+  bindings: readonly GenerateNodeReferenceBinding[],
+) {
+  return cloneGenerateNodeReferenceBindings(validateGenerateNodeReferenceBindingsForExecution(bindings))
+}
+
+export function parseGenerateNodeExecutionCompatibilityError(
+  error: unknown,
+): GenerateNodeExecutionCompatibilityError | null {
+  const value = isGenerateNodeReferenceRecord(error) ? error : {}
+  const response = isGenerateNodeReferenceRecord(value.response) ? value.response : {}
+  const responseData = isGenerateNodeReferenceRecord(response.data) ? response.data : {}
+  const data = isGenerateNodeReferenceRecord(value.data) ? value.data : {}
+  const body = Object.keys(responseData).length ? responseData : Object.keys(data).length ? data : value
+  const errorCode = String(body.error_code ?? body.code ?? '').trim()
+  if (errorCode !== 'MULTI_REFERENCE_UNSUPPORTED' && errorCode !== 'MULTI_REFERENCE_MAPPING_REQUIRED') return null
+  return {
+    error_code: errorCode,
+    detail: String(body.detail ?? body.error ?? body.message ?? errorCode),
+  }
+}
+
+export function resolveGenerateNodeExecutionBlockState(input: {
+  skillBlocked?: boolean
+  referenceValidationError?: GenerateNodeReferenceValidationState | null
+  executionCompatibilityError?: GenerateNodeExecutionCompatibilityError | null
+}) {
+  const previewBlocked = Boolean(input.skillBlocked || input.referenceValidationError)
+  return {
+    previewBlocked,
+    runBlocked: previewBlocked || Boolean(input.executionCompatibilityError),
+  }
+}
+
 export function buildGenerateNodeReferencePayload(bindings: readonly GenerateNodeReferenceBinding[]) {
   const referenceBindings = normalizeGenerateNodeReferenceBindings(bindings, [])
   return {
@@ -579,6 +843,7 @@ export function buildGenerateNodeAssetPayload(input: {
   compiledInputHash?: string
   warnings?: string[]
   compilerModelId?: number | string | null
+  referenceModeHint?: string
 }) {
   const contentStr = String(input.resultContent || '')
   const looksLikeVideo = input.mode.includes('video') || /^(data:video)/i.test(contentStr) || /\.(mp4|webm|mov)(\?|$)/i.test(contentStr)
@@ -611,6 +876,7 @@ export function buildGenerateNodeAssetPayload(input: {
       ...mediaFields,
       ...(mergedSourceAssetIds.length ? { source_asset_ids: mergedSourceAssetIds } : {}),
       ...(referenceBindings !== undefined ? { reference_bindings: referenceBindings } : {}),
+      ...(input.referenceModeHint ? { reference_mode_hint: input.referenceModeHint } : {}),
       source_provider: input.provider,
       source_model: input.selectedModel,
       source_mode: input.mode,
@@ -668,6 +934,8 @@ export function normalizeGenerateNodeGenerationPacket(packet: any) {
     'warnings',
     'compiler_model_id',
     'raw_prompt',
+    'reference_bindings',
+    'reference_mode_hint',
   ] as const
   const compileAudit = Object.fromEntries(compileAuditKeys.flatMap(key => {
     const value = base?.[key] ?? data?.result?.[key] ?? data?.[key] ?? root?.result?.[key] ?? root?.[key]

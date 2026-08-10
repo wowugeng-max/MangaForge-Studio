@@ -61,10 +61,13 @@ export type CanvasSkillPackInstallResponse = {
 }
 
 export type CanvasSkillCompileAsset = {
-  type: 'image' | 'prompt'
+  type: 'image' | 'prompt' | 'video' | 'audio'
   url?: string
   content?: string
   source_asset_ids?: number[]
+  reference_index?: number
+  reference_id?: string
+  reference_role?: 'general' | 'first_frame' | 'last_frame' | 'character' | 'scene' | 'style' | 'full_reference' | 'prompt_context'
 }
 
 export type CanvasSkillCompileInput = {
@@ -87,6 +90,8 @@ export type CanvasSkillCompileResult = {
   parameters: Record<string, string | number | boolean>
   references_used: string[]
   warnings: string[]
+  reference_bindings?: CanvasSkillCompileAsset[]
+  reference_mode_hint?: 'T2VA' | 'I2VA' | 'FL2VA' | 'L2VA' | 'Ref2VA'
 }
 
 export type CanvasSkillCompileResponse = {

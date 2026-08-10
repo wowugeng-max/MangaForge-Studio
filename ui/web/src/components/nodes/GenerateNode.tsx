@@ -31,14 +31,18 @@ import { buildAssetMediaUrl } from '../../utils/assetMedia'
 import {
   DEFAULT_ROLE,
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
+  GENERATE_NODE_REFERENCE_ROLE_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   MODES,
   PRESET_ROLES,
   areGenerateNodeIncomingContextSnapshotsEqual,
   buildGenerateNodeAssetPayload,
+  buildGenerateNodeReferenceBindingsFingerprint,
   buildGenerateNodeIncomingContextSnapshot,
+  buildGenerateNodeReferencePersistencePayload,
   buildGenerateNodeRequestPayload,
   buildGenerateNodeResultWithFission,
+  buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
   getGenerateNodeAspectRatioSize,
@@ -46,20 +50,30 @@ import {
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeImageUrl,
+  parseGenerateNodeExecutionCompatibilityError,
   parseCanvasSkillCommand,
   normalizeSelectOptions,
   pickQuickParams,
+  reconcileGenerateNodeReferenceBindings,
+  reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeSkillArguments,
+  resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
+  updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
 import type {
   GenerateNodeCommandSkillArgumentsByCommand,
+  GenerateNodeExecutionCompatibilityError,
+  GenerateNodeReferenceBinding,
+  GenerateNodeReferenceRole,
+  GenerateNodeReferenceValidationState,
 } from './generate-node-model'
 
 export {
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
+  GENERATE_NODE_REFERENCE_ROLE_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
   GenerateNodeReferenceError,
   MAX_GENERATE_NODE_REFERENCE_IMAGES,
@@ -78,23 +92,32 @@ export {
   buildGenerateNodeRequestPayload,
   buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeReferencePayload,
+  buildGenerateNodeReferenceBindingsFingerprint,
+  buildGenerateNodeReferencePersistencePayload,
+  buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeReferenceBindings,
+  parseGenerateNodeExecutionCompatibilityError,
+  reconcileGenerateNodeReferenceBindings,
   reorderGenerateNodeReferenceBindings,
+  resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeSkillArguments,
+  updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
 } from './generate-node-model'
 export type {
   GenerateNodeCommandSkillArgumentsByCommand,
+  GenerateNodeExecutionCompatibilityError,
   GenerateNodeIncomingAsset,
   GenerateNodeReferenceBinding,
   GenerateNodeReferenceErrorCode,
   GenerateNodeReferenceRole,
   GenerateNodeReferenceType,
+  GenerateNodeReferenceValidationState,
 } from './generate-node-model'
 
 const { TextArea } = Input
@@ -105,6 +128,7 @@ const SKILL_AUDIT_KEYS = [
   'skill_pack_id', 'skill_pack_source', 'skill_name', 'skill_revision',
   'compiled_prompt', 'compiled_negative_prompt', 'compiled_references',
   'compiled_input_hash', 'warnings', 'compiler_model_id', 'raw_prompt',
+  'reference_bindings', 'reference_mode_hint',
 ]
 
 function withoutSkillAudit(value: any) {
@@ -112,6 +136,15 @@ function withoutSkillAudit(value: any) {
   const next = { ...value }
   SKILL_AUDIT_KEYS.forEach(key => delete next[key])
   return next
+}
+
+function generateNodeReferenceValidationFromError(error: unknown): GenerateNodeReferenceValidationState {
+  const value = error as any
+  return {
+    error_code: String(value?.code || 'REFERENCE_ASSET_INVALID') as GenerateNodeReferenceValidationState['error_code'],
+    detail: String(value?.message || '参考素材校验失败'),
+    ...(value?.reference_index === undefined ? {} : { reference_index: Number(value.reference_index) }),
+  }
 }
 
 function GenerateNodeImpl(props: NodeProps) {
@@ -123,6 +156,15 @@ function GenerateNodeImpl(props: NodeProps) {
   const isMuted = useCanvasStore(s => isGenerateNodeMuted(s.nodes as any, id))
   const { getEdges, setNodes } = useReactFlow()
   const updateNodeInternals = useUpdateNodeInternals()
+  const incomingContextSelector = useCallback((state: ReactFlowState) => buildGenerateNodeIncomingContextSnapshot({
+    nodeId: id,
+    edges: state.edges,
+    nodes: Array.from(state.nodeInternals.values()),
+  }), [id])
+  const incomingContext = useStore(
+    incomingContextSelector,
+    areGenerateNodeIncomingContextSnapshotsEqual,
+  )
 
   const assets = useAssetLibraryStore(s => s.assets)
   const fetchAssets = useAssetLibraryStore(s => s.fetchAssets)
@@ -172,6 +214,8 @@ function GenerateNodeImpl(props: NodeProps) {
   const [compiledPrompt, setCompiledPrompt] = useState(String(data?.compiledPrompt ?? initialCompileAudit?.compiled_prompt ?? ''))
   const [compiledNegativePrompt, setCompiledNegativePrompt] = useState(String(data?.compiledNegativePrompt ?? initialCompileAudit?.compiled_negative_prompt ?? ''))
   const [compiledReferences, setCompiledReferences] = useState<unknown[]>(Array.isArray(data?.compiledReferences ?? initialCompileAudit?.compiled_references) ? (data?.compiledReferences ?? initialCompileAudit.compiled_references) : [])
+  const [compiledReferenceBindings, setCompiledReferenceBindings] = useState<GenerateNodeReferenceBinding[]>(Array.isArray(data?.compiledReferenceBindings ?? initialCompileAudit?.reference_bindings) ? (data?.compiledReferenceBindings ?? initialCompileAudit.reference_bindings) : [])
+  const [referenceModeHint, setReferenceModeHint] = useState(String(data?.referenceModeHint ?? initialCompileAudit?.reference_mode_hint ?? ''))
   const [compiledInputHash, setCompiledInputHash] = useState(String(data?.compiledInputHash ?? initialCompileAudit?.compiled_input_hash ?? ''))
   const [compileWarnings, setCompileWarnings] = useState<string[]>(Array.isArray(data?.compileWarnings ?? initialCompileAudit?.warnings) ? (data?.compileWarnings ?? initialCompileAudit.warnings).map(String) : [])
   const [skillPackSource, setSkillPackSource] = useState(String(data?.skillPackSource ?? initialCompileAudit?.skill_pack_source ?? ''))
@@ -183,6 +227,26 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillPreviewCached, setSkillPreviewCached] = useState(Boolean(data?.skillPreviewCached))
   const [skillPreviewLoading, setSkillPreviewLoading] = useState(false)
   const [skillPreviewError, setSkillPreviewError] = useState<Pick<CanvasSkillApiError, 'error_code' | 'detail'> | null>(null)
+  const initialReferenceReconcileRef = useRef<ReturnType<typeof reconcileGenerateNodeReferenceBindings> | null>(null)
+  if (initialReferenceReconcileRef.current === null) {
+    initialReferenceReconcileRef.current = reconcileGenerateNodeReferenceBindings(
+      data?.referenceBindings ?? data?.reference_bindings,
+      incomingContext.incomingAssets,
+      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+    )
+  }
+  const [referenceBindings, setReferenceBindings] = useState<GenerateNodeReferenceBinding[]>(() => (
+    initialReferenceReconcileRef.current?.bindings || []
+  ))
+  const [referenceValidationError, setReferenceValidationError] = useState<GenerateNodeReferenceValidationState | null>(() => (
+    initialReferenceReconcileRef.current?.validationError || null
+  ))
+  const [executionCompatibilityError, setExecutionCompatibilityError] = useState<GenerateNodeExecutionCompatibilityError | null>(() => (
+    parseGenerateNodeExecutionCompatibilityError(data?.executionCompatibilityError ?? data?.execution_compatibility_error)
+  ))
+  const referenceBindingsRef = useRef(referenceBindings)
+  referenceBindingsRef.current = referenceBindings
+  const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
   const previousCompileInputFingerprintRef = useRef<string | null>(null)
@@ -214,15 +278,6 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
   const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
   const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
-  const incomingContextSelector = useCallback((state: ReactFlowState) => buildGenerateNodeIncomingContextSnapshot({
-    nodeId: id,
-    edges: state.edges,
-    nodes: Array.from(state.nodeInternals.values()),
-  }), [id])
-  const incomingContext = useStore(
-    incomingContextSelector,
-    areGenerateNodeIncomingContextSnapshotsEqual,
-  )
   const commandSkillArgumentKey = parsedSkillCommand ? `${parsedSkillCommand.packId || ''}:${parsedSkillCommand.name}` : ''
   const commandSkillArguments = commandSkillArgumentKey ? commandSkillArgumentsByCommand[commandSkillArgumentKey] || {} : {}
   const knownSkills = useMemo(() => Array.from(new Map(
@@ -279,6 +334,31 @@ function GenerateNodeImpl(props: NodeProps) {
     || !effectiveCompilerModel
   ))
   const skillRunBlocked = effectiveSkillIncompatible || missingEffectiveCompilerModel
+  const referenceBindingsFingerprint = useMemo(
+    () => buildGenerateNodeReferenceBindingsFingerprint(referenceBindings),
+    [referenceBindings],
+  )
+  const referenceExecutionValidationError = useMemo<GenerateNodeReferenceValidationState | null>(() => {
+    try {
+      buildGenerateNodeSkillCompileAssets(referenceBindings)
+      return null
+    } catch (error) {
+      return generateNodeReferenceValidationFromError(error)
+    }
+  }, [referenceBindingsFingerprint])
+  const effectiveReferenceValidationError = referenceValidationError || referenceExecutionValidationError
+  const { previewBlocked, runBlocked } = resolveGenerateNodeExecutionBlockState({
+    skillBlocked: skillRunBlocked,
+    referenceValidationError: effectiveReferenceValidationError,
+    executionCompatibilityError,
+  })
+  const executionCompatibilityContextFingerprint = JSON.stringify({
+    selectedKey,
+    selectedModel,
+    mode,
+    referenceBindings: referenceBindingsFingerprint,
+  })
+  const executionCompatibilityContextFingerprintRef = useRef(executionCompatibilityContextFingerprint)
   const hasCompileMetadata = Boolean(result?.compiled_prompt !== undefined || skillPreviewResult || compiledInputHash || compiledPrompt)
 
   const modelSupportsMode = (item: any) => {
@@ -290,6 +370,26 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => {
     updateNodeInternals(id)
   }, [id, mode, updateNodeInternals])
+
+  useEffect(() => {
+    if (reconciledIncomingFingerprintRef.current === incomingContext.fingerprint) return
+    reconciledIncomingFingerprintRef.current = incomingContext.fingerprint
+    const reconciled = reconcileGenerateNodeReferenceBindings(
+      referenceBindingsRef.current,
+      incomingContext.incomingAssets,
+      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+    )
+    setReferenceValidationError(reconciled.validationError)
+    const currentFingerprint = buildGenerateNodeReferenceBindingsFingerprint(referenceBindingsRef.current)
+    const nextFingerprint = buildGenerateNodeReferenceBindingsFingerprint(reconciled.bindings)
+    if (currentFingerprint !== nextFingerprint) setReferenceBindings(reconciled.bindings)
+  }, [incomingContext.fingerprint])
+
+  useEffect(() => {
+    if (executionCompatibilityContextFingerprintRef.current === executionCompatibilityContextFingerprint) return
+    executionCompatibilityContextFingerprintRef.current = executionCompatibilityContextFingerprint
+    setExecutionCompatibilityError(null)
+  }, [executionCompatibilityContextFingerprint])
 
   useEffect(() => {
     updateNodeData(id, {
@@ -314,6 +414,10 @@ function GenerateNodeImpl(props: NodeProps) {
       cameraParams,
       cameraCustomOptions,
       customMovements,
+      ...buildGenerateNodeReferencePersistencePayload(referenceBindings),
+      referenceValidationError,
+      executionCompatibilityError,
+      execution_compatibility_error: executionCompatibilityError,
       skillPackId: hasEffectiveSkill ? skillPackId : undefined,
       skillName: hasEffectiveSkill ? skillName : undefined,
       skillRevision: hasEffectiveSkill ? skillRevision : undefined,
@@ -324,6 +428,11 @@ function GenerateNodeImpl(props: NodeProps) {
       compiledPrompt: hasCompileMetadata ? compiledPrompt : undefined,
       compiledNegativePrompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
       compiledReferences: hasCompileMetadata ? compiledReferences : undefined,
+      compiledReferenceBindings: hasCompileMetadata ? compiledReferenceBindings.map(binding => ({
+        ...binding,
+        ...(binding.source_asset_ids ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+      })) : undefined,
+      referenceModeHint: hasCompileMetadata ? referenceModeHint || undefined : undefined,
       compiledInputHash: hasCompileMetadata ? compiledInputHash : undefined,
       compileWarnings: hasCompileMetadata ? compileWarnings : undefined,
       skillPackSource: hasCompileMetadata ? skillPackSource : undefined,
@@ -340,12 +449,13 @@ function GenerateNodeImpl(props: NodeProps) {
       compiled_prompt: hasCompileMetadata ? compiledPrompt : undefined,
       compiled_negative_prompt: hasCompileMetadata ? compiledNegativePrompt : undefined,
       compiled_references: hasCompileMetadata ? compiledReferences : undefined,
+      reference_mode_hint: hasCompileMetadata ? referenceModeHint || undefined : undefined,
       compiled_input_hash: hasCompileMetadata ? compiledInputHash : undefined,
       warnings: hasCompileMetadata ? compileWarnings : undefined,
       skill_pack_source: hasCompileMetadata ? skillPackSource || undefined : undefined,
       compiler_model_id: hasCompileMetadata ? compilerModelId ?? undefined : undefined,
     })
-  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
+  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
   useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
 
@@ -475,7 +585,7 @@ function GenerateNodeImpl(props: NodeProps) {
     skill: effectiveSkillIdentity,
     skillArguments: effectiveSkillArguments,
     compilerModelId: effectiveCompilerModelId,
-    incomingAssets: incomingContext.incomingAssets,
+    referenceBindings: buildGenerateNodeReferenceBindingsFingerprint(referenceBindings),
     externalSystemPrompt: incomingContext.externalSystemPrompt,
     nodeParams: skillNodeParams(),
     params,
@@ -492,6 +602,8 @@ function GenerateNodeImpl(props: NodeProps) {
     setCompiledPrompt('')
     setCompiledNegativePrompt('')
     setCompiledReferences([])
+    setCompiledReferenceBindings([])
+    setReferenceModeHint('')
     setCompiledInputHash('')
     setCompileWarnings([])
     setSkillPackSource('')
@@ -507,6 +619,8 @@ function GenerateNodeImpl(props: NodeProps) {
       compiledPrompt: undefined,
       compiledNegativePrompt: undefined,
       compiledReferences: undefined,
+      compiledReferenceBindings: undefined,
+      referenceModeHint: undefined,
       compiledInputHash: undefined,
       compileWarnings: undefined,
       skillPackSource: undefined,
@@ -516,12 +630,28 @@ function GenerateNodeImpl(props: NodeProps) {
       compiled_prompt: undefined,
       compiled_negative_prompt: undefined,
       compiled_references: undefined,
+      reference_mode_hint: undefined,
       compiled_input_hash: undefined,
       warnings: undefined,
       skill_pack_source: undefined,
       compiler_model_id: undefined,
     })
   }, [compileInputFingerprint, id, updateNodeData])
+
+  const prepareReferenceBindingsForExecution = () => {
+    if (effectiveReferenceValidationError) {
+      message.error(`${effectiveReferenceValidationError.error_code}: ${effectiveReferenceValidationError.detail}`)
+      return null
+    }
+    try {
+      return buildGenerateNodeSkillCompileAssets(referenceBindings)
+    } catch (error: any) {
+      const validationError = generateNodeReferenceValidationFromError(error)
+      setReferenceValidationError(validationError)
+      message.error(`${validationError.error_code}: ${validationError.detail}`)
+      return null
+    }
+  }
 
   const handleSkillPreview = async () => {
     if (!hasEffectiveSkill) return message.info('请先选择 Skill 或在提示词开头输入 /skill 命令')
@@ -530,7 +660,8 @@ function GenerateNodeImpl(props: NodeProps) {
       return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
     }
 
-    const { incomingAssets } = incomingContext
+    const previewAssets = prepareReferenceBindingsForExecution()
+    if (previewAssets === null) return
     const previewRequest = skillPreviewRequestTrackerRef.current.start(compileInputFingerprint)
     setSkillPreviewLoading(true)
     setSkillPreviewError(null)
@@ -540,21 +671,21 @@ function GenerateNodeImpl(props: NodeProps) {
         ...(effectiveSkillPackId ? { pack_id: effectiveSkillPackId } : {}),
         raw_prompt: prompt,
         mode: mode as CanvasSkillMediaMode,
-        incoming_assets: incomingAssets.map(asset => ({
-          type: asset.type,
-          ...(asset.url ? { url: asset.url } : {}),
-          ...(asset.content ? { content: asset.content } : {}),
-          ...(asset.source_asset_ids?.length ? { source_asset_ids: asset.source_asset_ids } : {}),
-        })),
+        incoming_assets: previewAssets,
         node_params: skillNodeParams(),
         ...(effectiveSkillArguments ? { arguments: effectiveSkillArguments } : {}),
         compiler_model_id: effectiveCompilerModelId,
       })
       if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
       const preview = res.data.result
+      const previewReferenceAudit = Array.isArray(preview.reference_bindings)
+        ? reconcileGenerateNodeReferenceBindings(undefined, preview.reference_bindings)
+        : null
       setCompiledPrompt(preview.prompt)
       setCompiledNegativePrompt(preview.negative_prompt || '')
       setCompiledReferences(Array.isArray(preview.references_used) ? preview.references_used : [])
+      setCompiledReferenceBindings(previewReferenceAudit && !previewReferenceAudit.validationError ? previewReferenceAudit.bindings : previewAssets)
+      setReferenceModeHint(String(preview.reference_mode_hint || ''))
       setCompiledInputHash(res.data.cache_key)
       setCompileWarnings(Array.isArray(preview.warnings) ? preview.warnings : [])
       setSkillPackSource(effectiveSkill?.sourceUrl || '')
@@ -577,8 +708,8 @@ function GenerateNodeImpl(props: NodeProps) {
     }
   }
 
-  const buildPayload = () => {
-    const { incomingAssets, externalSystemPrompt } = incomingContext
+  const buildPayload = (executableReferenceBindings: readonly GenerateNodeReferenceBinding[]) => {
+    const { externalSystemPrompt } = incomingContext
     const cameraSuffix = buildCameraPromptSuffix(cameraParams)
     const payload = buildGenerateNodeRequestPayload({
       id,
@@ -593,7 +724,7 @@ function GenerateNodeImpl(props: NodeProps) {
       ratioSize,
       selectedRolePrompt,
       cameraSuffix,
-      incomingAssets,
+      referenceBindings: executableReferenceBindings,
       externalSystemPrompt,
       systemPromptOverride: data?._systemPromptOverride,
       skillPackId: effectiveSkillPackId,
@@ -632,6 +763,10 @@ function GenerateNodeImpl(props: NodeProps) {
       expectedCount,
       onCountMismatch: ({ expected, actual }) => message.warning(`裂变数量校验失败：期望 ${expected} 条，实际 ${actual} 条，已回退普通输出`),
     })
+    const resultReferenceAudit = Array.isArray(finalResult?.reference_bindings)
+      ? reconcileGenerateNodeReferenceBindings(undefined, finalResult.reference_bindings)
+      : null
+    const compilerOwnedBindings = resultReferenceAudit && !resultReferenceAudit.validationError ? resultReferenceAudit.bindings : referenceBindings
 
     if (finalResult?.compiled_prompt !== undefined) {
       const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
@@ -640,6 +775,8 @@ function GenerateNodeImpl(props: NodeProps) {
       setCompiledPrompt(String(finalResult.compiled_prompt || ''))
       setCompiledNegativePrompt(String(finalResult.compiled_negative_prompt || ''))
       setCompiledReferences(references)
+      setCompiledReferenceBindings(compilerOwnedBindings)
+      setReferenceModeHint(String(finalResult.reference_mode_hint || ''))
       setCompiledInputHash(String(finalResult.compiled_input_hash || ''))
       setCompileWarnings(warnings)
       setSkillPackSource(String(finalResult.skill_pack_source || ''))
@@ -654,6 +791,8 @@ function GenerateNodeImpl(props: NodeProps) {
         parameters: {},
         references_used: references.map(String),
         warnings,
+        reference_bindings: compilerOwnedBindings,
+        ...(finalResult.reference_mode_hint ? { reference_mode_hint: finalResult.reference_mode_hint } : {}),
       })
     }
     setResult(finalResult)
@@ -663,6 +802,8 @@ function GenerateNodeImpl(props: NodeProps) {
         compiledPrompt: finalResult.compiled_prompt,
         compiledNegativePrompt: finalResult.compiled_negative_prompt || '',
         compiledReferences: finalResult.compiled_references || [],
+        compiledReferenceBindings: compilerOwnedBindings,
+        referenceModeHint: finalResult.reference_mode_hint || '',
         compiledInputHash: finalResult.compiled_input_hash || '',
         compileWarnings: finalResult.warnings || [],
         skillPackSource: finalResult.skill_pack_source || '',
@@ -674,6 +815,7 @@ function GenerateNodeImpl(props: NodeProps) {
         compiled_prompt: finalResult.compiled_prompt,
         compiled_negative_prompt: finalResult.compiled_negative_prompt || '',
         compiled_references: finalResult.compiled_references || [],
+        reference_mode_hint: finalResult.reference_mode_hint,
         compiled_input_hash: finalResult.compiled_input_hash,
         warnings: finalResult.warnings || [],
         compiler_model_id: finalResult.compiler_model_id,
@@ -700,7 +842,19 @@ function GenerateNodeImpl(props: NodeProps) {
     }
   }
 
-  const failGeneration = (errorText: string) => {
+  const failGeneration = (error: unknown) => {
+    const compatibilityError = parseGenerateNodeExecutionCompatibilityError(error)
+    if (compatibilityError) setExecutionCompatibilityError(compatibilityError)
+    const value = error as any
+    const errorText = String(
+      value?.response?.data?.detail
+      || value?.response?.data?.error
+      || value?.detail
+      || value?.error
+      || value?.message
+      || error
+      || '未知错误',
+    )
     message.error(`生成报错: ${errorText || '未知错误'}`)
     setNodeStatus(id, 'error')
     setGenerating(false)
@@ -719,11 +873,11 @@ function GenerateNodeImpl(props: NodeProps) {
       return
     }
     if (msg.type === 'error') {
-      failGeneration(String(msg.message || msg.error || '后台生成失败'))
+      failGeneration(msg)
       return
     }
     if (msg.type === 'interrupted') {
-      failGeneration(String(msg.message || '任务已中断'))
+      failGeneration(msg)
     }
   }
 
@@ -740,6 +894,8 @@ function GenerateNodeImpl(props: NodeProps) {
       setNodeStatus(id, 'error')
       return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
     }
+    const executableReferenceBindings = prepareReferenceBindingsForExecution()
+    if (executableReferenceBindings === null) return
     setGenerating(true)
     setProgressMsg('正在连接实时通道...')
     setNodeStatus(id, 'running')
@@ -753,7 +909,7 @@ function GenerateNodeImpl(props: NodeProps) {
       await sseClient.connect()
 
       setProgressMsg('正在唤醒云端大脑...')
-      const payload = buildPayload()
+      const payload = buildPayload(executableReferenceBindings)
       const res = await apiClient.request({ url: '/generate', method: 'POST', data: payload })
 
       if (res.data?.client_id && !hasImmediateGenerationResult(res.data)) {
@@ -764,7 +920,7 @@ function GenerateNodeImpl(props: NodeProps) {
 
       finishGeneration(res.data)
     } catch (error: any) {
-      failGeneration(String(error.response?.data?.detail || error.response?.data?.error || error.message || '未知错误'))
+      failGeneration(error)
     } finally {
       if (!waitingForSSE) {
         setGenerating(false)
@@ -800,6 +956,8 @@ function GenerateNodeImpl(props: NodeProps) {
         projectId,
         cameraParams,
         sourceAssetIds: result?.source_asset_ids,
+        referenceBindings,
+        referenceModeHint: String(result?.reference_mode_hint || referenceModeHint || ''),
         ...(result?.compiled_prompt !== undefined ? {
           compiledPrompt: result.compiled_prompt,
           compiledNegativePrompt: result.compiled_negative_prompt || '',
@@ -818,6 +976,28 @@ function GenerateNodeImpl(props: NodeProps) {
     } catch {
       message.error('入库失败')
     }
+  }
+
+  const commitReferenceBindings = (nextBindings: readonly GenerateNodeReferenceBinding[]) => {
+    const reconciled = reconcileGenerateNodeReferenceBindings(
+      nextBindings,
+      incomingContext.incomingAssets,
+      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+    )
+    setReferenceValidationError(reconciled.validationError)
+    setReferenceBindings(reconciled.bindings)
+  }
+
+  const handleReferenceRoleChange = (referenceId: string, referenceRole: GenerateNodeReferenceRole) => {
+    const next = updateGenerateNodeReferenceBindingRole(referenceBindings, referenceId, referenceRole)
+    setReferenceValidationError(next.validationError)
+    if (!next.validationError) commitReferenceBindings(next.bindings)
+  }
+
+  const handleReferenceReorder = (index: number, direction: -1 | 1) => {
+    const targetIndex = index + direction
+    if (targetIndex < 0 || targetIndex >= referenceBindings.length) return
+    commitReferenceBindings(reorderGenerateNodeReferenceBindings(referenceBindings, index, targetIndex))
   }
 
   const selectRoleAsset = (assetId: number | null) => {
@@ -1140,6 +1320,67 @@ function GenerateNodeImpl(props: NodeProps) {
               </Space>
             ),
           }] : []),
+          ...(isImageVideoMode ? [{
+            key: 'references',
+            label: '参考素材',
+            children: (
+              <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Text type="secondary" style={{ fontSize: 11 }}>
+                  最多 9 张图片；提示词参考不计入图片额度。相同 URL 会按独立素材保留。
+                </Text>
+                {effectiveReferenceValidationError && (
+                  <div style={{ padding: 8, borderRadius: 8, background: '#fff2f0', border: '1px solid #ffccc7' }}>
+                    <Text type="danger" strong style={{ display: 'block', fontSize: 11 }}>{effectiveReferenceValidationError.error_code}</Text>
+                    <Text type="danger" style={{ fontSize: 11 }}>{effectiveReferenceValidationError.detail}</Text>
+                  </div>
+                )}
+                {executionCompatibilityError && (
+                  <div style={{ padding: 8, borderRadius: 8, background: '#fff7e6', border: '1px solid #ffd591' }}>
+                    <Text type="warning" strong style={{ display: 'block', fontSize: 11 }}>{executionCompatibilityError.error_code}</Text>
+                    <Text type="warning" style={{ fontSize: 11 }}>{executionCompatibilityError.detail}</Text>
+                  </div>
+                )}
+                {referenceBindings.length === 0 && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>通过 image/text 输入端口连接素材后，可在此设置角色和顺序。</Text>
+                )}
+                {referenceBindings.map((binding, index) => (
+                  <div key={binding.reference_id} style={{ display: 'grid', gridTemplateColumns: '48px minmax(0, 1fr)', gap: 8, padding: 8, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff' }}>
+                    <div style={{ width: 48, height: 48, borderRadius: 6, overflow: 'hidden', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {binding.type === 'image' && binding.url ? (
+                        <img src={resolveGenerateNodePreviewMediaSrc(binding.url)} alt={`Reference ${binding.reference_index}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      ) : (
+                        <Text style={{ fontSize: 10 }}>{binding.type === 'prompt' ? 'TEXT' : binding.type.toUpperCase()}</Text>
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0, display: 'grid', gap: 5 }}>
+                      <Space size={4} wrap>
+                        <Tag color="blue" style={{ margin: 0 }}>#{binding.reference_index}</Tag>
+                        <Tag style={{ margin: 0 }}>{binding.type}</Tag>
+                        <Text code style={{ fontSize: 10 }}>{binding.reference_id}</Text>
+                      </Space>
+                      <Text ellipsis={{ tooltip: binding.content || binding.url }} style={{ fontSize: 11 }}>
+                        {binding.type === 'prompt' ? binding.content : binding.url}
+                      </Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>
+                        source IDs: {binding.source_asset_ids?.length ? binding.source_asset_ids.join(', ') : '—'}
+                      </Text>
+                      <div style={{ display: 'flex', gap: 5 }}>
+                        <Select
+                          size="small"
+                          value={binding.reference_role}
+                          options={GENERATE_NODE_REFERENCE_ROLE_OPTIONS}
+                          onChange={value => handleReferenceRoleChange(binding.reference_id, value)}
+                          style={{ flex: 1, minWidth: 0 }}
+                        />
+                        <Button size="small" disabled={index === 0} onClick={() => handleReferenceReorder(index, -1)}>↑</Button>
+                        <Button size="small" disabled={index === referenceBindings.length - 1} onClick={() => handleReferenceReorder(index, 1)}>↓</Button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </Space>
+            ),
+          }] : []),
           ...(supportsPromptSkills ? [{
             key: 'skill',
             label: '提示词 Skill',
@@ -1214,7 +1455,7 @@ function GenerateNodeImpl(props: NodeProps) {
                   block
                   size="small"
                   loading={skillPreviewLoading}
-                  disabled={!hasEffectiveSkill || effectiveSkillIncompatible || missingEffectiveCompilerModel}
+                  disabled={!hasEffectiveSkill || previewBlocked}
                   onClick={handleSkillPreview}
                 >
                   预览编译提示词
@@ -1231,13 +1472,30 @@ function GenerateNodeImpl(props: NodeProps) {
                       <Tag color="geekblue" style={{ margin: 0 }}>{result?.skill_pack_id || effectiveSkillPackId || '默认 Pack'}: {result?.skill_name || skillPreviewResult?.skill_name || effectiveSkillName}</Tag>
                       <Tag color="blue" style={{ margin: 0 }}>revision {result?.skill_revision || skillPreviewResult?.skill_version || effectiveSkillRevision || '未知'}</Tag>
                       <Tag color={skillPreviewCached ? 'green' : 'default'} style={{ margin: 0 }}>{skillPreviewResult ? (skillPreviewCached ? '缓存命中' : '新编译') : '生成审计'}</Tag>
+                      {referenceModeHint && <Tag color="purple" style={{ margin: 0 }}>参考模式提示 {referenceModeHint}</Tag>}
                     </Space>
+                    {compiledInputHash && <Text code style={{ fontSize: 10 }}>编译哈希 {compiledInputHash}</Text>}
                     <Collapse
                       size="small"
                       defaultActiveKey={['positive']}
                       items={[
                         { key: 'positive', label: '正向提示词', children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledPrompt}</div> },
                         { key: 'negative', label: '负向提示词', children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledNegativePrompt || '（无）'}</div> },
+                        {
+                          key: 'reference-bindings',
+                          label: `编译参考 (${compiledReferenceBindings.length})`,
+                          children: (
+                            <div style={{ display: 'grid', gap: 5, fontSize: 11 }}>
+                              {compiledReferenceBindings.length ? compiledReferenceBindings.map(binding => (
+                                <div key={`${binding.reference_index}:${binding.reference_id}`} style={{ padding: 6, borderRadius: 6, background: '#f8fafc' }}>
+                                  <Text strong style={{ fontSize: 11 }}>#{binding.reference_index} · {binding.reference_role} · {binding.type}</Text>
+                                  <div><Text code style={{ fontSize: 10 }}>{binding.reference_id}</Text></div>
+                                  <Text type="secondary" style={{ fontSize: 10 }}>{binding.content || binding.url || '—'}</Text>
+                                </div>
+                              )) : '（无）'}
+                            </div>
+                          ),
+                        },
                         { key: 'references', label: `引用 (${compiledReferences.length})`, children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11 }}>{compiledReferences.length ? compiledReferences.map(String).join('\n') : '（无）'}</div> },
                         { key: 'warnings', label: `警告 (${compileWarnings.length})`, children: <div style={{ whiteSpace: 'pre-wrap', fontSize: 11, color: compileWarnings.length ? '#d4380d' : undefined }}>{compileWarnings.length ? compileWarnings.join('\n') : '（无）'}</div> },
                       ]}
@@ -1306,12 +1564,12 @@ function GenerateNodeImpl(props: NodeProps) {
           <Button
             type="primary"
             danger={generating}
-            disabled={isMuted || (!generating && skillRunBlocked)}
+            disabled={isMuted || (!generating && runBlocked)}
             icon={generating ? <StopOutlined /> : <PlayCircleOutlined />}
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
           </Button>
         </div>
 

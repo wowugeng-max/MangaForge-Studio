@@ -1049,6 +1049,338 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(payload.data.reference_bindings).toEqual(referenceBindings)
     expect(referenceBindings).toEqual(snapshot)
   })
+
+  test('reconciles live edge changes while preserving user roles, order, ids, and same-url multiplicity', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reorderBindings = module.reorderGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    expect(typeof reconcileBindings).toBe('function')
+    if (typeof reconcileBindings !== 'function') return
+
+    const persisted = reorderBindings(normalizeBindings([
+      {
+        type: 'image',
+        url: '/api/assets/media/shared.png',
+        reference_id: 'asset-11-ref',
+        reference_role: 'character',
+        source_asset_ids: [11],
+      },
+      {
+        type: 'image',
+        url: '/api/assets/media/shared.png',
+        reference_id: 'asset-22-ref',
+        reference_role: 'style',
+        source_asset_ids: [22],
+      },
+      {
+        type: 'prompt',
+        content: '旧场景约束',
+        reference_id: 'asset-33-ref',
+        reference_role: 'prompt_context',
+        source_asset_ids: [33],
+      },
+    ], []), 1, 0)
+    const persistedSnapshot = JSON.parse(JSON.stringify(persisted))
+    const incoming = [
+      { id: 11, type: 'image', url: '/api/assets/media/shared.png', source_asset_ids: [11, 111] },
+      { id: 22, type: 'image', url: '/api/assets/media/shared.png', source_asset_ids: [22] },
+      { id: 44, type: 'prompt', content: '新场景约束', source_asset_ids: [44] },
+    ]
+    const incomingSnapshot = JSON.parse(JSON.stringify(incoming))
+
+    const result = reconcileBindings(persisted, incoming)
+
+    expect(result.validationError).toBeNull()
+    expect(result.bindings).toMatchObject([
+      {
+        reference_index: 1,
+        reference_id: 'asset-22-ref',
+        reference_role: 'style',
+        type: 'image',
+        url: '/api/assets/media/shared.png',
+        source_asset_ids: [22],
+      },
+      {
+        reference_index: 2,
+        reference_id: 'asset-11-ref',
+        reference_role: 'character',
+        type: 'image',
+        url: '/api/assets/media/shared.png',
+        source_asset_ids: [11, 111],
+      },
+      {
+        reference_index: 3,
+        reference_role: 'general',
+        type: 'prompt',
+        content: '新场景约束',
+        source_asset_ids: [44],
+      },
+    ])
+    expect(new Set(result.bindings.map((binding: any) => binding.reference_id)).size).toBe(3)
+    expect(result.bindings.filter((binding: any) => binding.url === '/api/assets/media/shared.png')).toHaveLength(2)
+    expect(result.bindings.some((binding: any) => binding.reference_id === 'asset-33-ref')).toBe(false)
+    expect(persisted).toEqual(persistedSnapshot)
+    expect(incoming).toEqual(incomingSnapshot)
+    expect(result.bindings[0]).not.toBe(persisted[0])
+    expect(result.bindings[0].source_asset_ids).not.toBe(persisted[0].source_asset_ids)
+  })
+
+  test('keeps persisted bindings while linked React Flow sources are unresolved, then removes true disconnects', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildIncomingSnapshot = module.buildGenerateNodeIncomingContextSnapshot
+    expect(typeof reconcileBindings).toBe('function')
+    expect(typeof buildIncomingSnapshot).toBe('function')
+    if (typeof reconcileBindings !== 'function' || typeof buildIncomingSnapshot !== 'function') return
+
+    const persisted = normalizeBindings([
+      { type: 'image', url: '/persisted.png', reference_id: 'persisted-ref', reference_role: 'character', source_asset_ids: [71] },
+    ], [])
+    const unresolved = buildIncomingSnapshot({
+      nodeId: 'target',
+      edges: [{ source: 'source-not-mounted', target: 'target', targetHandle: 'image' }],
+      nodes: [],
+    })
+    expect(unresolved).toMatchObject({ incomingAssets: [], referenceEdgeCount: 1 })
+    expect(reconcileBindings(persisted, unresolved.incomingAssets, {
+      incomingComplete: unresolved.referenceEdgeCount === unresolved.incomingAssets.length,
+    })).toEqual({ bindings: persisted, validationError: null })
+
+    const disconnected = buildIncomingSnapshot({ nodeId: 'target', edges: [], nodes: [] })
+    expect(disconnected).toMatchObject({ incomingAssets: [], referenceEdgeCount: 0 })
+    expect(reconcileBindings(persisted, disconnected.incomingAssets, {
+      incomingComplete: disconnected.referenceEdgeCount === disconnected.incomingAssets.length,
+    })).toEqual({ bindings: [], validationError: null })
+  })
+
+  test('flows role and order edits through persistence, hydration, preview assets, request payload, and compile fingerprint', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reorderBindings = module.reorderGenerateNodeReferenceBindings
+    const updateRole = module.updateGenerateNodeReferenceBindingRole
+    const buildPersistence = module.buildGenerateNodeReferencePersistencePayload
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildFingerprint = module.buildGenerateNodeReferenceBindingsFingerprint
+    const buildPreviewAssets = module.buildGenerateNodeSkillCompileAssets
+    for (const helper of [updateRole, buildPersistence, reconcileBindings, buildFingerprint, buildPreviewAssets]) {
+      expect(typeof helper).toBe('function')
+    }
+    if ([updateRole, buildPersistence, reconcileBindings, buildFingerprint, buildPreviewAssets].some(helper => typeof helper !== 'function')) return
+
+    const incoming = [
+      { id: 51, type: 'image', url: '/api/assets/media/first.png', source_asset_ids: [51] },
+      { id: 52, type: 'image', url: '/api/assets/media/second.png', source_asset_ids: [52] },
+    ]
+    const initial = normalizeBindings(undefined, incoming)
+    const roleUpdate = updateRole(initial, initial[1].reference_id, 'last_frame')
+    expect(roleUpdate.validationError).toBeNull()
+    const reordered = reorderBindings(roleUpdate.bindings, 1, 0)
+    const persistence = buildPersistence(reordered)
+
+    expect(persistence.referenceBindings).toEqual(reordered)
+    expect(persistence.reference_bindings).toEqual(reordered)
+    expect(persistence.referenceBindings).not.toBe(persistence.reference_bindings)
+    expect(persistence.referenceBindings[0].source_asset_ids).not.toBe(persistence.reference_bindings[0].source_asset_ids)
+
+    const hydrated = reconcileBindings(persistence.reference_bindings, incoming)
+    expect(hydrated.validationError).toBeNull()
+    expect(hydrated.bindings.map((binding: any) => [binding.reference_id, binding.reference_role])).toEqual([
+      [initial[1].reference_id, 'last_frame'],
+      [initial[0].reference_id, 'general'],
+    ])
+
+    const previewAssets = buildPreviewAssets(hydrated.bindings)
+    const requestPayload = buildGenerateNodeRequestPayload({
+      id: 'node-reference-flow',
+      prompt: '保持连续性',
+      selectedKey: 7,
+      provider: 'provider-a',
+      selectedModel: 'model-a',
+      mode: 'image_to_video',
+      routingStrategy: 'balanced',
+      params: {},
+      temperature: 0.7,
+      ratioSize: '1280*720',
+      selectedRolePrompt: 'director',
+      referenceBindings: hydrated.bindings,
+    } as any)
+    expect(previewAssets).toEqual(hydrated.bindings)
+    expect(requestPayload.params.incoming_assets).toEqual(previewAssets)
+
+    const initialFingerprint = buildFingerprint(initial)
+    const editedFingerprint = buildFingerprint(hydrated.bindings)
+    expect(editedFingerprint).not.toBe(initialFingerprint)
+    expect(JSON.parse(editedFingerprint)).toEqual(hydrated.bindings.map((binding: any) => ({
+      reference_index: binding.reference_index,
+      reference_id: binding.reference_id,
+      reference_role: binding.reference_role,
+      type: binding.type,
+      url: binding.url ?? null,
+      content: binding.content ?? null,
+      source_asset_ids: binding.source_asset_ids ?? [],
+    })))
+  })
+
+  test('returns typed validation state without polluting bindings on invalid incoming or role edits', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const updateRole = module.updateGenerateNodeReferenceBindingRole
+    expect(typeof reconcileBindings).toBe('function')
+    expect(typeof updateRole).toBe('function')
+    if (typeof reconcileBindings !== 'function' || typeof updateRole !== 'function') return
+
+    const existing = normalizeBindings([
+      { type: 'image', url: '/first.png', reference_id: 'first', reference_role: 'first_frame' },
+      { type: 'image', url: '/second.png', reference_id: 'second' },
+    ], [])
+    const snapshot = JSON.parse(JSON.stringify(existing))
+    const invalidIncoming = Array.from({ length: 10 }, (_, index) => ({
+      id: 100 + index,
+      type: 'image',
+      url: `/incoming-${index + 1}.png`,
+      source_asset_ids: [100 + index],
+    }))
+
+    const reconcileResult = reconcileBindings(existing, invalidIncoming)
+    expect(reconcileResult.bindings).toEqual(snapshot)
+    expect(reconcileResult.validationError).toMatchObject({ error_code: 'REFERENCE_LIMIT_EXCEEDED' })
+
+    const roleResult = updateRole(existing, 'second', 'first_frame')
+    expect(roleResult.bindings).toEqual(snapshot)
+    expect(roleResult.validationError).toMatchObject({ error_code: 'REFERENCE_ROLE_INVALID' })
+    expect(existing).toEqual(snapshot)
+  })
+
+  test('blocks run but keeps Skill preview eligible for typed provider multi-reference incompatibility', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const parseCompatibilityError = module.parseGenerateNodeExecutionCompatibilityError
+    const resolveBlockState = module.resolveGenerateNodeExecutionBlockState
+    expect(typeof parseCompatibilityError).toBe('function')
+    expect(typeof resolveBlockState).toBe('function')
+    if (typeof parseCompatibilityError !== 'function' || typeof resolveBlockState !== 'function') return
+
+    const unsupported = parseCompatibilityError({
+      response: { data: { error_code: 'MULTI_REFERENCE_UNSUPPORTED', detail: 'provider accepts one image only' } },
+    })
+    expect(unsupported).toEqual({
+      error_code: 'MULTI_REFERENCE_UNSUPPORTED',
+      detail: 'provider accepts one image only',
+    })
+    expect(parseCompatibilityError({
+      error_code: 'MULTI_REFERENCE_MAPPING_REQUIRED',
+      error: 'route needs a reference mapping',
+    })).toEqual({
+      error_code: 'MULTI_REFERENCE_MAPPING_REQUIRED',
+      detail: 'route needs a reference mapping',
+    })
+    expect(parseCompatibilityError({ error_code: 'SKILL_MODE_INCOMPATIBLE', detail: 'not a provider execution error' })).toBeNull()
+
+    expect(resolveBlockState({ executionCompatibilityError: unsupported })).toEqual({
+      previewBlocked: false,
+      runBlocked: true,
+    })
+    expect(resolveBlockState({ skillBlocked: true, executionCompatibilityError: unsupported })).toEqual({
+      previewBlocked: true,
+      runBlocked: true,
+    })
+    expect(resolveBlockState({ referenceValidationError: { error_code: 'REFERENCE_MEDIA_UNSUPPORTED', detail: 'video pending' } })).toEqual({
+      previewBlocked: true,
+      runBlocked: true,
+    })
+  })
+
+  test('preserves compiler-owned reference audit fields across packets and asset provenance', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const referenceBindings = normalizeBindings([
+      { type: 'image', url: '/reference.png', reference_id: 'reference-a', reference_role: 'character', source_asset_ids: [91] },
+    ], [])
+    const normalizedPacket = normalizeGenerateNodeGenerationPacket({
+      data: {
+        result: {
+          content: '/generated.png',
+          compiled_prompt: 'compiled',
+          reference_bindings: referenceBindings,
+          reference_mode_hint: 'Ref2VA',
+        },
+      },
+    })
+    expect(normalizedPacket.reference_bindings).toEqual(referenceBindings)
+    expect(normalizedPacket.reference_mode_hint).toBe('Ref2VA')
+
+    const asset = buildGenerateNodeAssetPayload({
+      resultContent: '/generated.png',
+      mode: 'image_to_image',
+      prompt: '角色一致',
+      selectedModel: 'image-model',
+      provider: 'provider-a',
+      selectedRolePrompt: 'director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '1:1',
+      ratioSize: '1024*1024',
+      referenceBindings,
+      referenceModeHint: 'Ref2VA',
+    } as any)
+    expect(asset.data.reference_bindings).toEqual(referenceBindings)
+    expect(asset.data.reference_mode_hint).toBe('Ref2VA')
+  })
+
+  test('wires ordered reference state, media-only controls, shared preview/run assets, and compatibility UX', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('const [referenceBindings, setReferenceBindings]')
+    expect(source).toContain('data?.referenceBindings ?? data?.reference_bindings')
+    expect(source).toContain('const [referenceValidationError, setReferenceValidationError]')
+    expect(source).toContain('const [executionCompatibilityError, setExecutionCompatibilityError]')
+    expect(source).toContain('buildGenerateNodeReferencePersistencePayload(referenceBindings)')
+    expect(source).toContain('reconcileGenerateNodeReferenceBindings')
+    expect(source).toContain('buildGenerateNodeReferenceBindingsFingerprint(referenceBindings)')
+    expect(source).toContain('buildGenerateNodeSkillCompileAssets(referenceBindings)')
+    expect(source).toContain('referenceBindings,')
+    expect(source).not.toContain('incoming_assets: incomingAssets.map')
+    expect(source).toContain("key: 'references'")
+    expect(source).toContain("label: '参考素材'")
+    expect(source).toContain('GENERATE_NODE_REFERENCE_ROLE_OPTIONS')
+    expect(source).toContain('binding.reference_index')
+    expect(source).toContain('binding.source_asset_ids')
+    expect(source).toContain('handleReferenceRoleChange')
+    expect(source).toContain('handleReferenceReorder')
+    expect(source).toContain('referenceModeHint')
+    expect(source).toContain('参考模式提示')
+    expect(source).toContain('编译哈希')
+    expect(source).toContain('executionCompatibilityError.error_code')
+    expect(source).toContain('executionCompatibilityError.detail')
+    expect(source).toContain('disabled={!hasEffectiveSkill || previewBlocked}')
+    expect(source).toContain('disabled={isMuted || (!generating && runBlocked)}')
+  })
+
+  test('revalidates the current incoming collection after local role and order edits', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('const commitReferenceBindings =')
+    expect(source).toContain('commitReferenceBindings(next.bindings)')
+    expect(source).toContain('commitReferenceBindings(reorderGenerateNodeReferenceBindings')
+  })
+
+  test('does not replay live reconciliation over the initial hydrated validation state', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)')
+    expect(source).toContain('if (reconciledIncomingFingerprintRef.current === incomingContext.fingerprint) return')
+  })
+
+  test('keeps normalized compiler reference audit in scope for result persistence', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const finishGeneration = source.slice(source.indexOf('const finishGeneration ='))
+
+    expect(finishGeneration.indexOf('const compilerOwnedBindings')).toBeLessThan(
+      finishGeneration.indexOf('if (finalResult?.compiled_prompt !== undefined)'),
+    )
+  })
 })
 
 describe('GenerateNode Skill review regressions', () => {

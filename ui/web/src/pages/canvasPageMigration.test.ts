@@ -225,8 +225,17 @@ describe('ComfyForge canvas feature migration', () => {
       expect(skillsApi).toContain(endpoint)
     }
 
-    const novelSources = sourcesUnder(join(import.meta.dir, 'novel-workspace'))
-    expect(novelSources.some(text => text.includes('api/skills'))).toBe(false)
+    const novelSources = [
+      source('NovelStudio.tsx'),
+      source('NovelProjectWorkspace.tsx'),
+      source('NovelProductionDesk.tsx'),
+      ...sourcesUnder(join(import.meta.dir, 'novel-workspace')),
+      ...sourcesUnder(join(import.meta.dir, 'novel-studio')),
+      ...sourcesUnder(join(import.meta.dir, 'novel-lobby')),
+    ]
+    for (const forbidden of ['api/skills', 'referenceBindings', 'reference_images']) {
+      expect(novelSources.some(text => text.includes(forbidden))).toBe(false)
+    }
   })
 
   test('generate node uses a node-following config toolbar with quick access layers', () => {
