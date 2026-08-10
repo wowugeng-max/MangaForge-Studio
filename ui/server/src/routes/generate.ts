@@ -108,6 +108,24 @@ type IncomingCanvasAsset = {
   source_asset_ids?: number[]
 }
 
+function hasMeaningfulStructuredMessagePart(part: unknown): part is LLMMessageContentPart {
+  if (!part || typeof part !== 'object' || Array.isArray(part)) return false
+  const record = part as Record<string, unknown>
+  if (typeof record.type !== 'string' || !record.type.trim()) return false
+  return Object.entries(record).some(([key, value]) => {
+    if (key === 'type' || value === undefined || value === null) return false
+    if (typeof value === 'string') return Boolean(value.trim())
+    if (Array.isArray(value)) return value.length > 0
+    if (typeof value === 'object') return Object.keys(value).length > 0
+    return true
+  })
+}
+
+function hasRouteMessageContent(content: LLMMessage['content']): boolean {
+  if (hasLLMMessageContent(content)) return true
+  return Array.isArray(content) && content.some(hasMeaningfulStructuredMessagePart)
+}
+
 function normalizeStructuredMessageContent(content: unknown): string | LLMMessageContentPart[] {
   if (!Array.isArray(content)) return stringifyLLMMessageContent(content)
   return content
@@ -121,9 +139,9 @@ function normalizeStructuredMessageContent(content: unknown): string | LLMMessag
       if (imageUrl) return { type: 'image_url', image_url: { url: imageUrl } }
       return record
     })
-    .filter((part): part is LLMMessageContentPart => Boolean(
-      part && (hasLLMMessageContent([part]) || (typeof part === 'object' && Object.keys(part).length > 0)),
-    ))
+    .filter((part): part is LLMMessageContentPart => Boolean(part && (
+      hasLLMMessageContent([part]) || hasMeaningfulStructuredMessagePart(part)
+    )))
 }
 
 function normalizeMessages(payload: any): LLMMessage[] {
@@ -133,7 +151,7 @@ function normalizeMessages(payload: any): LLMMessage[] {
         role: ['system', 'assistant', 'tool'].includes(message?.role) ? message.role : 'user',
         content: normalizeStructuredMessageContent(message?.content),
       }))
-      .filter((message: LLMMessage) => hasLLMMessageContent(message.content))
+      .filter((message: LLMMessage) => hasRouteMessageContent(message.content))
   }
 
   const messages: LLMMessage[] = []

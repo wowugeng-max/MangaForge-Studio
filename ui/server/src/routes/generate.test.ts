@@ -342,6 +342,59 @@ describe('canvas generate route', () => {
     ])
   })
 
+  test('preserves file-only structured user messages when canonical image references are appended', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const request = buildCanvasGenerateLLMRequest({
+      model: 'video-model',
+      type: 'image_to_video',
+      messages: [{ role: 'user', content: [{ type: 'input_file', file_id: 'file-notes' }] }],
+      params: {
+        incoming_assets: [{ type: 'image', url: '/frame.png', reference_role: 'first_frame' }],
+      },
+    }) as any
+
+    expect(request.messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: '描述这些参考素材' },
+        { type: 'input_file', file_id: 'file-notes' },
+        { type: 'image_url', image_url: { url: '/frame.png' } },
+      ],
+    }])
+  })
+
+  test('preserves file-only structured user messages with prompt-only references and filters truly empty messages', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const promptOnlyRequest = buildCanvasGenerateLLMRequest({
+      model: 'vision-model',
+      type: 'vision',
+      messages: [{ role: 'user', content: [{ type: 'input_file', file_url: '/notes.txt' }] }],
+      params: {
+        incoming_assets: [{ type: 'prompt', content: 'keep the uploaded notes in context', reference_role: 'prompt_context' }],
+      },
+    }) as any
+    const emptyRequest = buildCanvasGenerateLLMRequest({
+      model: 'vision-model',
+      type: 'vision',
+      messages: [
+        { role: 'user', content: [] },
+        { role: 'user', content: [null, {}, { type: 'input_file' }] },
+        { role: 'user', content: '' },
+      ],
+    }) as any
+
+    expect(promptOnlyRequest.messages).toEqual([{
+      role: 'user',
+      content: [
+        { type: 'text', text: '[连线素材]:\nkeep the uploaded notes in context' },
+        { type: 'input_file', file_url: '/notes.txt' },
+      ],
+    }])
+    expect(emptyRequest.messages).toEqual([])
+  })
+
   test('uses reference bindings and reference images as ordered fallbacks when incoming assets are absent', async () => {
     const { buildCanvasGenerateLLMRequest } = await import('./generate')
 
