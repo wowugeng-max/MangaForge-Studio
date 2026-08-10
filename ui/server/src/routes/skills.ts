@@ -177,6 +177,9 @@ function normalizeIncomingAssets(value: unknown): PromptCompileInput['incomingAs
       throw new TypeError(`assets[${index}].source_asset_ids must be an array of integers`)
     }
     const asset: PromptCompileInput['incomingAssets'][number] = { type }
+    if (raw.reference_index !== undefined) asset.reference_index = raw.reference_index as number
+    if (raw.reference_id !== undefined) asset.reference_id = raw.reference_id as string
+    if (raw.reference_role !== undefined) asset.reference_role = raw.reference_role as PromptCompileInput['incomingAssets'][number]['reference_role']
     const rawUrl = raw.url ?? raw.file_path ?? raw.filePath
     if (rawUrl !== undefined) {
       if (typeof rawUrl !== 'string' || rawUrl.length === 0 || rawUrl.length > MAX_INCOMING_ASSET_URL_LENGTH) {

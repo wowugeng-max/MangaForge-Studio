@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { SkillManifest } from '../skills/types'
-import { SkillCompilerError } from '../skills/compiler'
+import { createPromptCompiler, SkillCompilerError } from '../skills/compiler'
 import { createSkillRegistry } from '../skills/registry'
 
 type Handler = (req: any, res: any) => unknown
@@ -213,6 +213,127 @@ describe('canvas skill routes', () => {
     expect(response.body).toMatchObject({ cache_key: 'hash-1', cached: false, result: { prompt: 'compiled' } })
     expect(compileCalls[0]).toMatchObject({ skillName: 'prompt-skill', packId: 'h3', rawPrompt: 'make a shot', mode: 'image_to_video', compilerModelId: 4, activeWorkspace: workspace })
     expect(compileCalls[0].incomingAssets).toEqual([{ type: 'prompt', content: 'hero' }])
+  })
+
+  test('preserves ordered reference metadata through preview compilation while legacy assets keep defaults', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const compileInputs: any[] = []
+    const executeCalls: any[] = []
+    const h3Skill = manifest({
+      directoryName: 'h3-prompt-writing',
+      name: 'h3-prompt-writing',
+      mediaModes: ['image_to_video'],
+      rootDir: workspace,
+      references: [],
+    })
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3Skill } as any,
+      readModels: async () => [{
+        id: 4,
+        model_name: 'fixture-compiler',
+        provider: 'fixture',
+        display_name: 'Fixture Compiler',
+        capabilities: { chat: true, vision: true },
+      } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        executeCalls.push(request)
+        return {
+          content: JSON.stringify({
+            skill_name: h3Skill.name,
+            skill_version: h3Skill.revision,
+            mode: 'FL2VA',
+            prompt: 'compiled',
+            negative_prompt: '',
+            parameters: {},
+            references_used: [],
+            warnings: [],
+          }),
+        }
+      },
+    })
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      compilePromptSkill: async input => {
+        compileInputs.push(input)
+        return compiler(input)
+      },
+    })
+    const sharedUrl = '/api/assets/media/shared-reference.png'
+
+    const response = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: {
+        skill_name: h3Skill.name,
+        prompt: 'move cleanly from the opening frame to the closing frame',
+        mode: 'image_to_video',
+        compiler_model_id: 4,
+        assets: [
+          {
+            type: 'image',
+            url: sharedUrl,
+            source_asset_ids: [101],
+            reference_index: 1,
+            reference_id: 'hero-first',
+            reference_role: 'first_frame',
+            ignored_transport_key: 'do-not-forward',
+          },
+          {
+            type: 'image',
+            url: sharedUrl,
+            source_asset_ids: [102],
+            reference_index: 2,
+            reference_id: 'hero-last',
+            reference_role: 'last_frame',
+            ignored_transport_key: 'do-not-forward',
+          },
+        ],
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.result.reference_mode_hint).toBe('FL2VA')
+    expect(response.body.result.reference_bindings).toEqual([
+      { type: 'image', url: sharedUrl, source_asset_ids: [101], reference_index: 1, reference_id: 'hero-first', reference_role: 'first_frame' },
+      { type: 'image', url: sharedUrl, source_asset_ids: [102], reference_index: 2, reference_id: 'hero-last', reference_role: 'last_frame' },
+    ])
+    expect(compileInputs[0].incomingAssets).toEqual([
+      { type: 'image', url: sharedUrl, source_asset_ids: [101], reference_index: 1, reference_id: 'hero-first', reference_role: 'first_frame' },
+      { type: 'image', url: sharedUrl, source_asset_ids: [102], reference_index: 2, reference_id: 'hero-last', reference_role: 'last_frame' },
+    ])
+
+    const legacy = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: {
+        skill_name: h3Skill.name,
+        prompt: 'legacy multi-reference request',
+        mode: 'image_to_video',
+        compiler_model_id: 4,
+        assets: [
+          { type: 'image', url: sharedUrl, source_asset_ids: [201] },
+          { type: 'image', url: sharedUrl, source_asset_ids: [202] },
+        ],
+      },
+    })
+
+    expect(legacy.statusCode).toBe(200)
+    expect(legacy.body.result.reference_mode_hint).toBe('Ref2VA')
+    expect(legacy.body.result.reference_bindings).toEqual([
+      { type: 'image', url: sharedUrl, source_asset_ids: [201], reference_index: 1, reference_id: 'reference-1', reference_role: 'general' },
+      { type: 'image', url: sharedUrl, source_asset_ids: [202], reference_index: 2, reference_id: 'reference-2', reference_role: 'general' },
+    ])
+
+    const invalid = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: {
+        skill_name: h3Skill.name,
+        prompt: 'invalid role request',
+        mode: 'image_to_video',
+        compiler_model_id: 4,
+        assets: [{ type: 'image', url: sharedUrl, reference_role: 'not-a-canvas-role' }],
+      },
+    })
+    expect(invalid.statusCode).not.toBe(200)
+    expect(invalid.body.error_code).toBe('REFERENCE_ROLE_INVALID')
+    expect(executeCalls).toHaveLength(2)
   })
 
   test('restricts incoming asset URLs and bounds asset text', async () => {
