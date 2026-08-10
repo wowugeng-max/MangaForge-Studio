@@ -20,6 +20,18 @@ const ORDERED_IMAGE_ASSETS = [
   { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_role: 'character' },
   { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_role: 'last_frame' },
 ]
+const ORDERED_REFERENCE_BINDINGS = ORDERED_IMAGE_ASSETS.map((asset, index) => ({
+  ...asset,
+  reference_id: `reference-${index + 1}`,
+}))
+
+function expectedImageAcceptancePrompt(
+  alias: 'I2VA' | 'FL2VA' | 'Ref2VA',
+  assets: Array<{ reference_index: number; reference_role: string }>,
+) {
+  const roleSummary = assets.map(asset => `reference ${asset.reference_index} (${asset.reference_role})`).join(', ')
+  return `${alias}: Use every supplied image reference in this exact order: ${roleSummary}. Create a coherent 8-second cinematic action that visibly incorporates every reference.`
+}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -31,6 +43,8 @@ type AssertionFaults = {
   textHash?: string
   imageHash?: string
   repeatedImageHash?: string
+  imageReferenceModeHint?: string
+  imageReferenceBindings?: any[]
 }
 
 function assertionFlowFetch(faults: AssertionFaults = {}): typeof fetch {
@@ -56,6 +70,11 @@ function assertionFlowFetch(faults: AssertionFaults = {}): typeof fetch {
     if (url.endsWith('/api/skills/compile-preview') && method === 'POST') {
       const isImage = body.mode === 'image_to_video'
       if (isImage) imagePreviewCalls += 1
+      const canonicalBindings = (body.assets ?? []).map((asset: any, index: number) => ({
+        ...asset,
+        reference_id: `reference-${index + 1}`,
+      }))
+      const imageReferenceModeHint = canonicalBindings.length === 1 ? 'I2VA' : canonicalBindings.length === 2 ? 'FL2VA' : 'Ref2VA'
       const cacheKey = isImage
         ? imagePreviewCalls > 1 ? faults.repeatedImageHash ?? faults.imageHash ?? '2'.repeat(64) : faults.imageHash ?? '2'.repeat(64)
         : faults.textHash ?? '1'.repeat(64)
@@ -64,6 +83,8 @@ function assertionFlowFetch(faults: AssertionFaults = {}): typeof fetch {
           skill_name: 'h3-prompt-writing', skill_version: revision, mode: body.mode,
           prompt: 'compiled prompt', negative_prompt: '', parameters: {},
           references_used: faults.references ?? REFERENCES, warnings: [],
+          reference_mode_hint: isImage ? faults.imageReferenceModeHint ?? imageReferenceModeHint : 'T2VA',
+          reference_bindings: isImage ? faults.imageReferenceBindings ?? canonicalBindings : [],
         },
         cache_key: cacheKey,
       })
@@ -217,6 +238,46 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(calls.some(call => call.method === 'POST' && call.url.endsWith('/api/skills/packs'))).toBe(false)
   })
 
+  test('cancels a non-OK media preflight response body before returning the typed API error', async () => {
+    let cancelCalls = 0
+    const validFetch = assertionFlowFetch()
+    const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      if (String(input).endsWith('/api/assets/media/assets%2Ffirst.png')) {
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel() { cancelCalls += 1 },
+        }), { status: 404, headers: { 'content-type': 'image/png' } })
+      }
+      return validFetch(input, init)
+    }
+
+    await expect(runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_API' })
+    expect(cancelCalls).toBe(1)
+  })
+
+  test('cancels a wrong-MIME media preflight response body before returning the typed configuration error', async () => {
+    let cancelCalls = 0
+    const validFetch = assertionFlowFetch()
+    const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      if (String(input).endsWith('/api/assets/media/assets%2Ffirst.png')) {
+        return new Response(new ReadableStream<Uint8Array>({
+          cancel() { cancelCalls += 1 },
+        }), { status: 200, headers: { 'content-type': 'text/plain' } })
+      }
+      return validFetch(input, init)
+    }
+
+    await expect(runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_CONFIGURATION' })
+    expect(cancelCalls).toBe(1)
+  })
+
   test('rejects loopback API redirects without allowing fetch to follow them', async () => {
     const calls: Array<{ url: string; redirect?: RequestRedirect }> = []
     const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
@@ -285,12 +346,40 @@ describe('MiniMax H3 live acceptance harness', () => {
     })).rejects.toMatchObject({ code: 'H3_E2E_NETWORK' })
   })
 
+  test('cancels an API response body rejected by its declared oversized content length', async () => {
+    let cancelCalls = 0
+    const fetchImpl = async () => new Response(new ReadableStream<Uint8Array>({
+      cancel() { cancelCalls += 1 },
+    }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/json',
+        'content-length': String(2 * 1024 * 1024 + 1),
+      },
+    })
+
+    await expect(runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_NETWORK' })
+    expect(cancelCalls).toBe(1)
+  })
+
   test.each([
     ['a non-40-character revision', { revision: 'not-a-locked-revision' }],
     ['a result missing the base reference', { references: ['references/ref-en.txt'] }],
     ['a result missing the full-reference guide', { references: ['references/base-en.txt'] }],
     ['a malformed compile hash', { textHash: 'not-a-64-character-hash' }],
     ['a changed repeated I2V hash', { repeatedImageHash: '3'.repeat(64) }],
+    ['an I2VA hint for three ordered images', { imageReferenceModeHint: 'I2VA' }],
+    ['a missing second reference binding', { imageReferenceBindings: [ORDERED_REFERENCE_BINDINGS[0], ORDERED_REFERENCE_BINDINGS[2]] }],
+    ['reordered reference bindings', { imageReferenceBindings: [ORDERED_REFERENCE_BINDINGS[1], ORDERED_REFERENCE_BINDINGS[0], ORDERED_REFERENCE_BINDINGS[2]] }],
+    ['mismatched reference lineage', { imageReferenceBindings: [
+      ORDERED_REFERENCE_BINDINGS[0],
+      { ...ORDERED_REFERENCE_BINDINGS[1], source_asset_ids: [999] },
+      ORDERED_REFERENCE_BINDINGS[2],
+    ] }],
   ] as Array<[string, AssertionFaults]>)('rejects %s with a typed assertion error', async (_label, faults) => {
     await expect(runH3Acceptance({
       env: {
@@ -304,12 +393,12 @@ describe('MiniMax H3 live acceptance harness', () => {
   })
 
   test('retains the singular image asset id as a compatibility alias with first-frame metadata', async () => {
-    const imagePreviewAssets: any[][] = []
+    const imagePreviewBodies: any[] = []
     const validFetch = assertionFlowFetch()
     const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       if (String(input).endsWith('/api/skills/compile-preview') && typeof init.body === 'string') {
         const body = JSON.parse(init.body)
-        if (body.mode === 'image_to_video') imagePreviewAssets.push(body.assets)
+        if (body.mode === 'image_to_video') imagePreviewBodies.push(body)
       }
       return validFetch(input, init)
     }
@@ -320,22 +409,26 @@ describe('MiniMax H3 live acceptance harness', () => {
       log: () => {},
     })
 
-    expect(imagePreviewAssets).toEqual([
-      [{ type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' }],
-      [{ type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' }],
+    const expectedAssets = [
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
+    ]
+    expect(imagePreviewBodies.map(body => body.assets)).toEqual([expectedAssets, expectedAssets])
+    expect(imagePreviewBodies.map(body => body.prompt)).toEqual([
+      expectedImageAcceptancePrompt('I2VA', expectedAssets),
+      expectedImageAcceptancePrompt('I2VA', expectedAssets),
     ])
   })
 
   test('preserves repeated plural ids as distinct ordered references instead of deduplicating them', async () => {
     const calls: string[] = []
-    const imagePreviewAssets: any[][] = []
+    const imagePreviewBodies: any[] = []
     const validFetch = assertionFlowFetch()
     const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
       const url = String(input)
       calls.push(url)
       if (url.endsWith('/api/skills/compile-preview') && typeof init.body === 'string') {
         const body = JSON.parse(init.body)
-        if (body.mode === 'image_to_video') imagePreviewAssets.push(body.assets)
+        if (body.mode === 'image_to_video') imagePreviewBodies.push(body)
       }
       return validFetch(input, init)
     }
@@ -354,7 +447,11 @@ describe('MiniMax H3 live acceptance harness', () => {
       { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
       { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 2, reference_role: 'last_frame' },
     ]
-    expect(imagePreviewAssets).toEqual([expected, expected])
+    expect(imagePreviewBodies.map(body => body.assets)).toEqual([expected, expected])
+    expect(imagePreviewBodies.map(body => body.prompt)).toEqual([
+      expectedImageAcceptancePrompt('FL2VA', expected),
+      expectedImageAcceptancePrompt('FL2VA', expected),
+    ])
     expect(calls.filter(url => url.endsWith('/api/assets/42'))).toHaveLength(2)
     expect(calls.filter(url => url.endsWith('/api/assets/media/assets%2Ffirst.png'))).toHaveLength(2)
   })
@@ -405,6 +502,8 @@ describe('MiniMax H3 live acceptance harness', () => {
             skill_name: 'h3-prompt-writing', skill_version: REVISION, mode: body.mode,
             prompt: isImage ? 'Ref2VA compiled prompt' : 'T2VA compiled prompt', negative_prompt: '', parameters: {},
             references_used: REFERENCES, warnings: [],
+            reference_mode_hint: isImage ? 'Ref2VA' : 'T2VA',
+            reference_bindings: isImage ? ORDERED_REFERENCE_BINDINGS : [],
           },
           cache_key: isImage ? '2'.repeat(64) : '1'.repeat(64),
           cached: isImage && imagePreviewCalls > 1,
@@ -459,6 +558,7 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(previews[0].assets).toEqual([])
     expect(previews[1]).toMatchObject({ mode: 'image_to_video' })
     expect(previews[1].assets).toEqual(ORDERED_IMAGE_ASSETS)
+    expect(previews[1].prompt).toBe(expectedImageAcceptancePrompt('Ref2VA', ORDERED_IMAGE_ASSETS))
     expect(previews[2]).toEqual(previews[1])
     expect(timeoutDelays).toEqual([
       15_000, 15_000, 15_000,

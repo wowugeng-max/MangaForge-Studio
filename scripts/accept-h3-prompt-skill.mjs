@@ -143,6 +143,7 @@ async function fetchWithTimeout(fetchImpl, url, init = {}, timeoutMs = REQUEST_T
 async function readBoundedText(response) {
   const declaredBytes = Number(response.headers.get('content-length'))
   if (Number.isFinite(declaredBytes) && declaredBytes > MAX_API_RESPONSE_BYTES) {
+    await response.body?.cancel().catch(() => undefined)
     throw new H3AcceptanceError('H3_E2E_NETWORK', `Local MangaForge API response exceeded ${MAX_API_RESPONSE_BYTES} bytes`)
   }
   if (!response.body) return ''
@@ -196,10 +197,13 @@ async function requestJson(fetchImpl, baseUrl, path, options = {}) {
 async function preflightLocalImage(fetchImpl, baseUrl, localUrl) {
   const origin = new URL(baseUrl).origin
   await fetchWithTimeout(fetchImpl, new URL(localUrl, origin).toString(), {}, REQUEST_TIMEOUT_MS, async response => {
-    if (!response.ok) throw new H3AcceptanceError('H3_E2E_API', `Local image asset preflight failed (HTTP ${response.status})`)
-    const contentType = String(response.headers.get('content-type') || '').toLowerCase()
-    if (!contentType.startsWith('image/')) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID did not resolve to image media')
-    await response.body?.cancel().catch(() => undefined)
+    try {
+      if (!response.ok) throw new H3AcceptanceError('H3_E2E_API', `Local image asset preflight failed (HTTP ${response.status})`)
+      const contentType = String(response.headers.get('content-type') || '').toLowerCase()
+      if (!contentType.startsWith('image/')) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID did not resolve to image media')
+    } finally {
+      await response.body?.cancel().catch(() => undefined)
+    }
   })
 }
 
@@ -220,13 +224,51 @@ function assertReferences(value) {
   return [...EXPECTED_REFERENCES]
 }
 
-function assertPreview(preview, expectedMode, revision) {
+function imageAcceptanceAlias(assets) {
+  return assets.length === 1 ? 'I2VA' : assets.length === 2 ? 'FL2VA' : 'Ref2VA'
+}
+
+function imageAcceptancePrompt(assets) {
+  const alias = imageAcceptanceAlias(assets)
+  const roleSummary = assets.map(asset => `reference ${asset.reference_index} (${asset.reference_role})`).join(', ')
+  return `${alias}: Use every supplied image reference in this exact order: ${roleSummary}. Create a coherent 8-second cinematic action that visibly incorporates every reference.`
+}
+
+function assertReferenceAudit(result, expectedHint, expectedBindings) {
+  if (result.reference_mode_hint !== expectedHint) {
+    throw new H3AcceptanceError('H3_E2E_ASSERTION', `image_to_video preview returned mismatched reference_mode_hint; expected ${expectedHint}`)
+  }
+  const actualBindings = result.reference_bindings
+  if (!Array.isArray(actualBindings) || actualBindings.length !== expectedBindings.length) {
+    throw new H3AcceptanceError('H3_E2E_ASSERTION', 'image_to_video preview returned incomplete reference_bindings')
+  }
+  for (let index = 0; index < expectedBindings.length; index += 1) {
+    const actual = actualBindings[index]
+    const expected = expectedBindings[index]
+    const lineageMatches = Array.isArray(actual?.source_asset_ids)
+      && actual.source_asset_ids.length === expected.source_asset_ids.length
+      && actual.source_asset_ids.every((id, lineageIndex) => id === expected.source_asset_ids[lineageIndex])
+    if (!actual || typeof actual !== 'object' || Array.isArray(actual)
+      || actual.reference_index !== expected.reference_index
+      || actual.reference_role !== expected.reference_role
+      || actual.type !== expected.type
+      || actual.url !== expected.url
+      || !lineageMatches) {
+      throw new H3AcceptanceError('H3_E2E_ASSERTION', `image_to_video preview returned mismatched reference binding ${index + 1}`)
+    }
+  }
+}
+
+function assertPreview(preview, expectedMode, revision, expectedReferenceAudit) {
   const result = preview && typeof preview === 'object' ? preview.result : undefined
   if (!result || typeof result !== 'object' || typeof result.prompt !== 'string' || !result.prompt.trim()) {
     throw new H3AcceptanceError('H3_E2E_ASSERTION', `${expectedMode} preview returned an empty prompt`)
   }
   if (result.skill_name !== H3_SKILL_NAME || result.skill_version !== revision || result.mode !== expectedMode) {
     throw new H3AcceptanceError('H3_E2E_ASSERTION', `${expectedMode} preview returned mismatched Skill identity, revision, or mode`)
+  }
+  if (expectedReferenceAudit) {
+    assertReferenceAudit(result, expectedReferenceAudit.referenceModeHint, expectedReferenceAudit.referenceBindings)
   }
   const hash = preview.cache_key
   if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/i.test(hash)) {
@@ -303,17 +345,22 @@ export async function runH3Acceptance({
     mode: 'text_to_video',
     assets: [],
   }
+  const imageAssets = images.map(({ imageAssetId, imageUrl }, index) => ({
+    type: 'image',
+    url: imageUrl,
+    source_asset_ids: [imageAssetId],
+    reference_index: index + 1,
+    reference_role: index === 0 ? 'first_frame' : index === images.length - 1 ? 'last_frame' : 'character',
+  }))
   const imageBody = {
     ...common,
-    prompt: 'I2VA: Start from the supplied first frame and develop a coherent 8-second cinematic action.',
+    prompt: imageAcceptancePrompt(imageAssets),
     mode: 'image_to_video',
-    assets: images.map(({ imageAssetId, imageUrl }, index) => ({
-      type: 'image',
-      url: imageUrl,
-      source_asset_ids: [imageAssetId],
-      reference_index: index + 1,
-      reference_role: index === 0 ? 'first_frame' : index === images.length - 1 ? 'last_frame' : 'character',
-    })),
+    assets: imageAssets,
+  }
+  const imageReferenceAudit = {
+    referenceModeHint: imageAcceptanceAlias(imageAssets),
+    referenceBindings: imageAssets,
   }
   const textPreview = assertPreview(
     await requestJson(fetchImpl, baseUrl, '/skills/compile-preview', { method: 'POST', body: textBody, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
@@ -324,11 +371,13 @@ export async function runH3Acceptance({
     await requestJson(fetchImpl, baseUrl, '/skills/compile-preview', { method: 'POST', body: imageBody, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
     'image_to_video',
     revision,
+    imageReferenceAudit,
   )
   const repeatedImagePreview = assertPreview(
     await requestJson(fetchImpl, baseUrl, '/skills/compile-preview', { method: 'POST', body: imageBody, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),
     'image_to_video',
     revision,
+    imageReferenceAudit,
   )
   if (imagePreview.hash !== repeatedImagePreview.hash) {
     throw new H3AcceptanceError('H3_E2E_ASSERTION', 'Repeated I2V compile-preview returned a different deterministic hash')
