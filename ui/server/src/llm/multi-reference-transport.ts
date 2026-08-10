@@ -39,7 +39,6 @@ export type MultiReferenceTransportSelection = {
     context_ui_params?: Record<string, unknown>
   }
   provider?: {
-    [key: string]: unknown
     contextUiParams?: Record<string, unknown>
     context_ui_params?: Record<string, unknown>
   }
@@ -109,27 +108,36 @@ function templateReferencesCollection(value: unknown, seen = new Set<object>()):
   return Object.values(value as Record<string, unknown>).some(item => templateReferencesCollection(item, seen))
 }
 
-function imageBearingMessages(
-  request: LLMRequest,
+export function isMultiReferenceImageBearingRole(
+  role: string,
   selection: MultiReferenceTransportSelection,
 ) {
   const apiFormat = String(selection.apiFormat ?? selection.api_format ?? '').trim().toLowerCase()
   if (apiFormat === 'gemini_native') {
     // Gemini moves system content into systemInstruction and only converts
     // non-system messages into multimodal `contents[].parts`.
-    return (request.messages || []).filter(message => message.role !== 'system')
+    return role !== 'system'
   }
   if (apiFormat.includes('anthropic') || apiFormat.includes('claude')) {
     // Anthropic removes system messages from `messages`; image-bearing content
     // must survive in one of the remaining converted message records.
-    return (request.messages || []).filter(message => message.role !== 'system')
+    return role !== 'system'
   }
   if (String(selection.endpoint || '').toLowerCase().includes('chat/completions')) {
     // OpenAI-compatible multimodal image parts are portable on conversational
     // user/assistant records. System image arrays are not a reliable transport.
-    return (request.messages || []).filter(message => message.role === 'user' || message.role === 'assistant')
+    return role === 'user' || role === 'assistant'
   }
-  return []
+  return false
+}
+
+function imageBearingMessages(
+  request: LLMRequest,
+  selection: MultiReferenceTransportSelection,
+) {
+  return (request.messages || []).filter(message => (
+    isMultiReferenceImageBearingRole(message.role, selection)
+  ))
 }
 
 function messageImageUrls(request: LLMRequest, selection: MultiReferenceTransportSelection) {
@@ -139,13 +147,9 @@ function messageImageUrls(request: LLMRequest, selection: MultiReferenceTranspor
   })
 }
 
-function containsOrderedMultiplicity(actual: readonly string[], expected: readonly string[]) {
-  let cursor = 0
-  for (const value of actual) {
-    if (value === expected[cursor]) cursor += 1
-    if (cursor === expected.length) return true
-  }
-  return expected.length === 0
+function hasExactOrderedMultiplicity(actual: readonly string[], expected: readonly string[]) {
+  return actual.length === expected.length
+    && actual.every((value, index) => value === expected[index])
 }
 
 function nativeMultimodalFormat(selection: MultiReferenceTransportSelection) {
@@ -198,10 +202,15 @@ export function resolveMultiReferenceTransport(
       )
     }
     const field = String(capability.field || capability.field_name || capability.fieldName || '').trim() || undefined
+    const payloadTemplate = routePayloadTemplate(selection)
+    const templateOverridesNativeBody = Boolean(payloadTemplate)
     if (
       !field
-      && !nativeMultimodalFormat(selection)
-      && !templateReferencesCollection(routePayloadTemplate(selection))
+      && (
+        templateOverridesNativeBody
+          ? !templateReferencesCollection(payloadTemplate)
+          : !nativeMultimodalFormat(selection)
+      )
     ) {
       return transportError(
         'MULTI_REFERENCE_UNSUPPORTED',
@@ -239,7 +248,7 @@ export function resolveMultiReferenceTransport(
   if (
     nativeMultimodalFormat(selection)
     && expectedUrls.every(Boolean)
-    && containsOrderedMultiplicity(messageImageUrls(request, selection), expectedUrls)
+    && hasExactOrderedMultiplicity(messageImageUrls(request, selection), expectedUrls)
   ) {
     if (count > DEFAULT_MULTI_REFERENCE_MAX) {
       return transportError(

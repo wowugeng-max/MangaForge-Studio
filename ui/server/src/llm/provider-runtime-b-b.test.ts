@@ -992,6 +992,158 @@ describe('gemini chat-style image generation routing', () => {
     ])
   })
 
+  test('template bodies consume explicit model or provider multi-reference fields', () => {
+    const baseRequest = {
+      model: 'x',
+      messages: [{ role: 'user', content: '生成视频' }],
+      type: 'image_to_video',
+      image_url: 'https://example.com/first.png',
+      reference_images: [
+        { url: 'https://example.com/first.png', reference_index: 1, reference_role: 'first_frame' },
+        { url: 'https://example.com/last.png', reference_index: 2, reference_role: 'last_frame' },
+      ],
+    } as any
+    const routeConfig = {
+      payload_template: { prompt: '{{prompt}}', quality: 'high' },
+    }
+
+    const modelBody = buildProviderRequestBody(baseRequest, openaiSelection({
+      endpoint: 'videos/generations',
+      routeType: 'image_to_video',
+      routeConfig,
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'input_images', shape: 'urls', max: 9 },
+        },
+      },
+    }))
+    expect(modelBody).toEqual({
+      prompt: '生成视频',
+      quality: 'high',
+      input_images: [
+        'https://example.com/first.png',
+        'https://example.com/last.png',
+      ],
+    })
+
+    const providerBody = buildProviderRequestBody(baseRequest, openaiSelection({
+      endpoint: 'videos/generations',
+      routeType: 'image_to_video',
+      routeConfig,
+      provider: {
+        ...selection().provider,
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'provider_images', shape: 'metadata', max: 9 },
+        },
+      } as any,
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {},
+      },
+    }))
+    expect(providerBody).toEqual({
+      prompt: '生成视频',
+      quality: 'high',
+      provider_images: baseRequest.reference_images,
+    })
+  })
+
+  test('route templates render the camelCase reference collection alias', () => {
+    const referenceImages = [
+      { url: 'https://example.com/first.png', reference_index: 1, reference_role: 'first_frame' },
+      { url: 'https://example.com/last.png', reference_index: 2, reference_role: 'last_frame' },
+    ]
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: '生成视频' }],
+      type: 'image_to_video',
+      image_url: referenceImages[0].url,
+      reference_images: referenceImages,
+    } as any, openaiSelection({
+      endpoint: 'videos/generations',
+      routeType: 'image_to_video',
+      routeConfig: {
+        payloadTemplate: {
+          payload: { references: '{{referenceImages}}' },
+        },
+      },
+    }))
+
+    expect(body).toEqual({ payload: { references: referenceImages } })
+  })
+
+  test('template overrides reject fieldless explicit native capabilities without a reference token', () => {
+    expect(() => buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: '生成视频' }],
+      type: 'image_to_video',
+      image_url: 'https://example.com/first.png',
+      reference_images: [
+        { url: 'https://example.com/first.png', reference_index: 1 },
+        { url: 'https://example.com/last.png', reference_index: 2 },
+      ],
+    } as any, openaiSelection({
+      apiFormat: 'gemini_native',
+      endpoint: 'models/gemini-video:generateContent',
+      routeType: 'image_to_video',
+      routeConfig: { payload_template: { prompt: '{{prompt}}' } },
+      model: {
+        ...selection().model,
+        context_ui_params: { multi_reference: { supported: true, max: 9 } },
+      },
+    }))).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+  })
+
+  test('falsey route templates do not override fieldless native multi-reference transport', () => {
+    const referenceImages = [
+      { url: 'https://example.com/first.png', reference_index: 1 },
+      { url: 'https://example.com/last.png', reference_index: 2 },
+    ]
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: '生成视频' },
+          ...referenceImages.map(reference => ({ type: 'image_url', image_url: { url: reference.url } })),
+        ],
+      }],
+      type: 'image_to_video',
+      image_url: referenceImages[0].url,
+      reference_images: referenceImages,
+    } as any, openaiSelection({
+      apiFormat: 'gemini_native',
+      endpoint: 'models/gemini-video:generateContent',
+      routeType: 'image_to_video',
+      routeConfig: { payload_template: false } as any,
+      model: {
+        ...selection().model,
+        context_ui_params: { multi_reference: { supported: true, max: 9 } },
+      },
+    }))
+
+    expect(body.contents.flatMap((message: any) => message.parts)
+      .map((part: any) => part.fileData?.fileUri || '')
+      .filter(Boolean)).toEqual(referenceImages.map(reference => reference.url))
+  })
+
+  test('single-reference templates preserve legacy non-object rendered bodies', () => {
+    expect(buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: '生成视频' }],
+      type: 'image_to_video',
+      image_url: 'https://example.com/first.png',
+      reference_images: [{ url: 'https://example.com/first.png', reference_index: 1 }],
+    } as any, openaiSelection({
+      endpoint: 'videos/generations',
+      routeType: 'image_to_video',
+      routeConfig: { payload_template: '{{prompt}}' },
+    }))).toBe('生成视频')
+  })
+
   test('undeclared media endpoints reject multiple references at body-build time', () => {
     expect(() => buildProviderRequestBody({
       model: 'x',
@@ -1068,7 +1220,11 @@ describe('gemini chat-style image generation routing', () => {
       apiFormat: 'anthropic',
       endpoint: 'messages',
     }))
-    expect(anthropicBody.messages[0].content).toEqual(multimodalRequest.messages[0].content)
+    expect(anthropicBody.messages[0].content).toEqual([
+      { type: 'text', text: '生成视频' },
+      { type: 'image', source: { type: 'url', url: 'https://example.com/first.png' } },
+      { type: 'image', source: { type: 'url', url: 'https://example.com/last.png' } },
+    ])
   })
 
   test('explicit native capabilities still materialize every canonical reference into provider messages', () => {
@@ -1105,9 +1261,176 @@ describe('gemini chat-style image generation routing', () => {
     }))
     expect(anthropicBody.messages[0].content).toEqual([
       { type: 'text', text: '生成视频' },
-      { type: 'image_url', image_url: { url: 'https://example.com/first.png' } },
-      { type: 'image_url', image_url: { url: 'https://example.com/last.png' } },
+      { type: 'image', source: { type: 'url', url: 'https://example.com/first.png' } },
+      { type: 'image', source: { type: 'url', url: 'https://example.com/last.png' } },
     ])
+  })
+
+  test('Anthropic converts remote and data URI images while preserving other content blocks', () => {
+    const dataUri = 'data:image/webp;base64,QUJDRA=='
+    const body = buildProviderRequestBody({
+      model: 'x',
+      type: 'image_to_video',
+      image_url: 'https://example.com/first.png',
+      reference_images: [
+        { url: 'https://example.com/first.png', reference_index: 1 },
+        { url: dataUri, reference_index: 2 },
+      ],
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: '生成视频' },
+          { type: 'tool_result', tool_use_id: 'tool-1', content: 'done' },
+          { type: 'image_url', image_url: { url: 'https://example.com/first.png' } },
+          { type: 'image_url', image_url: { url: dataUri } },
+        ],
+      }],
+    } as any, openaiSelection({ apiFormat: 'anthropic', endpoint: 'messages' }))
+
+    expect(body.messages[0].content).toEqual([
+      { type: 'text', text: '生成视频' },
+      { type: 'tool_result', tool_use_id: 'tool-1', content: 'done' },
+      { type: 'image', source: { type: 'url', url: 'https://example.com/first.png' } },
+      { type: 'image', source: { type: 'base64', media_type: 'image/webp', data: 'QUJDRA==' } },
+    ])
+  })
+
+  test('Anthropic preserves duplicate image order and excludes system images from sendable blocks', () => {
+    const urls = [
+      'https://example.com/same.png',
+      'https://example.com/same.png',
+      'https://example.com/last.png',
+    ]
+    const body = buildProviderRequestBody({
+      model: 'x',
+      type: 'image_to_video',
+      image_url: urls[0],
+      reference_images: urls.map((url, index) => ({ url, reference_index: index + 1 })),
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'system guidance' },
+            { type: 'image_url', image_url: { url: 'https://example.com/system.png' } },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: '生成视频' },
+            ...urls.map(url => ({ type: 'image_url', image_url: { url } })),
+          ],
+        },
+      ],
+    } as any, openaiSelection({ apiFormat: 'anthropic', endpoint: 'messages' }))
+
+    expect(body.system).toBe('system guidance')
+    expect(body.messages[0].content).toEqual([
+      { type: 'text', text: '生成视频' },
+      ...urls.map(url => ({ type: 'image', source: { type: 'url', url } })),
+    ])
+  })
+
+  test('explicit native capabilities rebuild system-only references into eligible messages', () => {
+    const referenceImages = [
+      { url: 'https://example.com/first.png', reference_index: 1 },
+      { url: 'https://example.com/last.png', reference_index: 2 },
+    ]
+    const systemOnlyRequest = {
+      model: 'x',
+      type: 'image_to_video',
+      image_url: referenceImages[0].url,
+      reference_images: referenceImages,
+      messages: [
+        {
+          role: 'system',
+          content: [
+            { type: 'text', text: 'system visual context' },
+            ...referenceImages.map(reference => ({ type: 'image_url', image_url: { url: reference.url } })),
+          ],
+        },
+        { role: 'user', content: '生成视频' },
+      ],
+    } as any
+    const explicitModel = {
+      ...selection().model,
+      context_ui_params: { multi_reference: { supported: true, max: 9 } },
+    }
+
+    const geminiBody = buildProviderRequestBody(systemOnlyRequest, openaiSelection({
+      apiFormat: 'gemini_native',
+      endpoint: 'models/gemini-video:generateContent',
+      model: explicitModel,
+    }))
+    expect(geminiBody.contents.flatMap((message: any) => message.parts)
+      .map((part: any) => part.fileData?.fileUri || '')
+      .filter(Boolean)).toEqual(referenceImages.map(reference => reference.url))
+
+    const anthropicBody = buildProviderRequestBody(systemOnlyRequest, openaiSelection({
+      apiFormat: 'anthropic',
+      endpoint: 'messages',
+      model: explicitModel,
+    }))
+    expect(anthropicBody.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+      .map((part: any) => part.image_url?.url || part.source?.url || '')
+      .filter(Boolean)).toEqual(referenceImages.map(reference => reference.url))
+  })
+
+  test('explicit native capabilities canonicalize extra eligible images without mutating the request', () => {
+    const referenceImages = [
+      { url: 'https://example.com/first.png', reference_index: 1 },
+      { url: 'https://example.com/last.png', reference_index: 2 },
+    ]
+    const request = {
+      model: 'x',
+      type: 'image_to_video',
+      image_url: referenceImages[0].url,
+      reference_images: referenceImages,
+      messages: [
+        { role: 'system', content: 'system text' },
+        {
+          role: 'user',
+          name: 'primary',
+          content: [
+            { type: 'text', text: 'first user text' },
+            { type: 'input_file', file_id: 'file-1' },
+            { type: 'image_url', image_url: { url: referenceImages[0].url } },
+            { type: 'image_url', image_url: { url: referenceImages[0].url } },
+            { type: 'image_url', image_url: { url: referenceImages[1].url } },
+          ],
+        },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'assistant text' },
+            { type: 'image_url', image_url: { url: referenceImages[0].url } },
+          ],
+        },
+        { role: 'user', content: [{ type: 'text', text: 'final user text' }] },
+      ],
+    } as any
+    const original = structuredClone(request)
+    const body = buildProviderRequestBody(request, openaiSelection({
+      apiFormat: 'gemini_native',
+      endpoint: 'models/gemini-video:generateContent',
+      model: {
+        ...selection().model,
+        context_ui_params: { multi_reference: { supported: true, max: 9 } },
+      },
+    }))
+
+    expect(request).toEqual(original)
+    expect(body.contents).toHaveLength(3)
+    expect(body.contents.map((message: any) => message.parts
+      .map((part: any) => part.text || '')
+      .filter(Boolean))).toEqual([
+      ['first user text'],
+      ['assistant text'],
+      ['final user text'],
+    ])
+    expect(body.contents.flatMap((message: any) => message.parts)
+      .map((part: any) => part.fileData?.fileUri || '')
+      .filter(Boolean)).toEqual(referenceImages.map(reference => reference.url))
   })
 
   test('provider body preflight rejects references that exist only in system multimodal content', () => {

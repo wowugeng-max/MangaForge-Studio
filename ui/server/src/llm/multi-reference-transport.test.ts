@@ -241,6 +241,31 @@ describe('multi-reference provider transport', () => {
     })).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
   })
 
+  test('requires the exact eligible native image array instead of an ordered subsequence', () => {
+    const selections = [
+      { apiFormat: 'gemini_native' },
+      { apiFormat: 'anthropic', endpoint: 'messages' },
+      { apiFormat: 'openai_compatible', endpoint: 'chat/completions' },
+    ]
+    for (const selection of selections) {
+      expect(resolveMultiReferenceTransport(multimodalRequest(), selection)).toMatchObject({
+        supported: true,
+        source: 'native_multimodal',
+      })
+      expect(() => resolveMultiReferenceTransport(multimodalRequest({
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'animate this shot' },
+            { type: 'image_url', image_url: { url: '/first.png' } },
+            { type: 'image_url', image_url: { url: '/first.png' } },
+            { type: 'image_url', image_url: { url: '/last.png' } },
+          ],
+        }],
+      }), selection)).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+    }
+  })
+
   test('does not count system-only image parts as preserved native multimodal references', () => {
     const systemOnly = request({
       messages: [
@@ -299,6 +324,18 @@ describe('multi-reference provider transport', () => {
           role: 'user',
           content: [
             { type: 'text', text: 'only one occurrence' },
+            { type: 'image_url', image_url: { url: '/same.png' } },
+          ],
+        }],
+      }, selection)).toThrow(expect.objectContaining({ code: 'MULTI_REFERENCE_UNSUPPORTED' }))
+      expect(() => resolveMultiReferenceTransport({
+        ...duplicateRequest,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'text', text: 'one extra occurrence' },
+            { type: 'image_url', image_url: { url: '/same.png' } },
+            { type: 'image_url', image_url: { url: '/same.png' } },
             { type: 'image_url', image_url: { url: '/same.png' } },
           ],
         }],

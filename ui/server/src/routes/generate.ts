@@ -1020,38 +1020,84 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     let compiledSkill: { request: LLMRequest; audit: SkillCompileAudit; result: PromptCompileResult; selector: ReturnType<typeof skillSelectorForPayload> } | null = null
     let request: LLMRequest | null = null
     let incomingAssets: IncomingCanvasAsset[] = []
+    let selectedSkill: ReturnType<typeof skillSelectorForPayload> = null
+    let preferredModelId: number | undefined
+    let runtimeTargetPreflighted = false
+    let multiReferenceComfyTarget = false
 
-    // Canonical reference validation and Skill compilation deliberately run
-    // before the first provider-store, Comfy, task-manager, or executor call.
+    // Canonical reference and pure Skill selector validation stay ahead of all
+    // provider-store, Comfy, task-manager, compiler, or executor side effects.
     try {
       incomingAssets = canonicalIncomingAssetsForPayload(payload)
       request = buildCanvasGenerateLLMRequest(payload, incomingAssets)
       const rawCandidate = rawPromptForSkill(payload)
       const params = payload?.params && typeof payload.params === 'object' ? payload.params : {}
-      const selected = skillSelectorForPayload(payload, params, rawCandidate)
-      if (selected) {
-        compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, incomingAssets, compile)
-        if (compiledSkill) {
-          request = compiledSkill.request
+      selectedSkill = skillSelectorForPayload(payload, params, rawCandidate)
+      if (selectedSkill) skillModeForPayload(payload, params)
+    } catch (error) {
+      return skillErrorResponse(res, error)
+    }
+
+    const hasMultipleReferences = (request.reference_images?.length || 0) > 1
+    if (hasMultipleReferences) {
+      try {
+        // Validate multi-reference Comfy mappings on a disposable workflow
+        // clone before invoking the Skill compiler provider.
+        multiReferenceComfyTarget = Boolean(await resolveComfyExecutionOptions(
+          activeWorkspace,
+          payload,
+          undefined,
+          request.reference_images || [],
+        ))
+      } catch (error) {
+        const code = error && typeof error === 'object' ? (error as any).code : undefined
+        if (typeof code === 'string' && (code.startsWith('SKILL_') || code.startsWith('MULTI_REFERENCE_'))) {
+          return skillErrorResponse(res, error)
         }
+        return res.status(400).json(errorBody(error))
+      }
+
+      if (!multiReferenceComfyTarget) {
+        try {
+          preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
+          const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId)
+          const selectedModelId = Number((preflightSelection as any)?.model?.id)
+          if (Number.isSafeInteger(selectedModelId) && selectedModelId > 0) preferredModelId = selectedModelId
+          runtimeTargetPreflighted = true
+        } catch (error) {
+          const code = error && typeof error === 'object' ? String((error as any).code || '') : ''
+          if (code.startsWith('MULTI_REFERENCE_')) return skillErrorResponse(res, error)
+          return res.status(500).json(errorBody(error))
+        }
+      }
+    }
+
+    try {
+      if (selectedSkill) {
+        compiledSkill = await compileCanvasSkillIfSelected(payload, activeWorkspace, request, incomingAssets, compile)
+        if (compiledSkill) request = compiledSkill.request
       }
     } catch (error) {
       return skillErrorResponse(res, error)
     }
 
-    try {
-      comfyOptions = await resolveComfyExecutionOptions(
-        activeWorkspace,
-        payload,
-        compiledSkill?.result,
-        request?.reference_images || [],
-      )
-    } catch (error) {
-      const code = error && typeof error === 'object' ? (error as any).code : undefined
-      if (typeof code === 'string' && (code.startsWith('SKILL_') || code.startsWith('MULTI_REFERENCE_'))) {
-        return skillErrorResponse(res, error)
+    if (!hasMultipleReferences || multiReferenceComfyTarget) {
+      try {
+        // Rebuild from the original payload so the preflight clone is never
+        // reused after compiled prompt injection.
+        comfyOptions = await resolveComfyExecutionOptions(
+          activeWorkspace,
+          payload,
+          compiledSkill?.result,
+          request.reference_images || [],
+        )
+      } catch (error) {
+        const code = error && typeof error === 'object' ? (error as any).code : undefined
+        if (typeof code === 'string' && (code.startsWith('SKILL_') || code.startsWith('MULTI_REFERENCE_'))) {
+          return skillErrorResponse(res, error)
+        }
+        return res.status(400).json(errorBody(error))
       }
-      return res.status(400).json(errorBody(error))
     }
 
     if (comfyOptions) {
@@ -1101,18 +1147,7 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
 
     if (!request) request = buildCanvasGenerateLLMRequest(payload)
     const sourceAssetIds = normalizeSourceAssetIds((request as any).source_asset_ids)
-    let preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
-    if ((request.reference_images?.length || 0) > 1) {
-      try {
-        const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId)
-        const selectedModelId = Number((preflightSelection as any)?.model?.id)
-        if (Number.isSafeInteger(selectedModelId) && selectedModelId > 0) preferredModelId = selectedModelId
-      } catch (error) {
-        const code = error && typeof error === 'object' ? String((error as any).code || '') : ''
-        if (code.startsWith('MULTI_REFERENCE_')) return skillErrorResponse(res, error)
-        return res.status(500).json(errorBody(error))
-      }
-    }
+    if (!runtimeTargetPreflighted) preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
 
     if (!clientId) {
       try {

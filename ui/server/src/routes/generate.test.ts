@@ -1597,6 +1597,176 @@ describe('canvas generate route', () => {
     expect(workflow['21'].inputs.image).toBe('editable-last')
   })
 
+  test('rejects Skill-enabled unsupported runtime transport before compiler side effects', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    let executeCalls = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({ skillName: 'h3-prompt-writing', mode: 'image_to_video' }) as any
+      },
+      preflightTransport: async () => {
+        throw Object.assign(new Error('provider only accepts one image'), {
+          code: 'MULTI_REFERENCE_UNSUPPORTED',
+          status: 422,
+        })
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      registerTask: () => { taskCalls += 1 },
+    } as any)
+
+    const response = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'single-image-video',
+        type: 'image_to_video',
+        prompt: '生成视频',
+        skill_name: 'h3-prompt-writing',
+        params: {
+          client_id: 'must-not-register',
+          incoming_assets: [
+            { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+            { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+          ],
+        },
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.body.error_code).toBe('MULTI_REFERENCE_UNSUPPORTED')
+    expect({ compileCalls, executeCalls, taskCalls }).toEqual({
+      compileCalls: 0,
+      executeCalls: 0,
+      taskCalls: 0,
+    })
+  })
+
+  test('rejects Skill-enabled invalid multi-reference Comfy mappings before compilation', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+      { id: 'local-comfy', display_name: 'Local Comfy', service_type: 'comfyui', api_format: 'comfyui', auth_type: 'none', default_base_url: 'http://provider-comfy', supported_modalities: ['image_to_video'], is_active: true },
+    ]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 43, provider: 'local-comfy', description: 'GPU', is_active: true, base_url: 'http://key-comfy' },
+    ]))
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    let comfyCalls = 0
+    let executeCalls = 0
+    let taskCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({ skillName: 'h3-prompt-writing', mode: 'image_to_video' }) as any
+      },
+      comfyExecute: async () => {
+        comfyCalls += 1
+        return { prompt_id: 'unexpected', output_files: [], history: {} }
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      registerTask: () => { taskCalls += 1 },
+    })
+
+    const response = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 43,
+        provider: 'local-comfy',
+        model: 'comfyui-workflow',
+        type: 'image_to_video',
+        prompt: {
+          '10': { inputs: { image: 'editable-first' } },
+          '11': { inputs: { image: 'editable-last' } },
+          '12': { inputs: { text: 'editable prompt' } },
+        },
+        skill_name: 'h3-prompt-writing',
+        skill_comfy_mapping: {
+          compiled_prompt: '12.inputs.text',
+          reference_images: [{ reference_index: 1, input: '10.inputs.image' }],
+        },
+        params: {
+          client_id: 'must-not-register-comfy',
+          incoming_assets: [
+            { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+            { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+          ],
+        },
+      },
+    })
+
+    expect(response.statusCode).toBe(422)
+    expect(response.body.error_code).toBe('MULTI_REFERENCE_MAPPING_REQUIRED')
+    expect({ compileCalls, comfyCalls, executeCalls, taskCalls }).toEqual({
+      compileCalls: 0,
+      comfyCalls: 0,
+      executeCalls: 0,
+      taskCalls: 0,
+    })
+  })
+
+  test('preflights and pins supported Skill targets before sync or background compilation', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const events: string[] = []
+    let compileCalls = 0
+    let executeCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      preflightTransport: async () => {
+        events.push('preflight')
+        return { model: { id: 77 } }
+      },
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        events.push('compile')
+        return compiledSkillResult({
+          skillName: 'h3-prompt-writing',
+          mode: 'image_to_video',
+          prompt: 'compiled prompt',
+        }) as any
+      },
+      execute: async (_activeWorkspace, request, preferredModelId) => {
+        executeCalls += 1
+        events.push(`execute:${preferredModelId}`)
+        expect(request.prompt).toBe('compiled prompt')
+        return { content: 'ok' } as any
+      },
+      sendMessage: async () => true,
+      registerTask: () => {},
+    } as any)
+
+    const baseBody = {
+      model: 'video-model',
+      type: 'image_to_video',
+      prompt: '生成视频',
+      skill_name: 'h3-prompt-writing',
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+          { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+        ],
+      },
+    }
+
+    const syncResponse = await call(handlers.get('POST /api/generate'), { body: baseBody })
+    expect(syncResponse.statusCode).toBe(200)
+
+    const backgroundResponse = await call(handlers.get('POST /api/generate'), {
+      body: { ...baseBody, params: { ...baseBody.params, client_id: 'skill-preflight-background' } },
+    })
+    expect(backgroundResponse.statusCode).toBe(200)
+    while (executeCalls < 2) await new Promise(resolve => setTimeout(resolve, 0))
+
+    expect(events).toEqual([
+      'preflight', 'compile', 'execute:77',
+      'preflight', 'compile', 'execute:77',
+    ])
+    expect(compileCalls).toBe(2)
+  })
+
   test('preflights non-Comfy multi-reference requests before sync execution or background task registration', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')

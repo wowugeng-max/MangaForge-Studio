@@ -15,6 +15,7 @@ export type ProviderRecord = {
   icon?: string
   endpoints?: Record<string, any>
   custom_headers?: Record<string, string>
+  context_ui_params?: Record<string, unknown>
 }
 
 export function getProvidersPath(activeWorkspace: string) {
@@ -43,12 +44,13 @@ export function normalizeProviderEndpoints(value: unknown): Record<string, any> 
 function normalizeProviderRecord(raw: Partial<ProviderRecord> & Record<string, any>): ProviderRecord {
   const id = String(raw.id ?? '')
   const responseMode = raw.response_mode ?? raw.responseMode ?? 'auto'
+  const contextUiParams = raw.context_ui_params ?? raw.contextUiParams
   const supportedModalities = Array.isArray(raw.supported_modalities)
     ? raw.supported_modalities
     : Array.isArray(raw.supportedModalities)
       ? raw.supportedModalities
       : []
-  return {
+  const normalized: ProviderRecord & Record<string, any> = {
     ...raw,
     id,
     display_name: String(raw.display_name ?? raw.displayName ?? id),
@@ -65,6 +67,9 @@ function normalizeProviderRecord(raw: Partial<ProviderRecord> & Record<string, a
     endpoints: normalizeProviderEndpoints(raw.endpoints),
     custom_headers: objectOrEmpty(raw.custom_headers ?? raw.customHeaders),
   }
+  if (contextUiParams !== undefined) normalized.context_ui_params = objectOrEmpty(contextUiParams)
+  delete normalized.contextUiParams
+  return normalized
 }
 
 export async function readProviders(activeWorkspace: string): Promise<ProviderRecord[]> {

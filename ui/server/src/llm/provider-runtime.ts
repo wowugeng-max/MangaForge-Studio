@@ -524,10 +524,14 @@ export async function executeWithRuntimeModel<T = any>(
     }
   }
 
+  // Multi-reference capability errors are request-shape failures, not provider
+  // execution failures. Preserve their typed contract and avoid local asset
+  // conversion or key failure metrics before rejecting them.
+  const preflightSelection = preflightSelectedRuntimeRequestTransport(selection, request)
   const startedAt = Date.now()
   try {
     const normalizedRequest = await requestWithLocalAssetDataUris(activeWorkspace, request)
-    const response = await postProviderJson<T>(selection, normalizedRequest, options)
+    const response = await postProviderJson<T>(preflightSelection, normalizedRequest, options)
     await recordRuntimeKeyMetrics(activeWorkspace, selection.key.id, startedAt, true)
     return { ...response, runtimeSelection: sanitizeRuntimeSelection(selection) as any }
   } catch (error) {

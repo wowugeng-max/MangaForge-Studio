@@ -129,6 +129,79 @@ describe('codex responses provider runtime a b', () => {
     }
   })
 
+  test('execute rejects typed multi-reference preflight errors before fetch or key metrics', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-multi-execute-preflight-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'single-image-provider',
+          display_name: 'Single Image Provider',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          supported_modalities: ['image_to_video'],
+          default_base_url: 'https://api.example.com/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      const originalKeys = [
+        { id: 40, provider: 'single-image-provider', key: 'secret-key', is_active: true },
+      ]
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify(originalKeys))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 40,
+          api_key_id: 40,
+          provider: 'single-image-provider',
+          display_name: 'Single Image Video',
+          model_name: 'single-image-video',
+          capabilities: { image_to_video: true },
+          health_status: 'healthy',
+          context_ui_params: {},
+        },
+      ]))
+
+      let fetchCalls = 0
+      globalThis.fetch = (async () => {
+        fetchCalls += 1
+        throw new Error('provider must not be called during execute preflight')
+      }) as typeof fetch
+
+      const outcome = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: '/first.png',
+        reference_images: [
+          { url: '/first.png', reference_index: 1 },
+          { url: '/last.png', reference_index: 2 },
+        ],
+        messages: [{ role: 'user', content: '生成视频' }],
+      } as any, 40, { maxRetries: 0 }).then(
+        value => ({ value }),
+        error => ({ error }),
+      )
+      const keysAfter = JSON.parse(await readFile(join(workspace, 'keys.json'), 'utf8'))
+
+      expect({
+        errorCode: (outcome as any).error?.code,
+        errorStatus: (outcome as any).error?.status,
+        resolvedError: (outcome as any).value?.error,
+        fetchCalls,
+        keysAfter,
+      }).toEqual({
+        errorCode: 'MULTI_REFERENCE_UNSUPPORTED',
+        errorStatus: 422,
+        resolvedError: undefined,
+        fetchCalls: 0,
+        keysAfter: originalKeys,
+      })
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('preflight leaves existing no-runtime-model handling unchanged', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-empty-preflight-'))
     try {
@@ -147,7 +220,7 @@ describe('codex responses provider runtime a b', () => {
     }
   })
 
-  test('preflights provider-level multi-reference capabilities loaded from workspace records', async () => {
+  test('normalizes and preflights camelCase provider capabilities loaded from workspace records', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-provider-capability-'))
     try {
       await writeFile(join(workspace, 'providers.json'), JSON.stringify([
@@ -162,8 +235,8 @@ describe('codex responses provider runtime a b', () => {
           is_active: true,
           endpoints: {},
           custom_headers: {},
-          context_ui_params: {
-            multi_reference: { supported: true, field: 'provider_images', shape: 'urls', max: 9 },
+          contextUiParams: {
+            multiReference: { supported: true, field: 'provider_images', shape: 'urls', max: 9 },
           },
         },
       ]))
@@ -195,7 +268,8 @@ describe('codex responses provider runtime a b', () => {
       } as any, 49)
 
       expect(selection?.model.id).toBe(49)
-      expect((selection?.provider as any).context_ui_params.multi_reference.field).toBe('provider_images')
+      expect((selection?.provider.context_ui_params as any)?.multiReference.field).toBe('provider_images')
+      expect((selection?.provider as any).contextUiParams).toBeUndefined()
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }

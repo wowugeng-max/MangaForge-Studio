@@ -24,6 +24,7 @@ import {
 import type { RuntimeModelSelection } from './provider-runtime-support-types'
 import { routeDslValue } from './provider-runtime-support-route-dsl'
 import {
+  isMultiReferenceImageBearingRole,
   MultiReferenceTransportError,
   resolveMultiReferenceTransport,
   type MultiReferenceTransport,
@@ -144,25 +145,7 @@ function toOpenAIBody(
       if (passthroughBlocked.has(key)) continue
       body[key] = value
     }
-    if (
-      ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
-      && multiReferenceTransport.field
-      && (request.reference_images?.length || 0) > 1
-    ) {
-      const field = multiReferenceTransport.field
-      if (['__proto__', 'prototype', 'constructor'].includes(field)) {
-        throw new MultiReferenceTransportError(
-          'MULTI_REFERENCE_UNSUPPORTED',
-          'Multi-reference provider field is unsafe',
-        )
-      }
-      body[field] = multiReferenceTransport.shape === 'urls'
-        ? request.reference_images!.map(reference => reference.url)
-        : request.reference_images!.map(reference => ({
-          ...reference,
-          ...(reference.source_asset_ids ? { source_asset_ids: [...reference.source_asset_ids] } : {}),
-        }))
-    }
+    applyExplicitMultiReferenceField(body, request, multiReferenceTransport)
     // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
     if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
     if (typeof request.negative_prompt === 'string' && request.negative_prompt.trim()) {
@@ -227,13 +210,47 @@ function toCodexResponsesBody(request: LLMRequest, selection: RuntimeModelSelect
   })
 }
 
+function anthropicImageBlock(imageUrl: string) {
+  const value = String(imageUrl || '').trim()
+  const dataMatch = value.match(/^data:([^;,]+);base64,(.*)$/i)
+  if (dataMatch) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: dataMatch[1],
+        data: dataMatch[2],
+      },
+    }
+  }
+  return { type: 'image', source: { type: 'url', url: value } }
+}
+
+function anthropicMessageContent(content: LLMRequest['messages'][number]['content']) {
+  if (!Array.isArray(content)) return content
+  return content.map(part => {
+    const imageUrl = imageUrlFromLLMContentPart(part)
+    if (imageUrl) return anthropicImageBlock(imageUrl)
+    if (!part || typeof part !== 'object') return part
+    const type = String((part as any).type || '')
+    if (['text', 'input_text', 'output_text'].includes(type)) {
+      return { type: 'text', text: textFromLLMContentPart(part) }
+    }
+    return { ...part }
+  })
+}
+
 function toAnthropicBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
-  const system = request.messages.find(m => m.role === 'system')?.content
+  const system = request.messages
+    .filter(message => message.role === 'system')
+    .map(message => stringifyLLMMessageTextContent(message.content))
+    .filter(value => value.trim())
+    .join('\n')
   const messages = request.messages
     .filter(m => m.role !== 'system')
     .map(m => ({
       role: m.role === 'assistant' ? 'assistant' : 'user',
-      content: m.content,
+      content: anthropicMessageContent(m.content),
     }))
   const body: Record<string, any> = {
     model: anthropicModelNameForRequest(selection.model.model_name || request.model, selection.model, {
@@ -456,6 +473,7 @@ function renderTemplateValue(template: any, context: Record<string, any>): any {
 }
 
 function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelection) {
+  const referenceImages = request.reference_images ?? (request as any).referenceImages
   const context: Record<string, any> = {
     ...(request as any),
     model: selection.model.model_name || request.model,
@@ -464,6 +482,8 @@ function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelect
     size: (request as any).size ?? '1024*1024',
     temperature: request.temperature,
     max_tokens: request.max_tokens,
+    reference_images: referenceImages,
+    referenceImages,
   }
   // Endpoint templates are provider-authored but request fields are not. Keep
   // the compiler's negative prompt media-only even when a text template uses a
@@ -472,22 +492,51 @@ function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelect
   return context
 }
 
-function requestWithCanonicalReferenceMessageParts(request: LLMRequest): LLMRequest {
-  const references = request.reference_images || []
-  if (references.length <= 1) return request
-  const expectedUrls = references.map(reference => reference.url)
-  const actualUrls = (request.messages || []).flatMap(message => Array.isArray(message.content)
-    ? message.content.map(imageUrlFromLLMContentPart).filter(Boolean)
-    : [])
-  let cursor = 0
-  for (const url of actualUrls) {
-    if (url === expectedUrls[cursor]) cursor += 1
-    if (cursor === expectedUrls.length) return request
+function applyExplicitMultiReferenceField(
+  body: Record<string, any>,
+  request: LLMRequest,
+  transport: MultiReferenceTransport,
+) {
+  if (
+    !['model_capability', 'provider_capability'].includes(transport.source)
+    || !transport.field
+    || (request.reference_images?.length || 0) <= 1
+  ) return
+  const field = transport.field
+  if (['__proto__', 'prototype', 'constructor'].includes(field)) {
+    throw new MultiReferenceTransportError(
+      'MULTI_REFERENCE_UNSUPPORTED',
+      'Multi-reference provider field is unsafe',
+    )
   }
+  body[field] = transport.shape === 'urls'
+    ? request.reference_images!.map(reference => reference.url)
+    : request.reference_images!.map(reference => ({
+      ...reference,
+      ...(reference.source_asset_ids ? { source_asset_ids: [...reference.source_asset_ids] } : {}),
+    }))
+}
+
+function requestWithCanonicalReferenceMessageParts(
+  request: LLMRequest,
+  selection: RuntimeModelSelection,
+): LLMRequest {
+  const references = request.reference_images || []
+  if (
+    references.length <= 1
+    || !isMultiReferenceImageBearingRole('user', selection)
+  ) return request
 
   const messages = (request.messages || []).map(message => ({
     ...message,
-    content: Array.isArray(message.content) ? [...message.content] : message.content,
+    content: Array.isArray(message.content)
+      ? message.content
+        .filter(part => (
+          !isMultiReferenceImageBearingRole(message.role, selection)
+          || !imageUrlFromLLMContentPart(part)
+        ))
+        .map(part => part && typeof part === 'object' ? { ...part } : part)
+      : message.content,
   }))
   let userIndex = messages.findLastIndex(message => message.role === 'user')
   if (userIndex < 0) {
@@ -611,10 +660,31 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
   const multiReferenceTransport = resolveMultiReferenceTransport(request, selection)
   const payloadTemplate = routeDslValue(selection.routeConfig, 'payload_template', 'payloadTemplate')
   if (payloadTemplate) {
-    return renderTemplateValue(payloadTemplate, buildTemplateContext(request, selection)) ?? {}
+    const templateContext = buildTemplateContext(request, selection)
+    if (
+      ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
+      && multiReferenceTransport.field
+    ) {
+      // An explicit capability field owns canonical reference transport. Do not
+      // also render route-template aliases into a second provider field.
+      delete templateContext.reference_images
+      delete templateContext.referenceImages
+    }
+    const rendered = renderTemplateValue(payloadTemplate, templateContext) ?? {}
+    if (
+      (request.reference_images?.length || 0) > 1
+      && (!rendered || typeof rendered !== 'object' || Array.isArray(rendered))
+    ) {
+      throw new MultiReferenceTransportError(
+        'MULTI_REFERENCE_UNSUPPORTED',
+        'Multi-reference payload templates must render an object body',
+      )
+    }
+    applyExplicitMultiReferenceField(rendered, request, multiReferenceTransport)
+    return rendered
   }
   const nativeRequest = ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
-    ? requestWithCanonicalReferenceMessageParts(request)
+    ? requestWithCanonicalReferenceMessageParts(request, selection)
     : request
   if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(nativeRequest, selection)
   if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(nativeRequest)
