@@ -61,6 +61,7 @@ import {
   pickQuickParams,
   reconcileGenerateNodeReferenceBindings,
   reorderGenerateNodeReferenceBindings,
+  resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodePreviewMediaSrc,
@@ -118,6 +119,7 @@ export {
   reconcileGenerateNodeReferenceBindings,
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
+  resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeResultReferenceBindings,
   shouldInvalidateGenerateNodeInitialCompileAudit,
@@ -134,6 +136,8 @@ export type {
   GenerateNodeReferenceType,
   GenerateNodeReferenceValidationState,
   GenerateNodeRunToken,
+  GenerateNodeSkillIdentity,
+  GenerateNodeSkillSelectionError,
   GenerateNodeUnresolvedReferenceSource,
 } from './generate-node-model'
 
@@ -306,17 +310,27 @@ function GenerateNodeImpl(props: NodeProps) {
   const knownSkills = useMemo(() => Array.from(new Map(
     [...allSkills, ...readySkills].map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill]),
   ).values()), [allSkills, readySkills])
-  const selectedSkill = useMemo(() => {
-    if (!skillName) return undefined
-    const matches = knownSkills.filter(skill => skill.name === skillName && (!skillPackId || skill.packId === skillPackId))
-    return matches.find(skill => !skillRevision || skill.revision === skillRevision) || matches[0]
-  }, [knownSkills, skillName, skillPackId, skillRevision])
-  const commandSkill = useMemo(() => {
-    if (!parsedSkillCommand) return undefined
-    const matches = knownSkills.filter(skill => skill.name === parsedSkillCommand.name && (!parsedSkillCommand.packId || skill.packId === parsedSkillCommand.packId))
-    return matches.length === 1 ? matches[0] : undefined
+  const selectedSkillResolution = useMemo(() => resolveGenerateNodeSkillSelection({
+    knownSkills,
+    selectedPackId: skillPackId,
+    selectedName: skillName,
+    selectedRevision: skillRevision,
+  }), [knownSkills, skillName, skillPackId, skillRevision])
+  const selectedSkill = selectedSkillResolution.selectedSkill
+  const commandSkillResolution = useMemo(() => {
+    if (!parsedSkillCommand) return null
+    return resolveGenerateNodeSkillSelection({
+      knownSkills,
+      selectedPackId: parsedSkillCommand.packId,
+      selectedName: parsedSkillCommand.name,
+      selectedRevision: '',
+    })
   }, [knownSkills, parsedSkillCommand])
+  const commandSkill = commandSkillResolution?.selectedSkill
   const effectiveSkill = parsedSkillCommand ? commandSkill : selectedSkill
+  const effectiveSkillSelectionError = parsedSkillCommand
+    ? commandSkillResolution?.error || null
+    : selectedSkillResolution.error
   const effectiveSkillIdentity = buildGenerateNodeSkillIdentity({
     command: parsedSkillCommand,
     selectedPackId: selectedSkill?.packId || skillPackId,
@@ -356,7 +370,7 @@ function GenerateNodeImpl(props: NodeProps) {
     || effectiveCompilerModelId === null
     || !effectiveCompilerModel
   ))
-  const skillRunBlocked = effectiveSkillIncompatible || missingEffectiveCompilerModel
+  const skillRunBlocked = Boolean(hasEffectiveSkill && (effectiveSkillSelectionError || effectiveSkillIncompatible || missingEffectiveCompilerModel))
   const referenceBindingsFingerprint = useMemo(
     () => buildGenerateNodeReferenceBindingsFingerprint(referenceBindings),
     [referenceBindings],
@@ -682,6 +696,7 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const handleSkillPreview = async () => {
     if (!hasEffectiveSkill) return message.info('请先选择 Skill 或在提示词开头输入 /skill 命令')
+    if (effectiveSkillSelectionError) return message.error(`${effectiveSkillSelectionError.error_code}: ${effectiveSkillSelectionError.detail}`)
     if (effectiveSkillIncompatible) return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容`)
     if (missingEffectiveCompilerModel || effectiveCompilerModelId === null) {
       return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
@@ -933,6 +948,9 @@ function GenerateNodeImpl(props: NodeProps) {
       if (effectiveReferenceValidationError) {
         return message.error(`${effectiveReferenceValidationError.error_code}: ${effectiveReferenceValidationError.detail}`)
       }
+      if (effectiveSkillSelectionError) {
+        return message.error(`${effectiveSkillSelectionError.error_code}: ${effectiveSkillSelectionError.detail}`)
+      }
       if (effectiveSkillIncompatible) {
         return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容，请更换或清除`)
       }
@@ -1095,7 +1113,14 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectableSkills = selectedSkill && !compatibleReadySkills.some(skill => skillOptionKey(skill) === skillOptionKey(selectedSkill))
     ? [...compatibleReadySkills, selectedSkill]
     : compatibleReadySkills
-  const selectedSkillValue = selectedSkill ? skillOptionKey(selectedSkill) : ''
+  const unresolvedSelectedSkillValue = skillName ? `unresolved:${skillPackId}:${skillName}:${skillRevision}` : ''
+  const selectedSkillValue = selectedSkill ? skillOptionKey(selectedSkill) : unresolvedSelectedSkillValue
+  const unresolvedSelectedSkillOption = !selectedSkill && skillName ? {
+    value: unresolvedSelectedSkillValue,
+    label: skillRevision
+      ? `${skillPackId ? `${skillPackId}: ` : ''}${skillName} · 锁定 revision ${skillRevision} 不可用`
+      : `${skillPackId ? `${skillPackId}: ` : ''}${skillName} · revision 未锁定（请选择）`,
+  } : null
   const selectPromptSkill = (value: string) => {
     if (!value) {
       setSkillPackId('')
@@ -1451,21 +1476,29 @@ function GenerateNodeImpl(props: NodeProps) {
                   style={{ width: '100%' }}
                   options={[
                     { value: '', label: '默认（不使用 Skill）' },
+                    ...(unresolvedSelectedSkillOption ? [unresolvedSelectedSkillOption] : []),
                     ...selectableSkills.map(skill => ({
                       value: skillOptionKey(skill),
-                      label: `${skill.packId}: ${skill.displayName || skill.name}${skill.compatibility === 'prompt_ready' && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode)) ? '' : ' · 不兼容'}`,
+                      label: `${skill.packId}: ${skill.displayName || skill.name} · revision ${skill.revision}${skill.compatibility === 'prompt_ready' && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode)) ? '' : ' · 不兼容'}`,
                     })),
                   ]}
                 />
                 {hasEffectiveSkill && (
-                  <div style={{ padding: 8, borderRadius: 8, border: `1px solid ${effectiveSkillIncompatible ? '#ffccc7' : '#d9f7be'}`, background: effectiveSkillIncompatible ? '#fff2f0' : '#f6ffed' }}>
+                  <div style={{ padding: 8, borderRadius: 8, border: `1px solid ${effectiveSkillSelectionError || effectiveSkillIncompatible ? '#ffccc7' : '#d9f7be'}`, background: effectiveSkillSelectionError || effectiveSkillIncompatible ? '#fff2f0' : '#f6ffed' }}>
                     <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
                       <Text strong style={{ fontSize: 12 }}>{effectiveSkillPackId ? `${effectiveSkillPackId}: ` : ''}{effectiveSkill?.displayName || effectiveSkillName}</Text>
-                      <Tag color={effectiveSkillIncompatible ? 'red' : 'green'} style={{ margin: 0 }}>{effectiveSkillIncompatible ? '不兼容' : 'prompt_ready'}</Tag>
+                      <Tag color={effectiveSkillSelectionError || effectiveSkillIncompatible ? 'red' : 'green'} style={{ margin: 0 }}>{effectiveSkillSelectionError ? '不可用' : effectiveSkillIncompatible ? '不兼容' : 'prompt_ready'}</Tag>
                       {(skillPreviewResult?.skill_version || effectiveSkillRevision) && (
                         <Tag color="blue" style={{ margin: 0 }}>锁定 {skillPreviewResult?.skill_version || effectiveSkillRevision}</Tag>
                       )}
                     </div>
+                    {effectiveSkillSelectionError && (
+                      <div style={{ marginTop: 4 }}>
+                        <Text type="danger" strong style={{ display: 'block', fontSize: 11 }}>{effectiveSkillSelectionError.error_code}</Text>
+                        {effectiveSkillRevision && <Text type="danger" style={{ display: 'block', fontSize: 11 }}>锁定 revision {effectiveSkillRevision} 当前不可用。</Text>}
+                        <Text type="danger" style={{ display: 'block', fontSize: 11 }}>{effectiveSkillSelectionError.detail}</Text>
+                      </div>
+                    )}
                     {(effectiveSkill?.reason || effectiveSkill?.shortDescription || effectiveSkill?.description) && (
                       <Text type={effectiveSkillIncompatible ? 'danger' : 'secondary'} style={{ display: 'block', marginTop: 4, fontSize: 11 }}>
                         {effectiveSkill?.reason || effectiveSkill?.shortDescription || effectiveSkill?.description}
@@ -1496,7 +1529,7 @@ function GenerateNodeImpl(props: NodeProps) {
                     style={{ width: '100%' }}
                   />
                 </div>
-                {hasEffectiveSkill && missingEffectiveCompilerModel && (
+                {hasEffectiveSkill && !effectiveSkillSelectionError && missingEffectiveCompilerModel && (
                   <Text type="danger" style={{ fontSize: 11 }}>
                     {!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载可用编译模型…' : '需要配置一个启用且 capabilities.chat === true 的编译模型后才能预览或运行。'}
                   </Text>
@@ -1619,7 +1652,7 @@ function GenerateNodeImpl(props: NodeProps) {
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
           </Button>
         </div>
 

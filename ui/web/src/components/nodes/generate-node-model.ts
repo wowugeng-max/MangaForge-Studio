@@ -299,6 +299,106 @@ export function buildGenerateNodeSkillIdentity(input: {
   }
 }
 
+export type GenerateNodeSkillIdentity = {
+  packId: string
+  name: string
+  revision: string
+}
+
+export type GenerateNodeSkillSelectionError = {
+  error_code: 'SKILL_REVISION_UNAVAILABLE' | 'SKILL_AMBIGUOUS' | 'SKILL_NOT_FOUND'
+  detail: string
+  requested_pack_id: string
+  requested_name: string
+  requested_revision: string
+  available_revisions: string[]
+}
+
+export function resolveGenerateNodeSkillSelection<T extends GenerateNodeSkillIdentity>(input: {
+  knownSkills: readonly T[]
+  selectedPackId?: string
+  selectedName?: string
+  selectedRevision?: string
+}): {
+  requestedIdentity: GenerateNodeSkillIdentity
+  selectedSkill: T | undefined
+  error: GenerateNodeSkillSelectionError | null
+} {
+  const requestedIdentity = {
+    packId: String(input.selectedPackId || ''),
+    name: String(input.selectedName || ''),
+    revision: String(input.selectedRevision || ''),
+  }
+  if (!requestedIdentity.name) return { requestedIdentity, selectedSkill: undefined, error: null }
+
+  const matches = Array.from(new Map(input.knownSkills
+    .filter(skill => (
+      skill.name === requestedIdentity.name
+      && (!requestedIdentity.packId || skill.packId === requestedIdentity.packId)
+    ))
+    .map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill])).values())
+  const availableRevisions = Array.from(new Set(matches.map(skill => skill.revision))).sort()
+
+  if (requestedIdentity.revision) {
+    const exactMatches = matches.filter(skill => skill.revision === requestedIdentity.revision)
+    if (exactMatches.length === 1) return { requestedIdentity, selectedSkill: exactMatches[0], error: null }
+    if (exactMatches.length > 1) {
+      return {
+        requestedIdentity,
+        selectedSkill: undefined,
+        error: {
+          error_code: 'SKILL_AMBIGUOUS',
+          detail: `Locked Skill ${requestedIdentity.name} revision ${requestedIdentity.revision} matches multiple Packs; select an exact Pack and revision`,
+          requested_pack_id: requestedIdentity.packId,
+          requested_name: requestedIdentity.name,
+          requested_revision: requestedIdentity.revision,
+          available_revisions: availableRevisions,
+        },
+      }
+    }
+    return {
+      requestedIdentity,
+      selectedSkill: undefined,
+      error: {
+        error_code: 'SKILL_REVISION_UNAVAILABLE',
+        detail: `Locked Skill ${requestedIdentity.packId ? `${requestedIdentity.packId}:` : ''}${requestedIdentity.name} revision ${requestedIdentity.revision} is unavailable`,
+        requested_pack_id: requestedIdentity.packId,
+        requested_name: requestedIdentity.name,
+        requested_revision: requestedIdentity.revision,
+        available_revisions: availableRevisions,
+      },
+    }
+  }
+
+  if (matches.length === 1) return { requestedIdentity, selectedSkill: matches[0], error: null }
+  if (matches.length > 1) {
+    return {
+      requestedIdentity,
+      selectedSkill: undefined,
+      error: {
+        error_code: 'SKILL_AMBIGUOUS',
+        detail: `Skill ${requestedIdentity.packId ? `${requestedIdentity.packId}:` : ''}${requestedIdentity.name} has multiple installed revisions; select an exact revision`,
+        requested_pack_id: requestedIdentity.packId,
+        requested_name: requestedIdentity.name,
+        requested_revision: '',
+        available_revisions: availableRevisions,
+      },
+    }
+  }
+  return {
+    requestedIdentity,
+    selectedSkill: undefined,
+    error: {
+      error_code: 'SKILL_NOT_FOUND',
+      detail: `Skill ${requestedIdentity.packId ? `${requestedIdentity.packId}:` : ''}${requestedIdentity.name} is unavailable`,
+      requested_pack_id: requestedIdentity.packId,
+      requested_name: requestedIdentity.name,
+      requested_revision: '',
+      available_revisions: [],
+    },
+  }
+}
+
 export type GenerateNodePreviewRequestToken = {
   requestId: number
   fingerprint: string

@@ -1979,6 +1979,139 @@ describe('GenerateNode ordered reference bindings', () => {
 })
 
 describe('GenerateNode Skill review regressions', () => {
+  test('fails closed without substituting an installed revision for a locked unavailable revision', async () => {
+    const module = await import('./GenerateNode')
+    const resolveGenerateNodeSkillSelection = (module as any).resolveGenerateNodeSkillSelection
+    const buildGenerateNodeSkillIdentity = (module as any).buildGenerateNodeSkillIdentity
+    expect(typeof resolveGenerateNodeSkillSelection).toBe('function')
+    expect(typeof buildGenerateNodeSkillIdentity).toBe('function')
+    if (typeof resolveGenerateNodeSkillSelection !== 'function') return
+
+    const revB = { packId: 'pack-a', name: 'cinematic', revision: 'rev-b' }
+    const resolution = resolveGenerateNodeSkillSelection({
+      knownSkills: [revB],
+      selectedPackId: 'pack-a',
+      selectedName: 'cinematic',
+      selectedRevision: 'rev-a',
+    })
+
+    expect(resolution.selectedSkill).toBeUndefined()
+    expect(resolution.requestedIdentity).toEqual({ packId: 'pack-a', name: 'cinematic', revision: 'rev-a' })
+    expect(resolution.error).toMatchObject({
+      error_code: 'SKILL_REVISION_UNAVAILABLE',
+      requested_revision: 'rev-a',
+      available_revisions: ['rev-b'],
+    })
+    expect(buildGenerateNodeSkillIdentity({
+      selectedPackId: resolution.requestedIdentity.packId,
+      selectedName: resolution.requestedIdentity.name,
+      selectedRevision: resolution.requestedIdentity.revision,
+    })).toEqual({ packId: 'pack-a', name: 'cinematic', revision: 'rev-a' })
+    expect(JSON.stringify(resolution)).not.toContain('"revision":"rev-b","error":null')
+  })
+
+  test('keeps an unpinned multi-revision selection ambiguous instead of choosing the first match', async () => {
+    const module = await import('./GenerateNode')
+    const resolveGenerateNodeSkillSelection = (module as any).resolveGenerateNodeSkillSelection
+    expect(typeof resolveGenerateNodeSkillSelection).toBe('function')
+    if (typeof resolveGenerateNodeSkillSelection !== 'function') return
+
+    const resolution = resolveGenerateNodeSkillSelection({
+      knownSkills: [
+        { packId: 'pack-a', name: 'cinematic', revision: 'rev-a' },
+        { packId: 'pack-a', name: 'cinematic', revision: 'rev-b' },
+      ],
+      selectedPackId: 'pack-a',
+      selectedName: 'cinematic',
+      selectedRevision: '',
+    })
+
+    expect(resolution.selectedSkill).toBeUndefined()
+    expect(resolution.requestedIdentity).toEqual({ packId: 'pack-a', name: 'cinematic', revision: '' })
+    expect(resolution.error).toMatchObject({
+      error_code: 'SKILL_AMBIGUOUS',
+      available_revisions: ['rev-a', 'rev-b'],
+    })
+  })
+
+  test('resolves exact locked revisions and unique legacy unpinned selections', async () => {
+    const module = await import('./GenerateNode')
+    const resolveGenerateNodeSkillSelection = (module as any).resolveGenerateNodeSkillSelection
+    expect(typeof resolveGenerateNodeSkillSelection).toBe('function')
+    if (typeof resolveGenerateNodeSkillSelection !== 'function') return
+
+    const revA = { packId: 'pack-a', name: 'cinematic', revision: 'rev-a' }
+    const revB = { packId: 'pack-a', name: 'cinematic', revision: 'rev-b' }
+    expect(resolveGenerateNodeSkillSelection({
+      knownSkills: [revA, revB],
+      selectedPackId: 'pack-a',
+      selectedName: 'cinematic',
+      selectedRevision: 'rev-a',
+    })).toMatchObject({ selectedSkill: revA, error: null })
+    expect(resolveGenerateNodeSkillSelection({
+      knownSkills: [revA],
+      selectedPackId: 'pack-a',
+      selectedName: 'cinematic',
+      selectedRevision: '',
+    })).toMatchObject({ selectedSkill: revA, error: null })
+  })
+
+  test('skill list refresh or removal cannot mutate the requested locked identity or compile fingerprint', async () => {
+    const module = await import('./GenerateNode')
+    const resolveGenerateNodeSkillSelection = (module as any).resolveGenerateNodeSkillSelection
+    expect(typeof resolveGenerateNodeSkillSelection).toBe('function')
+    if (typeof resolveGenerateNodeSkillSelection !== 'function') return
+
+    const storedIdentity = { packId: 'pack-a', name: 'cinematic', revision: 'rev-a' }
+    const beforeRefresh = resolveGenerateNodeSkillSelection({
+      knownSkills: [
+        { packId: 'pack-a', name: 'cinematic', revision: 'rev-a' },
+        { packId: 'pack-a', name: 'cinematic', revision: 'rev-b' },
+      ],
+      selectedPackId: storedIdentity.packId,
+      selectedName: storedIdentity.name,
+      selectedRevision: storedIdentity.revision,
+    })
+    const afterRemoval = resolveGenerateNodeSkillSelection({
+      knownSkills: [{ packId: 'pack-a', name: 'cinematic', revision: 'rev-b' }],
+      selectedPackId: storedIdentity.packId,
+      selectedName: storedIdentity.name,
+      selectedRevision: storedIdentity.revision,
+    })
+
+    expect(beforeRefresh.requestedIdentity).toEqual(storedIdentity)
+    expect(afterRemoval.requestedIdentity).toEqual(storedIdentity)
+    expect(afterRemoval.selectedSkill).toBeUndefined()
+    expect(afterRemoval.error).toMatchObject({ error_code: 'SKILL_REVISION_UNAVAILABLE' })
+    expect(JSON.stringify({ skill: beforeRefresh.requestedIdentity })).toBe(JSON.stringify({ skill: afterRemoval.requestedIdentity }))
+    expect(storedIdentity).toEqual({ packId: 'pack-a', name: 'cinematic', revision: 'rev-a' })
+  })
+
+  test('wires typed Skill selection errors into preview, run, persistence, and exact-revision dropdown UX', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('resolveGenerateNodeSkillSelection({')
+    expect(source).not.toContain('|| matches[0]')
+    expect(source).toContain('const effectiveSkillSelectionError =')
+    expect(source).toContain('Boolean(hasEffectiveSkill && (effectiveSkillSelectionError || effectiveSkillIncompatible || missingEffectiveCompilerModel))')
+    expect(source).toContain('effectiveSkillSelectionError || effectiveSkillIncompatible || missingEffectiveCompilerModel')
+    expect(source).toContain('skillRevision: hasEffectiveSkill ? skillRevision : undefined')
+    expect(source).toContain('setSkillRevision(skill.revision)')
+    expect(source).toContain("effectiveSkillSelectionError.error_code")
+    expect(source).toContain("effectiveSkillSelectionError.detail")
+    expect(source).toContain('锁定 revision')
+    expect(source).toContain('skill.revision')
+
+    const previewSource = source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))
+    expect(previewSource).toContain('if (effectiveSkillSelectionError)')
+    expect(previewSource.indexOf('if (effectiveSkillSelectionError)')).toBeLessThan(previewSource.indexOf('compileSkillPreview({'))
+    expect(previewSource).toContain('skill_revision: effectiveSkillRevision')
+
+    const runSource = source.slice(source.indexOf('const handleRun = async () => {'), source.indexOf('useEffect(() => {', source.indexOf('const handleRun = async () => {')))
+    expect(runSource).toContain('if (effectiveSkillSelectionError)')
+    expect(runSource.indexOf('if (effectiveSkillSelectionError)')).toBeLessThan(runSource.indexOf('createSSEClient'))
+  })
+
   test('accepts only the latest Skill preview request for the current fingerprint', async () => {
     const module = await import('./GenerateNode')
     const createGenerateNodePreviewRequestTracker = (module as any).createGenerateNodePreviewRequestTracker
