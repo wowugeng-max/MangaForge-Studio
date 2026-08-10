@@ -72,14 +72,6 @@ function scrubUnknown(value: unknown, workspace: string): unknown {
 
 function scalar(value: unknown): value is string | number | boolean { return typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' }
 
-function supportsNegativePrompt(model: ModelRecord, mode: CanvasMediaMode): boolean {
-  if (model.capabilities?.negative_prompt === true) return true
-  const params = model.context_ui_params ?? {}
-  if (params.negative_prompt === true || params.negativePrompt === true) return true
-  const modeParams = params[mode]
-  return !!(modeParams && typeof modeParams === 'object' && !Array.isArray(modeParams) && ((modeParams as any).negative_prompt || (modeParams as any).negativePrompt))
-}
-
 function extractContent(response: LLMResponse<any>): string {
   if (typeof response.content === 'string' && response.content.trim()) return response.content.trim()
   const candidate = response.parsed ?? response.output
@@ -248,7 +240,6 @@ export function createPromptCompiler(deps: PromptCompilerDeps | RegistryLike = {
       result = parseResult(content, skill, input.mode)
     }
     result = withReferenceAudit(result, referenceBindings, referenceModeHint)
-    if (result.negative_prompt && !supportsNegativePrompt(model, input.mode)) { result = { ...result, prompt: `${result.prompt}\n\nNegative prompt: ${result.negative_prompt}`, warnings: [...result.warnings, 'Model does not support a separate negative prompt; merged it into prompt.'] } }
     cache.putCachedCompile(input.activeWorkspace, { key: inputHash, result, createdAt: Date.now(), compilerModelId: effectiveCompilerModelId })
     return { result, inputHash, cached: false, compilerModelId: effectiveCompilerModelId, skill }
   }

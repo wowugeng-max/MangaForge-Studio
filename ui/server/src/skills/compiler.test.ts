@@ -288,6 +288,58 @@ describe('prompt compiler', () => {
     expect(secondModel.inputHash).not.toBe(first.inputHash)
   })
 
+  test('preserves structured positive and negative prompts when the compiler model lacks negative-prompt capability', async () => {
+    const root = await compilerRoot()
+    const cache = createCompileCache()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache,
+      readModels: async () => [{
+        id: 31,
+        model_name: 'chat-only-compiler',
+        provider: 'fixture',
+        display_name: 'Chat-only compiler',
+        capabilities: { chat: true },
+      } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        return {
+          content: compilerResult('text_to_video', {
+            prompt: 'POS',
+            negative_prompt: 'NEG',
+            warnings: ['compiler warning'],
+          }),
+        }
+      },
+    })
+    const input = {
+      skillName: 'h3-prompt-writing',
+      rawPrompt: 'preserve structured output',
+      mode: 'text_to_video' as const,
+      incomingAssets: [],
+      nodeParams: {},
+      activeWorkspace: root,
+      compilerModelId: 31,
+    }
+
+    const first = await compiler(input)
+    const cached = await compiler(input)
+
+    expect(first.result).toMatchObject({
+      prompt: 'POS',
+      negative_prompt: 'NEG',
+      warnings: ['compiler warning'],
+    })
+    expect(cached.result).toMatchObject({
+      prompt: 'POS',
+      negative_prompt: 'NEG',
+      warnings: ['compiler warning'],
+    })
+    expect(cached.cached).toBe(true)
+    expect(executions).toBe(1)
+  })
+
   test('re-reads the configured compiler model before generating the cache key', async () => {
     const root = await compilerRoot()
     const modelCalls: number[] = []

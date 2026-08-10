@@ -33,6 +33,10 @@ import {
   requestWithoutNativeImageParts,
   resolveProviderRequestTransportPlan,
 } from './provider-runtime-multi-reference-plan'
+import {
+  applyNegativePromptTransport,
+  prepareNegativePromptRequest,
+} from './provider-runtime-negative-prompt'
 
 export { resolveProviderRequestTransportPlan } from './provider-runtime-multi-reference-plan'
 
@@ -139,9 +143,6 @@ function toOpenAIBody(
         model: selection.model.model_name || request.model,
         messages: [{ role: 'user', content: userContent }],
         max_tokens: request.max_tokens ?? 4096,
-        ...(typeof request.negative_prompt === 'string' && request.negative_prompt.trim()
-          ? { negative_prompt: request.negative_prompt }
-          : {}),
       }
     }
     const body: Record<string, any> = {
@@ -156,9 +157,6 @@ function toOpenAIBody(
     }
     // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
     if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
-    if (typeof request.negative_prompt === 'string' && request.negative_prompt.trim()) {
-      body.negative_prompt = request.negative_prompt
-    }
     return body
   }
   const shouldStream = shouldStreamRequest(request, selection)
@@ -641,8 +639,11 @@ export function parseGeminiGenerateContentResponse<T = any>(raw: any): LLMRespon
 
 export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
   const { multiReferenceTransport, payloadTemplate } = resolveProviderRequestTransportPlan(request, selection)
+  const routeType = requestRouteType(request, selection.model)
+  const negativePromptPlan = prepareNegativePromptRequest(request, selection, routeType, payloadTemplate)
+  const targetRequest = negativePromptPlan.request
   if (payloadTemplate) {
-    const templateContext = buildTemplateContext(request, selection)
+    const templateContext = buildTemplateContext(targetRequest, selection)
     if (
       ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
       && multiReferenceTransport.field
@@ -662,14 +663,15 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
         'Multi-reference payload templates must render an object body',
       )
     }
-    applyExplicitMultiReferenceField(rendered, request, multiReferenceTransport)
+    applyExplicitMultiReferenceField(rendered, targetRequest, multiReferenceTransport)
+    applyNegativePromptTransport(rendered, request, negativePromptPlan.transport)
     return rendered
   }
   const nativeRequest = explicitMultiReferenceFieldOwnsTransport(multiReferenceTransport)
-    ? requestWithoutNativeImageParts(request)
+    ? requestWithoutNativeImageParts(targetRequest)
     : ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
-      ? requestWithCanonicalReferenceMessageParts(request, selection)
-      : request
+      ? requestWithCanonicalReferenceMessageParts(targetRequest, selection)
+      : targetRequest
   const body = isClaudeCodeFormat(selection.apiFormat)
     ? toAnthropicBody(nativeRequest, selection)
     : isGeminiNativeFormat(selection.apiFormat)
@@ -677,7 +679,8 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
       : isCodexResponsesFormat(selection.apiFormat)
         ? toCodexResponsesBody(nativeRequest, selection)
         : toOpenAIBody(nativeRequest, selection, multiReferenceTransport)
-  applyExplicitMultiReferenceField(body, request, multiReferenceTransport)
+  applyExplicitMultiReferenceField(body, targetRequest, multiReferenceTransport)
+  applyNegativePromptTransport(body, request, negativePromptPlan.transport)
   return body
 }
 

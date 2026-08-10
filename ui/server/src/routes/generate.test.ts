@@ -5,6 +5,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 
 let workspaces: string[] = []
+const originalFetch = globalThis.fetch
 
 async function tempWorkspace() {
   const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-generate-route-'))
@@ -110,6 +111,7 @@ function compiledSkillResult(overrides: Record<string, any> = {}) {
 }
 
 afterEach(async () => {
+  globalThis.fetch = originalFetch
   await Promise.all(workspaces.map(workspace => rm(workspace, { recursive: true, force: true })))
   workspaces = []
 })
@@ -891,6 +893,131 @@ describe('canvas generate route', () => {
         source_asset_ids: [101],
       },
     })
+  })
+
+  test('keeps compiler output structured when a chat-only compiler targets a media model with a separate negative field', async () => {
+    const workspace = await tempWorkspace()
+    const revision = 'd'.repeat(40)
+    const skillRoot = join(workspace, 'routing-skill-a')
+    await mkdir(skillRoot, { recursive: true })
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([{
+      id: 'image-provider', display_name: 'Image Provider', service_type: 'llm', api_format: 'openai_compatible',
+      auth_type: 'bearer', supported_modalities: ['text_to_image'], default_base_url: 'https://image.example/v1',
+      is_active: true, endpoints: { text_to_image: { url: 'images/generations' } }, custom_headers: {},
+    }]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 41, provider: 'image-provider', key: 'secret-key', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 41, api_key_id: 41, provider: 'image-provider', display_name: 'Target Image', model_name: 'target-image',
+        capabilities: { text_to_image: true, negative_prompt: true }, health_status: 'healthy', context_ui_params: {},
+      },
+      {
+        id: 91, api_key_id: 41, provider: 'image-provider', display_name: 'Compiler', model_name: 'compiler-chat-only',
+        capabilities: { chat: true }, health_status: 'healthy', context_ui_params: {},
+      },
+    ]))
+    const { createPromptCompiler } = await import('../skills/compiler')
+    const { registerGenerateRoutes } = await import('./generate')
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => ({
+        packId: 'routing-pack', directoryName: 'routing-skill', name: 'routing-skill', description: 'route prompts',
+        arguments: [], userInvocable: true, triggerWords: [], mediaModes: ['text_to_image'], compatibility: 'prompt_ready',
+        revision, rootDir: skillRoot, body: 'Return a structured image prompt.', references: [],
+      }) } as any,
+      executeWithRuntimeModel: async () => ({
+        content: JSON.stringify({
+          skill_name: 'routing-skill', skill_version: revision, mode: 'text_to_image',
+          prompt: 'POS', negative_prompt: 'NEG', parameters: {}, references_used: [], warnings: [],
+        }),
+      }),
+    })
+    let providerBody: any
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      providerBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/result.png' }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    const { app, handlers } = createRouteHarness()
+    registerGenerateRoutes(app as any, () => workspace, { compilePromptSkill: compiler })
+
+    const response = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 41, model: 'target-image', type: 'text_to_image', prompt: 'raw prompt',
+        skill_name: 'routing-skill', skill_pack_id: 'routing-pack', compiler_model_id: 91,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({ compiled_prompt: 'POS', compiled_negative_prompt: 'NEG' })
+    expect(providerBody.prompt).toBe('POS')
+    expect(providerBody.negative_prompt).toBe('NEG')
+    expect(JSON.stringify(providerBody).match(/NEG/g)).toHaveLength(1)
+  })
+
+  test('merges a structured negative prompt once when a capable compiler targets a prompt-only media template', async () => {
+    const workspace = await tempWorkspace()
+    const revision = 'e'.repeat(40)
+    const skillRoot = join(workspace, 'routing-skill-b')
+    await mkdir(skillRoot, { recursive: true })
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([{
+      id: 'prompt-provider', display_name: 'Prompt Provider', service_type: 'llm', api_format: 'openai_compatible',
+      auth_type: 'bearer', supported_modalities: ['text_to_image'], default_base_url: 'https://prompt.example/v1',
+      is_active: true,
+      endpoints: { text_to_image: { url: 'images/generations', payload_template: { prompt: '{{prompt}}' } } },
+      custom_headers: {},
+    }]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+      { id: 42, provider: 'prompt-provider', key: 'secret-key', is_active: true },
+    ]))
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([
+      {
+        id: 42, api_key_id: 42, provider: 'prompt-provider', display_name: 'Prompt-only Image', model_name: 'prompt-only-image',
+        capabilities: { text_to_image: true }, health_status: 'healthy', context_ui_params: {},
+      },
+      {
+        id: 92, api_key_id: 42, provider: 'prompt-provider', display_name: 'Compiler', model_name: 'compiler-with-negative',
+        capabilities: { chat: true, negative_prompt: true }, health_status: 'healthy', context_ui_params: {},
+      },
+    ]))
+    const { createPromptCompiler } = await import('../skills/compiler')
+    const { registerGenerateRoutes } = await import('./generate')
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => ({
+        packId: 'routing-pack', directoryName: 'routing-skill', name: 'routing-skill', description: 'route prompts',
+        arguments: [], userInvocable: true, triggerWords: [], mediaModes: ['text_to_image'], compatibility: 'prompt_ready',
+        revision, rootDir: skillRoot, body: 'Return a structured image prompt.', references: [],
+      }) } as any,
+      executeWithRuntimeModel: async () => ({
+        content: JSON.stringify({
+          skill_name: 'routing-skill', skill_version: revision, mode: 'text_to_image',
+          prompt: 'POS', negative_prompt: 'NEG', parameters: {}, references_used: [], warnings: [],
+        }),
+      }),
+    })
+    let providerBody: any
+    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+      providerBody = JSON.parse(String(init?.body || '{}'))
+      return new Response(JSON.stringify({ data: [{ url: 'https://cdn.example/result.png' }] }), {
+        status: 200, headers: { 'content-type': 'application/json' },
+      })
+    }) as typeof fetch
+    const { app, handlers } = createRouteHarness()
+    registerGenerateRoutes(app as any, () => workspace, { compilePromptSkill: compiler })
+
+    const response = await call(handlers.get('POST /api/generate'), {
+      body: {
+        api_key_id: 42, model: 'prompt-only-image', type: 'text_to_image', prompt: 'raw prompt',
+        skill_name: 'routing-skill', skill_pack_id: 'routing-pack', compiler_model_id: 92,
+      },
+    })
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({ compiled_prompt: 'POS', compiled_negative_prompt: 'NEG' })
+    expect(providerBody).toEqual({ prompt: 'POS\n\nNegative prompt: NEG' })
+    expect(JSON.stringify(providerBody).match(/NEG/g)).toHaveLength(1)
   })
 
   test('executes an explicitly pinned duplicate revision and rejects an unpinned duplicate before side effects', async () => {

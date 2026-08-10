@@ -844,7 +844,7 @@ describe('gemini chat-style image generation routing', () => {
     expect(body.size).toBe('1344x768')
   })
 
-  test('forwards negative_prompt only on media payloads', () => {
+  test('forwards declared negative_prompt only on media payloads', () => {
     const mediaBody = buildProviderRequestBody({
       model: 'x',
       messages: [{ role: 'user', content: 'a cat' }],
@@ -853,7 +853,7 @@ describe('gemini chat-style image generation routing', () => {
     } as any, openaiSelection({
       endpoint: 'images/generations',
       routeType: 'text_to_image',
-      model: { ...selection().model, model_name: 'gpt-image-2', capabilities: { text_to_image: true } },
+      model: { ...selection().model, model_name: 'gpt-image-2', capabilities: { text_to_image: true, negative_prompt: true } },
     }))
     expect(mediaBody.negative_prompt).toBe('blurry')
 
@@ -883,6 +883,101 @@ describe('gemini chat-style image generation routing', () => {
       model: 'x', messages: [{ role: 'user', content: 'image prompt' }], type: 'text_to_image', negative_prompt: 'blurry',
     } as any, openaiSelection({ routeConfig, routeType: 'text_to_image' }))
     expect(mediaBody).toEqual({ prompt: 'image prompt', negative: 'blurry' })
+  })
+
+  test('merges a media negative prompt into prompt-only templates exactly once without mutating the request', () => {
+    const request = {
+      model: 'x',
+      prompt: 'POS',
+      messages: [{ role: 'user', content: 'POS' }],
+      type: 'text_to_image',
+      negative_prompt: 'NEG',
+    } as any
+    const original = structuredClone(request)
+    const runtimeSelection = openaiSelection({
+      routeType: 'text_to_image',
+      routeConfig: { payload_template: { prompt: '{{prompt}}' } },
+      model: {
+        ...selection().model,
+        model_name: 'prompt-only-image',
+        capabilities: { text_to_image: true },
+      },
+    })
+
+    const first = buildProviderRequestBody(request, runtimeSelection)
+    const repeated = buildProviderRequestBody(request, runtimeSelection)
+
+    expect(first).toEqual({ prompt: 'POS\n\nNegative prompt: NEG' })
+    expect(repeated).toEqual(first)
+    expect(first.negative_prompt).toBeUndefined()
+    expect(request).toEqual(original)
+  })
+
+  test('renders a recursively consumed negative prompt once and applies declared target fields once', () => {
+    const request = {
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'text_to_image', negative_prompt: 'NEG',
+    } as any
+    const original = structuredClone(request)
+    const tokenBody = buildProviderRequestBody(request, openaiSelection({
+      routeType: 'text_to_image',
+      routeConfig: {
+        negative_prompt: { supported: true, field: 'must_not_duplicate' },
+        payload_template: { payload: { prompt: '{{prompt}}', inputs: [{ negative: '{{negative_prompt}}' }] } },
+      },
+    }))
+    const declaredBody = buildProviderRequestBody(request, openaiSelection({
+      routeType: 'text_to_image',
+      routeConfig: {
+        negative_prompt: { supported: true, field: 'route_negative' },
+        payload_template: { prompt: '{{prompt}}' },
+      },
+      model: {
+        ...selection().model,
+        capabilities: { text_to_image: true, negative_prompt: true },
+        context_ui_params: { text_to_image: [{ name: 'negative_prompt', field: 'model_negative' }] },
+      },
+      provider: {
+        ...selection().provider,
+        context_ui_params: { negative_prompt: { supported: true, field: 'provider_negative' } },
+      } as any,
+    }))
+
+    expect(tokenBody).toEqual({ payload: { prompt: 'POS', inputs: [{ negative: 'NEG' }] } })
+    expect(JSON.stringify(tokenBody).match(/NEG/g)).toHaveLength(1)
+    expect(declaredBody).toEqual({ prompt: 'POS', route_negative: 'NEG' })
+    expect(request).toEqual(original)
+  })
+
+  test('merges undeclared native media negatives while empty and non-media requests retain compatibility', () => {
+    const mediaRequest = {
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'text_to_image', negative_prompt: 'NEG',
+    } as any
+    const chatRequest = { ...mediaRequest, type: 'chat' }
+    const emptyRequest = { ...mediaRequest, negative_prompt: '' }
+    const originals = [mediaRequest, chatRequest, emptyRequest].map(value => structuredClone(value))
+
+    const mediaBody = buildProviderRequestBody(mediaRequest, openaiSelection({
+      endpoint: 'images/generations', routeType: 'text_to_image',
+      model: { ...selection().model, capabilities: { text_to_image: true } },
+    }))
+    const chatBody = buildProviderRequestBody(chatRequest, openaiSelection({
+      endpoint: 'chat/completions', routeType: 'chat',
+      model: { ...selection().model, capabilities: { chat: true } },
+    }))
+    const emptyBody = buildProviderRequestBody(emptyRequest, openaiSelection({
+      endpoint: 'images/generations', routeType: 'text_to_image',
+      model: { ...selection().model, capabilities: { text_to_image: true } },
+    }))
+
+    expect(mediaBody.prompt).toBe('POS\n\nNegative prompt: NEG')
+    expect(mediaBody.negative_prompt).toBeUndefined()
+    expect(chatBody.messages[0].content).toBe('POS')
+    expect(chatBody.negative_prompt).toBeUndefined()
+    expect(emptyBody.prompt).toBe('POS')
+    expect(emptyBody.negative_prompt).toBeUndefined()
+    expect([mediaRequest, chatRequest, emptyRequest]).toEqual(originals)
   })
 
   test('image_to_image request bound for chat endpoint attaches the source image', () => {
