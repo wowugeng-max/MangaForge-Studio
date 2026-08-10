@@ -949,6 +949,158 @@ describe('gemini chat-style image generation routing', () => {
     expect(request).toEqual(original)
   })
 
+  test('rejects route-template token fields that collide with a post-applied transport field', () => {
+    const references = [
+      { url: 'https://example.com/first.png', reference_index: 1, reference_role: 'first_frame' },
+      { url: 'https://example.com/last.png', reference_index: 2, reference_role: 'last_frame' },
+    ]
+    const request = {
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'image_to_video', image_url: references[0].url,
+      reference_images: references, negative_prompt: 'NEG',
+    } as any
+    const original = structuredClone(request)
+    const collisions = [
+      {
+        name: 'template references then declared negative',
+        runtimeSelection: openaiSelection({
+          endpoint: 'videos/generations', routeType: 'image_to_video',
+          routeConfig: {
+            negative_prompt: { supported: true, field: 'assets' },
+            payload_template: { prompt: '{{prompt}}', assets: '{{reference_images}}' },
+          },
+          model: { ...selection().model, capabilities: { image_to_video: true }, context_ui_params: {} },
+        }),
+      },
+      {
+        name: 'declared references then template negative',
+        runtimeSelection: openaiSelection({
+          endpoint: 'videos/generations', routeType: 'image_to_video',
+          routeConfig: { payload_template: { prompt: '{{prompt}}', assets: '{{negative_prompt}}' } },
+          model: {
+            ...selection().model,
+            capabilities: { image_to_video: true },
+            context_ui_params: {
+              multi_reference: { supported: true, field: 'assets', shape: 'urls', max: 9 },
+            },
+          },
+        }),
+      },
+    ]
+
+    for (const collision of collisions) {
+      expect(() => buildProviderRequestBody(request, collision.runtimeSelection), collision.name).toThrow(
+        expect.objectContaining({
+          code: 'MULTI_REFERENCE_UNSUPPORTED',
+          status: 422,
+          message: expect.stringContaining('assets'),
+        }),
+      )
+    }
+    expect(request).toEqual(original)
+  })
+
+  test('keeps exact ordered references and one negative prompt when explicit fields differ', () => {
+    const references = [
+      { url: 'https://example.com/same.png', reference_index: 1, reference_role: 'first_frame', source_asset_ids: [11] },
+      { url: 'https://example.com/same.png', reference_index: 2, reference_role: 'last_frame', source_asset_ids: [12] },
+    ]
+    const request = {
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'image_to_video', image_url: references[0].url,
+      reference_images: references, negative_prompt: 'NEG',
+    } as any
+    const original = structuredClone(request)
+
+    const body = buildProviderRequestBody(request, openaiSelection({
+      endpoint: 'videos/generations', routeType: 'image_to_video',
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'assets', shape: 'metadata', max: 9 },
+          negative_prompt: { supported: true, field: 'negative_text' },
+        },
+      },
+    }))
+
+    expect(body.assets).toEqual(references)
+    expect(body.negative_text).toBe('NEG')
+    expect(body.reference_images).toBeUndefined()
+    expect(JSON.stringify(body).match(/NEG/g)).toHaveLength(1)
+    expect(request).toEqual(original)
+  })
+
+  test('keeps separate nested template token locations collision-free', () => {
+    const references = [
+      { url: 'https://example.com/first.png', reference_index: 1 },
+      { url: 'https://example.com/last.png', reference_index: 2 },
+    ]
+    const body = buildProviderRequestBody({
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'image_to_video', image_url: references[0].url,
+      reference_images: references, negative_prompt: 'NEG',
+    } as any, openaiSelection({
+      endpoint: 'videos/generations', routeType: 'image_to_video',
+      routeConfig: {
+        payload_template: {
+          payload: {
+            references: '{{reference_images}}',
+            negative: '{{negative_prompt}}',
+          },
+        },
+      },
+      model: { ...selection().model, capabilities: { image_to_video: true }, context_ui_params: {} },
+    }))
+
+    expect(body).toEqual({ payload: { references, negative: 'NEG' } })
+  })
+
+  test('does not reserve a declared negative field when the negative prompt is empty', () => {
+    const references = [
+      { url: 'https://example.com/first.png', reference_index: 1 },
+      { url: 'https://example.com/last.png', reference_index: 2 },
+    ]
+    const body = buildProviderRequestBody({
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'image_to_video', image_url: references[0].url,
+      reference_images: references, negative_prompt: '',
+    } as any, openaiSelection({
+      endpoint: 'videos/generations', routeType: 'image_to_video',
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'assets', shape: 'urls', max: 9 },
+          negative_prompt: { supported: true, field: 'assets' },
+        },
+      },
+    }))
+
+    expect(body.assets).toEqual(references.map(reference => reference.url))
+  })
+
+  test('does not reserve a multi-reference field for a legacy single reference', () => {
+    const reference = { url: 'https://example.com/first.png', reference_index: 1 }
+    const body = buildProviderRequestBody({
+      model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'image_to_video', image_url: reference.url,
+      reference_images: [reference], negative_prompt: 'NEG',
+    } as any, openaiSelection({
+      endpoint: 'videos/generations', routeType: 'image_to_video',
+      model: {
+        ...selection().model,
+        capabilities: { image_to_video: true },
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'assets', shape: 'urls', max: 9 },
+          negative_prompt: { supported: true, field: 'assets' },
+        },
+      },
+    }))
+
+    expect(body.assets).toBe('NEG')
+  })
+
   test('merges undeclared native media negatives while empty and non-media requests retain compatibility', () => {
     const mediaRequest = {
       model: 'x', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],

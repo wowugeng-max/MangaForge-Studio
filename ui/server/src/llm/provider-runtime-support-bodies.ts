@@ -35,7 +35,6 @@ import {
 } from './provider-runtime-multi-reference-plan'
 import {
   applyNegativePromptTransport,
-  prepareNegativePromptRequest,
 } from './provider-runtime-negative-prompt'
 
 export { resolveProviderRequestTransportPlan } from './provider-runtime-multi-reference-plan'
@@ -638,9 +637,12 @@ export function parseGeminiGenerateContentResponse<T = any>(raw: any): LLMRespon
 }
 
 export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
-  const { multiReferenceTransport, payloadTemplate } = resolveProviderRequestTransportPlan(request, selection)
   const routeType = requestRouteType(request, selection.model)
-  const negativePromptPlan = prepareNegativePromptRequest(request, selection, routeType, payloadTemplate)
+  const { multiReferenceTransport, negativePromptPlan, payloadTemplate } = resolveProviderRequestTransportPlan(
+    request,
+    selection,
+    routeType,
+  )
   const targetRequest = negativePromptPlan.request
   if (payloadTemplate) {
     const templateContext = buildTemplateContext(targetRequest, selection)

@@ -484,7 +484,7 @@ export function preflightSelectedRuntimeRequestTransport(
   request: LLMRequest,
 ): RuntimeModelSelection {
   const routedSelection = selectionForRequestRoute(selection, request)
-  resolveProviderRequestTransportPlan(request, routedSelection)
+  resolveProviderRequestTransportPlan(request, routedSelection, routedSelection.routeType)
   return routedSelection
 }
 

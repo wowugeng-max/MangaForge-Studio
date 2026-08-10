@@ -202,6 +202,97 @@ describe('codex responses provider runtime a b', () => {
     }
   })
 
+  test('rejects native transport field collisions before fetch or key metrics without mutating references', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-field-collision-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([{
+        id: 'collision-provider',
+        display_name: 'Collision Provider',
+        service_type: 'llm',
+        api_format: 'openai_compatible',
+        auth_type: 'bearer',
+        supported_modalities: ['image_to_video'],
+        default_base_url: 'https://api.example.com/v1',
+        is_active: true,
+        endpoints: {},
+        custom_headers: {},
+      }]))
+      const originalKeysText = `${JSON.stringify([{
+        id: 141,
+        provider: 'collision-provider',
+        key: 'secret-key',
+        is_active: true,
+        failure_count: 4,
+        last_used: '2026-08-01T00:00:00.000Z',
+      }], null, 2)}\n`
+      await writeFile(join(workspace, 'keys.json'), originalKeysText)
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([{
+        id: 141,
+        api_key_id: 141,
+        provider: 'collision-provider',
+        display_name: 'Collision Video',
+        model_name: 'collision-video',
+        capabilities: { image_to_video: true },
+        health_status: 'healthy',
+        context_ui_params: {
+          multi_reference: { supported: true, field: 'assets', shape: 'metadata', max: 9 },
+          negative_prompt: { supported: true, field: 'assets' },
+        },
+      }]))
+
+      let fetchCalls = 0
+      globalThis.fetch = (async () => {
+        fetchCalls += 1
+        throw new Error('field collision must fail before fetch')
+      }) as typeof fetch
+      const request = {
+        model: 'balanced',
+        type: 'image_to_video',
+        image_url: '/first.png',
+        reference_images: [
+          { url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+          { url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+        ],
+        negative_prompt: 'NEG',
+        messages: [{ role: 'user', content: '生成视频' }],
+      } as any
+      const originalRequest = structuredClone(request)
+
+      const preflight = await preflightRuntimeRequestTransport(workspace, request, 141).then(
+        value => ({ value }),
+        error => ({ error }),
+      )
+      const execution = await executeWithRuntimeModel(workspace, request, 141, { maxRetries: 0 }).then(
+        value => ({ value }),
+        error => ({ error }),
+      )
+
+      expect({
+        preflightCode: (preflight as any).error?.code,
+        preflightStatus: (preflight as any).error?.status,
+        preflightDetail: (preflight as any).error?.message,
+        executionCode: (execution as any).error?.code,
+        executionStatus: (execution as any).error?.status,
+        executionResultError: (execution as any).value?.error,
+        fetchCalls,
+        keysText: await readFile(join(workspace, 'keys.json'), 'utf8'),
+        request,
+      }).toEqual({
+        preflightCode: 'MULTI_REFERENCE_UNSUPPORTED',
+        preflightStatus: 422,
+        preflightDetail: expect.stringContaining('assets'),
+        executionCode: 'MULTI_REFERENCE_UNSUPPORTED',
+        executionStatus: 422,
+        executionResultError: undefined,
+        fetchCalls: 0,
+        keysText: originalKeysText,
+        request: originalRequest,
+      })
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('preflight and execute reject deterministic unsafe field or template bodies without fetch or metric writes', async () => {
     const invalidConfigs = [
       {

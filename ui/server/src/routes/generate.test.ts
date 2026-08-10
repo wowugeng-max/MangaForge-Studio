@@ -2219,6 +2219,15 @@ describe('canvas generate route', () => {
 
     const invalidConfigs = [
       {
+        name: 'field-collision-route',
+        endpoints: { image_to_video: { url: 'videos/generations' } },
+        contextUiParams: {
+          multi_reference: { supported: true, field: 'assets', shape: 'urls', max: 9 },
+          negative_prompt: { supported: true, field: 'assets' },
+        },
+        params: { negative_prompt: 'NEG' },
+      },
+      {
         name: 'unsafe-field-route',
         endpoints: { image_to_video: { url: 'videos/generations' } },
         contextUiParams: {
@@ -2282,6 +2291,7 @@ describe('canvas generate route', () => {
         prompt: '生成视频',
         skill_name: 'h3-prompt-writing',
         params: {
+          ...(invalid.params || {}),
           incoming_assets: [
             { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
             { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
