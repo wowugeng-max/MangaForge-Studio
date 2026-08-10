@@ -1126,6 +1126,88 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(result.bindings[0].source_asset_ids).not.toBe(persisted[0].source_asset_ids)
   })
 
+  test('keeps stable connected-source identity across reruns without leaking UI identity into canonical payloads', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const buildIncomingSnapshot = module.buildGenerateNodeIncomingContextSnapshot
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const updateRole = module.updateGenerateNodeReferenceBindingRole
+    const reorderBindings = module.reorderGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildPersistence = module.buildGenerateNodeReferencePersistencePayload
+    const buildPreviewAssets = module.buildGenerateNodeSkillCompileAssets
+    const buildReferencePayload = module.buildGenerateNodeReferencePayload
+    const edges = [
+      { id: 'edge-a', source: 'source-a', target: 'target', targetHandle: 'image' },
+      { id: 'edge-b', source: 'source-b', target: 'target', targetHandle: 'image' },
+    ]
+    const initialSnapshot = buildIncomingSnapshot({
+      nodeId: 'target',
+      edges,
+      nodes: [
+        { id: 'source-a', data: { result: { content: '/a-v1.png', source_asset_ids: [11] } } },
+        { id: 'source-b', data: { result: { content: '/shared.png', source_asset_ids: [22] } } },
+      ],
+    })
+    const initial = normalizeBindings(undefined, initialSnapshot.incomingAssets)
+    const roleA = updateRole(initial, initial[0].reference_id, 'character').bindings
+    const roleB = updateRole(roleA, roleA[1].reference_id, 'style').bindings
+    const reordered = reorderBindings(roleB, 1, 0)
+    const persisted = buildPersistence(reordered).reference_bindings
+    const persistedSnapshot = JSON.parse(JSON.stringify(persisted))
+
+    expect(persisted.map((binding: any) => binding.source_edge_id)).toEqual(['edge-b', 'edge-a'])
+    const rerunSnapshot = buildIncomingSnapshot({
+      nodeId: 'target',
+      edges,
+      nodes: [
+        { id: 'source-a', data: { result: { content: '/shared.png', source_asset_ids: [111] } } },
+        { id: 'source-b', data: { result: { content: '/shared.png', source_asset_ids: [22] } } },
+      ],
+    })
+    const reconciled = reconcileBindings(persisted, rerunSnapshot.incomingAssets, { incomingComplete: true })
+
+    expect(reconciled.validationError).toBeNull()
+    expect(reconciled.bindings).toMatchObject([
+      {
+        reference_id: initial[1].reference_id,
+        reference_role: 'style',
+        url: '/api/assets/media/shared.png',
+        source_asset_ids: [22],
+        source_edge_id: 'edge-b',
+      },
+      {
+        reference_id: initial[0].reference_id,
+        reference_role: 'character',
+        url: '/api/assets/media/shared.png',
+        source_asset_ids: [111],
+        source_edge_id: 'edge-a',
+      },
+    ])
+    expect(reconciled.bindings).toHaveLength(2)
+    expect(persisted).toEqual(persistedSnapshot)
+
+    const canonicalOutputs = [
+      buildPreviewAssets(reconciled.bindings),
+      buildReferencePayload(reconciled.bindings),
+      buildGenerateNodeRequestPayload({
+        id: 'identity-transport', prompt: 'rerun', selectedKey: 7, provider: 'provider-a', selectedModel: 'model-a',
+        mode: 'image_to_image', routingStrategy: 'balanced', params: {}, temperature: 0.7,
+        ratioSize: '1024*1024', selectedRolePrompt: 'director', referenceBindings: reconciled.bindings,
+      } as any),
+      buildGenerateNodeAssetPayload({
+        resultContent: '/generated.png', mode: 'image_to_image', prompt: 'rerun', selectedModel: 'model-a',
+        provider: 'provider-a', selectedRolePrompt: 'director', params: {}, temperature: 0.7,
+        aspectRatio: '1:1', ratioSize: '1024*1024', referenceBindings: reconciled.bindings,
+      } as any),
+    ]
+    for (const output of canonicalOutputs) {
+      const serialized = JSON.stringify(output)
+      expect(serialized).not.toContain('source_edge_id')
+      expect(serialized).not.toContain('source_node_id')
+      expect(serialized).not.toContain('source_handle')
+    }
+  })
+
   test('keeps persisted bindings while linked React Flow sources are unresolved, then removes true disconnects', async () => {
     const module = await loadGenerateNodeReferenceApi()
     const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
@@ -1140,19 +1222,91 @@ describe('GenerateNode ordered reference bindings', () => {
     ], [])
     const unresolved = buildIncomingSnapshot({
       nodeId: 'target',
-      edges: [{ source: 'source-not-mounted', target: 'target', targetHandle: 'image' }],
+      edges: [{ id: 'edge-unresolved', source: 'source-not-mounted', target: 'target', targetHandle: 'image' }],
       nodes: [],
     })
-    expect(unresolved).toMatchObject({ incomingAssets: [], referenceEdgeCount: 1 })
+    expect(unresolved).toMatchObject({
+      incomingAssets: [],
+      referenceEdgeCount: 1,
+      resolvedReferenceEdgeCount: 0,
+      unresolvedReferenceEdgeCount: 1,
+      referenceValidationError: null,
+    })
     expect(reconcileBindings(persisted, unresolved.incomingAssets, {
-      incomingComplete: unresolved.referenceEdgeCount === unresolved.incomingAssets.length,
+      incomingComplete: unresolved.unresolvedReferenceEdgeCount === 0,
     })).toEqual({ bindings: persisted, validationError: null })
 
     const disconnected = buildIncomingSnapshot({ nodeId: 'target', edges: [], nodes: [] })
-    expect(disconnected).toMatchObject({ incomingAssets: [], referenceEdgeCount: 0 })
+    expect(disconnected).toMatchObject({
+      incomingAssets: [],
+      referenceEdgeCount: 0,
+      resolvedReferenceEdgeCount: 0,
+      unresolvedReferenceEdgeCount: 0,
+      referenceValidationError: null,
+    })
     expect(reconcileBindings(persisted, disconnected.incomingAssets, {
-      incomingComplete: disconnected.referenceEdgeCount === disconnected.incomingAssets.length,
+      incomingComplete: disconnected.unresolvedReferenceEdgeCount === 0,
     })).toEqual({ bindings: [], validationError: null })
+  })
+
+  test('treats mounted empty or malformed reference sources as resolved invalid inputs and removes their stale bindings', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = module.reconcileGenerateNodeReferenceBindings
+    const buildIncomingSnapshot = module.buildGenerateNodeIncomingContextSnapshot
+    const persisted = normalizeBindings([
+      {
+        type: 'image', url: '/valid-v1.png', reference_id: 'valid-ref', reference_role: 'character',
+        source_asset_ids: [71], source_edge_id: 'edge-valid', source_node_id: 'source-valid',
+      },
+      {
+        type: 'image', url: '/empty-v1.png', reference_id: 'empty-ref', reference_role: 'scene',
+        source_asset_ids: [72], source_edge_id: 'edge-empty', source_node_id: 'source-empty',
+      },
+      {
+        type: 'prompt', content: 'old prompt', reference_id: 'malformed-ref', reference_role: 'prompt_context',
+        source_asset_ids: [73], source_edge_id: 'edge-malformed', source_node_id: 'source-malformed',
+      },
+    ], [])
+    const snapshot = buildIncomingSnapshot({
+      nodeId: 'target',
+      edges: [
+        { id: 'edge-valid', source: 'source-valid', target: 'target', targetHandle: 'image' },
+        { id: 'edge-empty', source: 'source-empty', target: 'target', targetHandle: 'image' },
+        { id: 'edge-malformed', source: 'source-malformed', target: 'target', targetHandle: 'text' },
+      ],
+      nodes: [
+        { id: 'source-valid', data: { result: { content: '/valid-v2.png', source_asset_ids: [171] } } },
+        { id: 'source-empty', data: { result: { content: '   ', source_asset_ids: [172] } } },
+        { id: 'source-malformed', data: { result: { content: { unexpected: true }, source_asset_ids: [173] } } },
+      ],
+    })
+
+    expect(snapshot).toMatchObject({
+      referenceEdgeCount: 3,
+      resolvedReferenceEdgeCount: 3,
+      unresolvedReferenceEdgeCount: 0,
+      referenceValidationError: {
+        error_code: 'REFERENCE_ASSET_INVALID',
+      },
+    })
+    expect(snapshot.incomingAssets).toMatchObject([
+      {
+        type: 'image', url: '/api/assets/media/valid-v2.png', source_asset_ids: [171],
+        source_edge_id: 'edge-valid', source_node_id: 'source-valid',
+      },
+    ])
+
+    const reconciled = reconcileBindings(persisted, snapshot.incomingAssets, {
+      incomingComplete: snapshot.unresolvedReferenceEdgeCount === 0,
+    })
+    expect(reconciled.validationError).toBeNull()
+    expect(reconciled.bindings).toMatchObject([
+      {
+        reference_id: 'valid-ref', reference_role: 'character', url: '/api/assets/media/valid-v2.png',
+        source_asset_ids: [171], source_edge_id: 'edge-valid',
+      },
+    ])
   })
 
   test('flows role and order edits through persistence, hydration, preview assets, request payload, and compile fingerprint', async () => {
@@ -1290,6 +1444,109 @@ describe('GenerateNode ordered reference bindings', () => {
       previewBlocked: true,
       runBlocked: true,
     })
+  })
+
+  test('gates programmatic runs with the shared block state before starting any transport', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const resolveBlockState = module.resolveGenerateNodeExecutionBlockState
+    expect(resolveBlockState({
+      executionCompatibilityError: { error_code: 'MULTI_REFERENCE_UNSUPPORTED', detail: 'provider accepts one image only' },
+    })).toMatchObject({ previewBlocked: false, runBlocked: true })
+    expect(resolveBlockState({
+      referenceValidationError: { error_code: 'REFERENCE_ASSET_INVALID', detail: 'empty mounted source' },
+    })).toMatchObject({ previewBlocked: true, runBlocked: true })
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const handleRunStart = source.indexOf('const handleRun = async () => {')
+    const runSignalEffectStart = source.indexOf('useEffect(() => {', handleRunStart)
+    const handleRunSource = source.slice(handleRunStart, runSignalEffectStart)
+    expect(handleRunSource).toContain('if (runBlocked) {')
+    expect(handleRunSource.indexOf('if (runBlocked) {')).toBeLessThan(handleRunSource.indexOf('if (!selectedKey || !selectedModel)'))
+    expect(handleRunSource.indexOf('if (runBlocked) {')).toBeLessThan(handleRunSource.indexOf('createSSEClient'))
+    expect(handleRunSource).toContain('executionCompatibilityError.error_code')
+    expect(handleRunSource).toContain('effectiveReferenceValidationError.error_code')
+
+    const runSignalSource = source.slice(runSignalEffectStart, source.indexOf('const handleInterrupt', runSignalEffectStart))
+    expect(runSignalSource).toContain('void handleRun()')
+  })
+
+  test('freezes canonical execution references and deduped lineage without mutating inputs', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const freezeExecutionReferences = module.freezeGenerateNodeExecutionReferences
+    expect(typeof freezeExecutionReferences).toBe('function')
+    if (typeof freezeExecutionReferences !== 'function') return
+
+    const executionBindings = normalizeBindings([
+      {
+        type: 'image', url: '/reference.png', reference_id: 'reference-a', reference_role: 'character',
+        source_asset_ids: [11, 22], source_edge_id: 'edge-a', source_node_id: 'source-a', source_handle: 'out',
+      },
+      {
+        type: 'prompt', content: 'ink style', reference_id: 'reference-b', reference_role: 'style',
+        source_asset_ids: [22, 33], source_edge_id: 'edge-b', source_node_id: 'source-b',
+      },
+    ], [])
+    const packet = { content: '/generated.png', source_asset_ids: [99, 11] }
+    const executionSnapshot = JSON.parse(JSON.stringify(executionBindings))
+    const packetSnapshot = JSON.parse(JSON.stringify(packet))
+
+    const frozen = freezeExecutionReferences(packet, executionBindings)
+    expect(frozen.reference_bindings).toEqual([
+      {
+        reference_index: 1, reference_id: 'reference-a', reference_role: 'character', type: 'image',
+        url: '/api/assets/media/reference.png', source_asset_ids: [11, 22],
+      },
+      {
+        reference_index: 2, reference_id: 'reference-b', reference_role: 'style', type: 'prompt',
+        content: 'ink style', source_asset_ids: [22, 33],
+      },
+    ])
+    expect(frozen.source_asset_ids).toEqual([99, 11, 22, 33])
+    expect(JSON.stringify(frozen)).not.toContain('source_edge_id')
+    expect(executionBindings).toEqual(executionSnapshot)
+    expect(packet).toEqual(packetSnapshot)
+
+    executionBindings[0].url = '/changed-after-run.png'
+    executionBindings[0].source_asset_ids![0] = 777
+    packet.source_asset_ids[0] = 888
+    expect(frozen.reference_bindings[0]).toMatchObject({
+      url: '/api/assets/media/reference.png', source_asset_ids: [11, 22],
+    })
+    expect(frozen.source_asset_ids).toEqual([99, 11, 22, 33])
+  })
+
+  test('uses the active run reference snapshot for result, downstream, and saved provenance', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('const activeRunReferenceBindingsRef = useRef<GenerateNodeReferenceBinding[] | null>(null)')
+
+    const handleRunStart = source.indexOf('const handleRun = async () => {')
+    const runSignalEffectStart = source.indexOf('useEffect(() => {', handleRunStart)
+    const handleRunSource = source.slice(handleRunStart, runSignalEffectStart)
+    expect(handleRunSource.indexOf('activeRunReferenceBindingsRef.current =')).toBeGreaterThan(-1)
+    expect(handleRunSource.indexOf('activeRunReferenceBindingsRef.current =')).toBeLessThan(handleRunSource.indexOf('createSSEClient'))
+
+    const finishStart = source.indexOf('const finishGeneration =')
+    const failStart = source.indexOf('const failGeneration =', finishStart)
+    const finishSource = source.slice(finishStart, failStart)
+    expect(finishSource).toContain('freezeGenerateNodeExecutionReferences')
+    expect(finishSource).toContain('activeRunReferenceBindingsRef.current')
+    expect(finishSource).toContain('result: finalResult')
+    expect(finishSource).toContain('incoming_data: finalResult')
+    expect(finishSource).toContain('activeRunReferenceBindingsRef.current = null')
+
+    const failSource = source.slice(failStart, source.indexOf('const handleSSEMessage', failStart))
+    expect(failSource).toContain('activeRunReferenceBindingsRef.current = null')
+
+    const saveStart = source.indexOf('const handleSaveToAsset =')
+    const saveEnd = source.indexOf('const commitReferenceBindings =', saveStart)
+    const saveSource = source.slice(saveStart, saveEnd)
+    expect(saveSource).toContain('Array.isArray(result?.reference_bindings)')
+    expect(saveSource).toContain('const savedReferenceBindings =')
+    expect(saveSource).toContain('referenceBindings: savedReferenceBindings')
+
+    const skillAuditKeysSource = source.slice(source.indexOf('const SKILL_AUDIT_KEYS ='), source.indexOf('function withoutSkillAudit'))
+    expect(skillAuditKeysSource).not.toContain("'reference_bindings'")
   })
 
   test('preserves compiler-owned reference audit fields across packets and asset provenance', async () => {
@@ -1457,6 +1714,56 @@ describe('GenerateNode Skill review regressions', () => {
     expect(source).toContain('const incomingContext = useStore(')
     expect(source).toContain('state.nodeInternals')
     expect(source).not.toContain('const collectIncomingContext = () => {')
+  })
+
+  test('invalidates first-mount compile audit only when canonical reconciled references changed', async () => {
+    const module = await import('./GenerateNode')
+    const normalizeBindings = (module as any).normalizeGenerateNodeReferenceBindings
+    const reconcileBindings = (module as any).reconcileGenerateNodeReferenceBindings
+    const shouldInvalidateInitialAudit = (module as any).shouldInvalidateGenerateNodeInitialCompileAudit
+    expect(typeof shouldInvalidateInitialAudit).toBe('function')
+    if (typeof shouldInvalidateInitialAudit !== 'function') return
+
+    const persisted = normalizeBindings([
+      {
+        type: 'image', url: '/old.png', reference_id: 'reference-a', reference_role: 'character',
+        source_asset_ids: [11], source_edge_id: 'edge-a', source_node_id: 'source-a',
+      },
+    ], [])
+    const changed = reconcileBindings(persisted, [
+      {
+        type: 'image', url: '/new.png', source_asset_ids: [22],
+        source_edge_id: 'edge-a', source_node_id: 'source-a',
+      },
+    ], { incomingComplete: true })
+    expect(changed.validationError).toBeNull()
+    expect(shouldInvalidateInitialAudit(persisted, changed.bindings)).toBe(true)
+
+    const unchanged = reconcileBindings(persisted, [
+      {
+        type: 'image', url: '/old.png', source_asset_ids: [11],
+        source_edge_id: 'edge-a', source_node_id: 'source-a',
+      },
+    ], { incomingComplete: true })
+    expect(unchanged.validationError).toBeNull()
+    expect(shouldInvalidateInitialAudit(persisted, unchanged.bindings)).toBe(false)
+
+    const identityMigration = reconcileBindings([
+      {
+        type: 'image', url: '/old.png', reference_id: 'reference-a', reference_role: 'character', source_asset_ids: [11],
+      },
+    ], [
+      {
+        type: 'image', url: '/old.png', source_asset_ids: [11],
+        source_edge_id: 'edge-a', source_node_id: 'source-a',
+      },
+    ], { incomingComplete: true })
+    expect(shouldInvalidateInitialAudit(persisted.map(({ source_edge_id: _edge, source_node_id: _node, ...binding }: any) => binding), identityMigration.bindings)).toBe(false)
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('const initialReferenceBindingsChangedRef = useRef(')
+    expect(source).toContain('initialReferenceBindingsChangedRef.current = false')
+    expect(source).toContain('if (previous === null && !initialReferenceBindingsChanged) return')
   })
 
   test('normalizes and persists command Skill arguments independently across canvas reloads', async () => {

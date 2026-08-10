@@ -37,6 +37,7 @@ import {
   PRESET_ROLES,
   areGenerateNodeIncomingContextSnapshotsEqual,
   buildGenerateNodeAssetPayload,
+  buildGenerateNodeCanonicalReferenceBindings,
   buildGenerateNodeReferenceBindingsFingerprint,
   buildGenerateNodeIncomingContextSnapshot,
   buildGenerateNodeReferencePersistencePayload,
@@ -45,6 +46,7 @@ import {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
+  freezeGenerateNodeExecutionReferences,
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
@@ -61,6 +63,7 @@ import {
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
+  shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
 import type {
@@ -87,6 +90,7 @@ export {
   resolveGenerateNodeSourceAssetIds,
   isGenerateNodeMuted,
   buildGenerateNodeAssetPayload,
+  buildGenerateNodeCanonicalReferenceBindings,
   normalizeGenerateNodeGenerationPacket,
   buildGenerateNodeResultWithFission,
   buildGenerateNodeRequestPayload,
@@ -97,6 +101,7 @@ export {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillIdentity,
   createGenerateNodePreviewRequestTracker,
+  freezeGenerateNodeExecutionReferences,
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
@@ -106,6 +111,7 @@ export {
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeSkillArguments,
+  shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
 } from './generate-node-model'
@@ -128,7 +134,7 @@ const SKILL_AUDIT_KEYS = [
   'skill_pack_id', 'skill_pack_source', 'skill_name', 'skill_revision',
   'compiled_prompt', 'compiled_negative_prompt', 'compiled_references',
   'compiled_input_hash', 'warnings', 'compiler_model_id', 'raw_prompt',
-  'reference_bindings', 'reference_mode_hint',
+  'reference_mode_hint',
 ]
 
 function withoutSkillAudit(value: any) {
@@ -227,25 +233,31 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillPreviewCached, setSkillPreviewCached] = useState(Boolean(data?.skillPreviewCached))
   const [skillPreviewLoading, setSkillPreviewLoading] = useState(false)
   const [skillPreviewError, setSkillPreviewError] = useState<Pick<CanvasSkillApiError, 'error_code' | 'detail'> | null>(null)
+  const persistedReferenceBindings = data?.referenceBindings ?? data?.reference_bindings
   const initialReferenceReconcileRef = useRef<ReturnType<typeof reconcileGenerateNodeReferenceBindings> | null>(null)
   if (initialReferenceReconcileRef.current === null) {
     initialReferenceReconcileRef.current = reconcileGenerateNodeReferenceBindings(
-      data?.referenceBindings ?? data?.reference_bindings,
+      persistedReferenceBindings,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
     )
   }
+  const initialReferenceBindingsChangedRef = useRef(shouldInvalidateGenerateNodeInitialCompileAudit(
+    persistedReferenceBindings,
+    initialReferenceReconcileRef.current.bindings,
+  ))
   const [referenceBindings, setReferenceBindings] = useState<GenerateNodeReferenceBinding[]>(() => (
     initialReferenceReconcileRef.current?.bindings || []
   ))
   const [referenceValidationError, setReferenceValidationError] = useState<GenerateNodeReferenceValidationState | null>(() => (
-    initialReferenceReconcileRef.current?.validationError || null
+    incomingContext.referenceValidationError || initialReferenceReconcileRef.current?.validationError || null
   ))
   const [executionCompatibilityError, setExecutionCompatibilityError] = useState<GenerateNodeExecutionCompatibilityError | null>(() => (
     parseGenerateNodeExecutionCompatibilityError(data?.executionCompatibilityError ?? data?.execution_compatibility_error)
   ))
   const referenceBindingsRef = useRef(referenceBindings)
   referenceBindingsRef.current = referenceBindings
+  const activeRunReferenceBindingsRef = useRef<GenerateNodeReferenceBinding[] | null>(null)
   const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
@@ -377,9 +389,9 @@ function GenerateNodeImpl(props: NodeProps) {
     const reconciled = reconcileGenerateNodeReferenceBindings(
       referenceBindingsRef.current,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
     )
-    setReferenceValidationError(reconciled.validationError)
+    setReferenceValidationError(incomingContext.referenceValidationError || reconciled.validationError)
     const currentFingerprint = buildGenerateNodeReferenceBindingsFingerprint(referenceBindingsRef.current)
     const nextFingerprint = buildGenerateNodeReferenceBindingsFingerprint(reconciled.bindings)
     if (currentFingerprint !== nextFingerprint) setReferenceBindings(reconciled.bindings)
@@ -554,6 +566,7 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => () => {
     sseClientRef.current?.disconnect()
     sseClientRef.current = null
+    activeRunReferenceBindingsRef.current = null
   }, [])
 
   useEffect(() => {
@@ -594,8 +607,11 @@ function GenerateNodeImpl(props: NodeProps) {
 
   useEffect(() => {
     const previous = previousCompileInputFingerprintRef.current
+    const initialReferenceBindingsChanged = initialReferenceBindingsChangedRef.current
+    initialReferenceBindingsChangedRef.current = false
     previousCompileInputFingerprintRef.current = compileInputFingerprint
-    if (previous === null || previous === compileInputFingerprint) return
+    if (previous === null && !initialReferenceBindingsChanged) return
+    if (previous === compileInputFingerprint) return
 
     skillPreviewRequestTrackerRef.current.invalidate()
     setSkillPreviewLoading(false)
@@ -757,16 +773,23 @@ function GenerateNodeImpl(props: NodeProps) {
     const currentNodeData = useCanvasStore.getState().nodes.find(node => node.id === id)?.data || data
     const expectedCountRaw = currentNodeData?._fissionExpectedCount
     const expectedCount = Number.isFinite(Number(expectedCountRaw)) ? Number(expectedCountRaw) : null
-    const finalResult = buildGenerateNodeResultWithFission({
+    const packetResult = buildGenerateNodeResultWithFission({
       packet,
       fissionEnabled: Boolean(currentNodeData?._fissionEnabled),
       expectedCount,
       onCountMismatch: ({ expected, actual }) => message.warning(`裂变数量校验失败：期望 ${expected} 条，实际 ${actual} 条，已回退普通输出`),
     })
-    const resultReferenceAudit = Array.isArray(finalResult?.reference_bindings)
-      ? reconcileGenerateNodeReferenceBindings(undefined, finalResult.reference_bindings)
+    const activeRunReferenceBindings = activeRunReferenceBindingsRef.current
+      ? buildGenerateNodeCanonicalReferenceBindings(activeRunReferenceBindingsRef.current)
+      : buildGenerateNodeCanonicalReferenceBindings(referenceBindingsRef.current)
+    const resultReferenceAudit = Array.isArray(packetResult?.reference_bindings)
+      ? reconcileGenerateNodeReferenceBindings(undefined, packetResult.reference_bindings)
       : null
-    const compilerOwnedBindings = resultReferenceAudit && !resultReferenceAudit.validationError ? resultReferenceAudit.bindings : referenceBindings
+    const frozenReferenceBindings = resultReferenceAudit && !resultReferenceAudit.validationError
+      ? resultReferenceAudit.bindings
+      : activeRunReferenceBindings
+    const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
+    const compilerOwnedBindings = finalResult.reference_bindings
 
     if (finalResult?.compiled_prompt !== undefined) {
       const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
@@ -821,6 +844,7 @@ function GenerateNodeImpl(props: NodeProps) {
         compiler_model_id: finalResult.compiler_model_id,
       } : {}),
     })
+    activeRunReferenceBindingsRef.current = null
     setNodeStatus(id, 'success')
     setGenerating(false)
     setProgressMsg('')
@@ -843,6 +867,7 @@ function GenerateNodeImpl(props: NodeProps) {
   }
 
   const failGeneration = (error: unknown) => {
+    activeRunReferenceBindingsRef.current = null
     const compatibilityError = parseGenerateNodeExecutionCompatibilityError(error)
     if (compatibilityError) setExecutionCompatibilityError(compatibilityError)
     const value = error as any
@@ -882,20 +907,30 @@ function GenerateNodeImpl(props: NodeProps) {
   }
 
   const handleRun = async () => {
+    if (runBlocked) {
+      setNodeStatus(id, 'error')
+      if (executionCompatibilityError) {
+        return message.error(`${executionCompatibilityError.error_code}: ${executionCompatibilityError.detail}`)
+      }
+      if (effectiveReferenceValidationError) {
+        return message.error(`${effectiveReferenceValidationError.error_code}: ${effectiveReferenceValidationError.detail}`)
+      }
+      if (effectiveSkillIncompatible) {
+        return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容，请更换或清除`)
+      }
+      if (missingEffectiveCompilerModel) {
+        return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
+      }
+      return message.error('当前配置不可运行')
+    }
     if (!selectedKey || !selectedModel) {
       setNodeStatus(id, 'error')
       return message.warning('请完整选择 Key 和 模型')
     }
-    if (effectiveSkillIncompatible) {
-      setNodeStatus(id, 'error')
-      return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容，请更换或清除`)
-    }
-    if (missingEffectiveCompilerModel) {
-      setNodeStatus(id, 'error')
-      return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
-    }
     const executableReferenceBindings = prepareReferenceBindingsForExecution()
     if (executableReferenceBindings === null) return
+    const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(executableReferenceBindings)
+    activeRunReferenceBindingsRef.current = executionReferenceBindings
     setGenerating(true)
     setProgressMsg('正在连接实时通道...')
     setNodeStatus(id, 'running')
@@ -909,7 +944,7 @@ function GenerateNodeImpl(props: NodeProps) {
       await sseClient.connect()
 
       setProgressMsg('正在唤醒云端大脑...')
-      const payload = buildPayload(executableReferenceBindings)
+      const payload = buildPayload(executionReferenceBindings)
       const res = await apiClient.request({ url: '/generate', method: 'POST', data: payload })
 
       if (res.data?.client_id && !hasImmediateGenerationResult(res.data)) {
@@ -941,6 +976,12 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const handleSaveToAsset = async () => {
     if (!result?.content) return
+    const resultReferenceAudit = Array.isArray(result?.reference_bindings)
+      ? reconcileGenerateNodeReferenceBindings(undefined, result.reference_bindings)
+      : null
+    const savedReferenceBindings = resultReferenceAudit && !resultReferenceAudit.validationError
+      ? resultReferenceAudit.bindings
+      : referenceBindings
     try {
       await apiClient.post('/assets/', buildGenerateNodeAssetPayload({
         resultContent: String(result.content),
@@ -956,7 +997,7 @@ function GenerateNodeImpl(props: NodeProps) {
         projectId,
         cameraParams,
         sourceAssetIds: result?.source_asset_ids,
-        referenceBindings,
+        referenceBindings: savedReferenceBindings,
         referenceModeHint: String(result?.reference_mode_hint || referenceModeHint || ''),
         ...(result?.compiled_prompt !== undefined ? {
           compiledPrompt: result.compiled_prompt,
@@ -982,9 +1023,9 @@ function GenerateNodeImpl(props: NodeProps) {
     const reconciled = reconcileGenerateNodeReferenceBindings(
       nextBindings,
       incomingContext.incomingAssets,
-      { incomingComplete: incomingContext.referenceEdgeCount === incomingContext.incomingAssets.length },
+      { incomingComplete: incomingContext.unresolvedReferenceEdgeCount === 0 },
     )
-    setReferenceValidationError(reconciled.validationError)
+    setReferenceValidationError(incomingContext.referenceValidationError || reconciled.validationError)
     setReferenceBindings(reconciled.bindings)
   }
 

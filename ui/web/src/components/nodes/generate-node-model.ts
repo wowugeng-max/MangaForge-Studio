@@ -82,7 +82,7 @@ export function resolveGenerateNodePreviewMediaSrc(content: string, apiBaseURL?:
   return buildAssetMediaUrl(value, apiBaseURL)
 }
 
-export function resolveGenerateNodeSourceContent(sourceData: any) {
+function resolveGenerateNodeSourceContentValue(sourceData: any) {
   const assetData = sourceData?.asset?.data
   const incomingData = sourceData?.incoming_data
   const assetIsCharacter = sourceData?.asset?.type === 'character'
@@ -103,7 +103,11 @@ export function resolveGenerateNodeSourceContent(sourceData: any) {
     pickMediaResultContent(incomingData),
     typeof incomingData === 'string' ? incomingData : '',
   ]
-  const found = candidates.find(value => value !== undefined && value !== null && String(value).trim())
+  return candidates.find(value => value !== undefined && value !== null && String(value).trim())
+}
+
+export function resolveGenerateNodeSourceContent(sourceData: any) {
+  const found = resolveGenerateNodeSourceContentValue(sourceData)
   return found === undefined || found === null ? '' : String(found)
 }
 
@@ -114,6 +118,9 @@ export type GenerateNodeIncomingAsset = {
   file_path?: string
   url?: string
   source_asset_ids?: number[]
+  source_edge_id?: string
+  source_node_id?: string
+  source_handle?: string
   reference_index?: number
   reference_id?: string
   reference_role?: GenerateNodeReferenceRole
@@ -140,6 +147,9 @@ export type GenerateNodeReferenceBinding = {
   url?: string
   content?: string
   source_asset_ids?: number[]
+  source_edge_id?: string
+  source_node_id?: string
+  source_handle?: string
 }
 
 export type GenerateNodeReferenceErrorCode =
@@ -326,29 +336,58 @@ export type GenerateNodeIncomingContextSnapshot = {
   incomingAssets: GenerateNodeIncomingAsset[]
   externalSystemPrompt: string
   referenceEdgeCount: number
+  resolvedReferenceEdgeCount: number
+  unresolvedReferenceEdgeCount: number
+  referenceValidationError: GenerateNodeReferenceValidationState | null
   fingerprint: string
 }
 
 export function buildGenerateNodeIncomingContextSnapshot(input: {
   nodeId: string
-  edges: Array<{ source: string; target: string; targetHandle?: string | null }>
+  edges: Array<{ id?: string; source: string; target: string; sourceHandle?: string | null; targetHandle?: string | null }>
   nodes: Array<{ id: string; data?: any }>
 }): GenerateNodeIncomingContextSnapshot {
   const incomingAssets: GenerateNodeIncomingAsset[] = []
   let externalSystemPrompt = ''
   const incomingEdges = input.edges.filter(edge => edge.target === input.nodeId)
   const referenceEdgeCount = incomingEdges.filter(edge => edge.targetHandle === 'text' || edge.targetHandle === 'image').length
+  let resolvedReferenceEdgeCount = 0
+  let unresolvedReferenceEdgeCount = 0
+  let referenceValidationError: GenerateNodeReferenceValidationState | null = null
+  let referenceIndex = 0
   incomingEdges.forEach(edge => {
+    const isReferenceEdge = edge.targetHandle === 'text' || edge.targetHandle === 'image'
+    if (isReferenceEdge) referenceIndex += 1
     const sourceNode = input.nodes.find(node => node.id === edge.source)
-    if (!sourceNode) return
-    const sourceContent = resolveGenerateNodeSourceContent(sourceNode.data)
+    if (!sourceNode) {
+      if (isReferenceEdge) unresolvedReferenceEdgeCount += 1
+      return
+    }
+    if (isReferenceEdge) resolvedReferenceEdgeCount += 1
+    const rawSourceContent = resolveGenerateNodeSourceContentValue(sourceNode.data)
+    const sourceContent = typeof rawSourceContent === 'string' ? rawSourceContent : ''
     const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
     const sourceAssetId = sourceAssetIds[0]
+    const sourceIdentity = {
+      ...(typeof edge.id === 'string' && edge.id.trim() ? { source_edge_id: edge.id.trim() } : {}),
+      source_node_id: edge.source,
+      ...(typeof edge.sourceHandle === 'string' && edge.sourceHandle.trim() ? { source_handle: edge.sourceHandle.trim() } : {}),
+    }
+    if (isReferenceEdge && !sourceContent.trim()) {
+      if (!referenceValidationError) {
+        referenceValidationError = {
+          error_code: 'REFERENCE_ASSET_INVALID',
+          detail: `Reference source ${edge.source} has no valid ${edge.targetHandle} content`,
+          reference_index: referenceIndex,
+        }
+      }
+      return
+    }
     if (edge.targetHandle === 'text' && sourceContent) {
-      incomingAssets.push({ id: sourceAssetId, type: 'prompt', content: String(sourceContent), source_asset_ids: sourceAssetIds })
+      incomingAssets.push({ id: sourceAssetId, type: 'prompt', content: String(sourceContent), source_asset_ids: sourceAssetIds, ...sourceIdentity })
     } else if (edge.targetHandle === 'image' && sourceContent) {
       const url = normalizeGenerateNodeImageUrl(String(sourceContent))
-      incomingAssets.push({ id: sourceAssetId, type: 'image', file_path: url, url, source_asset_ids: sourceAssetIds })
+      incomingAssets.push({ id: sourceAssetId, type: 'image', file_path: url, url, source_asset_ids: sourceAssetIds, ...sourceIdentity })
     } else if (edge.targetHandle === 'system' && sourceContent) {
       externalSystemPrompt = String(sourceContent)
     }
@@ -357,7 +396,17 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
     incomingAssets,
     externalSystemPrompt,
     referenceEdgeCount,
-    fingerprint: JSON.stringify({ incomingAssets, externalSystemPrompt, referenceEdgeCount }),
+    resolvedReferenceEdgeCount,
+    unresolvedReferenceEdgeCount,
+    referenceValidationError,
+    fingerprint: JSON.stringify({
+      incomingAssets,
+      externalSystemPrompt,
+      referenceEdgeCount,
+      resolvedReferenceEdgeCount,
+      unresolvedReferenceEdgeCount,
+      referenceValidationError,
+    }),
   }
 }
 
@@ -533,6 +582,12 @@ export function normalizeGenerateNodeReferenceBindings(
 
     const sourceAssetIds = normalizeGenerateNodeReferenceLineage(rawAsset, referenceIndex)
     if (sourceAssetIds.length) binding.source_asset_ids = sourceAssetIds
+    const sourceEdgeId = rawAsset.source_edge_id ?? rawAsset.sourceEdgeId
+    const sourceNodeId = rawAsset.source_node_id ?? rawAsset.sourceNodeId
+    const sourceHandle = rawAsset.source_handle ?? rawAsset.sourceHandle
+    if (typeof sourceEdgeId === 'string' && sourceEdgeId.trim()) binding.source_edge_id = sourceEdgeId.trim()
+    if (typeof sourceNodeId === 'string' && sourceNodeId.trim()) binding.source_node_id = sourceNodeId.trim()
+    if (typeof sourceHandle === 'string' && sourceHandle.trim()) binding.source_handle = sourceHandle.trim()
     return binding
   })
 
@@ -622,6 +677,18 @@ function generateNodeReferenceLineageMatches(
   return Boolean(existing.source_asset_ids?.some(id => candidateIds.has(id)))
 }
 
+function generateNodeReferenceSourceIdentityMatches(
+  existing: GenerateNodeReferenceBinding,
+  candidate: GenerateNodeReferenceBinding,
+) {
+  if (existing.source_edge_id && candidate.source_edge_id) {
+    return existing.source_edge_id === candidate.source_edge_id
+  }
+  if (!existing.source_node_id || !candidate.source_node_id) return false
+  return existing.source_node_id === candidate.source_node_id
+    && (existing.source_handle || '') === (candidate.source_handle || '')
+}
+
 export function reconcileGenerateNodeReferenceBindings(
   persisted: unknown,
   incomingAssets: readonly GenerateNodeIncomingAsset[] = [],
@@ -661,9 +728,12 @@ export function reconcileGenerateNodeReferenceBindings(
   )
 
   existing.forEach(binding => {
-    let incomingIndex = findIncoming((candidate, index) => (
-      Boolean(explicitIncomingIds[index]) && explicitIncomingIds[index] === binding.reference_id
-    ))
+    let incomingIndex = findIncoming(candidate => generateNodeReferenceSourceIdentityMatches(binding, candidate))
+    if (incomingIndex < 0) {
+      incomingIndex = findIncoming((candidate, index) => (
+        Boolean(explicitIncomingIds[index]) && explicitIncomingIds[index] === binding.reference_id
+      ))
+    }
     if (incomingIndex < 0) {
       incomingIndex = findIncoming(candidate => generateNodeReferenceLineageMatches(binding, candidate))
     }
@@ -744,10 +814,37 @@ export function buildGenerateNodeReferenceBindingsFingerprint(
   })))
 }
 
+export function shouldInvalidateGenerateNodeInitialCompileAudit(
+  persisted: unknown,
+  reconciled: readonly GenerateNodeReferenceBinding[],
+) {
+  try {
+    const persistedBindings = normalizeGenerateNodeReferenceBindings(persisted ?? [], [])
+    return buildGenerateNodeReferenceBindingsFingerprint(persistedBindings)
+      !== buildGenerateNodeReferenceBindingsFingerprint(reconciled)
+  } catch {
+    return true
+  }
+}
+
+export function buildGenerateNodeCanonicalReferenceBindings(
+  bindings: readonly GenerateNodeReferenceBinding[],
+): GenerateNodeReferenceBinding[] {
+  return normalizeGenerateNodeReferenceBindings(bindings, []).map(binding => ({
+    reference_index: binding.reference_index,
+    reference_id: binding.reference_id,
+    reference_role: binding.reference_role,
+    type: binding.type,
+    ...(binding.url ? { url: binding.url } : {}),
+    ...(binding.content ? { content: binding.content } : {}),
+    ...(binding.source_asset_ids?.length ? { source_asset_ids: [...binding.source_asset_ids] } : {}),
+  }))
+}
+
 export function buildGenerateNodeSkillCompileAssets(
   bindings: readonly GenerateNodeReferenceBinding[],
 ) {
-  return cloneGenerateNodeReferenceBindings(validateGenerateNodeReferenceBindingsForExecution(bindings))
+  return buildGenerateNodeCanonicalReferenceBindings(validateGenerateNodeReferenceBindingsForExecution(bindings))
 }
 
 export function parseGenerateNodeExecutionCompatibilityError(
@@ -779,7 +876,7 @@ export function resolveGenerateNodeExecutionBlockState(input: {
 }
 
 export function buildGenerateNodeReferencePayload(bindings: readonly GenerateNodeReferenceBinding[]) {
-  const referenceBindings = normalizeGenerateNodeReferenceBindings(bindings, [])
+  const referenceBindings = buildGenerateNodeCanonicalReferenceBindings(bindings)
   return {
     reference_bindings: referenceBindings,
     reference_images: referenceBindings
@@ -857,7 +954,7 @@ export function buildGenerateNodeAssetPayload(input: {
     : []
   const referenceBindings = input.referenceBindings === undefined
     ? undefined
-    : normalizeGenerateNodeReferenceBindings(input.referenceBindings, [])
+    : buildGenerateNodeCanonicalReferenceBindings(input.referenceBindings)
   const mergedSourceAssetIds = referenceBindings === undefined
     ? sourceAssetIds
     : Array.from(new Set([
@@ -952,6 +1049,30 @@ export function normalizeGenerateNodeGenerationPacket(packet: any) {
   return typeof content === 'string'
     ? { content, ...compileAudit, ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}) }
     : content || packet
+}
+
+export function freezeGenerateNodeExecutionReferences(
+  packet: any,
+  executionBindings: readonly GenerateNodeReferenceBinding[],
+): any {
+  const packetRecord = packet && typeof packet === 'object' && !Array.isArray(packet)
+    ? packet as Record<string, any>
+    : { content: packet }
+  const referenceBindings = buildGenerateNodeCanonicalReferenceBindings(executionBindings)
+  const sourceAssetIds = Array.from(new Set([
+    ...normalizeGenerateNodeSourceAssetIds(packetRecord.source_asset_ids),
+    ...referenceBindings.flatMap(binding => binding.source_asset_ids || []),
+  ]))
+  const {
+    reference_bindings: _packetReferenceBindings,
+    source_asset_ids: _packetSourceAssetIds,
+    ...packetWithoutReferences
+  } = packetRecord
+  return {
+    ...packetWithoutReferences,
+    ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
+    reference_bindings: referenceBindings,
+  }
 }
 
 export function buildGenerateNodeResultWithFission(input: {
