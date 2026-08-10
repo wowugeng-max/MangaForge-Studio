@@ -387,6 +387,104 @@ describe('prompt compiler', () => {
     }
   })
 
+  test('compiles the public H3 fixture with stable ordered multi-reference hashes and distinct reordered hashes', async () => {
+    const root = join(import.meta.dir, 'fixtures', 'h3-prompt-writing')
+    const skillPath = join(root, 'SKILL.md')
+    const raw = await readFile(skillPath, 'utf8')
+    const parsed = parseSkillDocument(raw, skillPath)
+    const fixtureSkill = {
+      ...parsed.manifest,
+      ...classifySkillCompatibility(parsed.manifest, raw),
+      packId: 'MiniMax-H3',
+      revision: H3_REVISION,
+      sourceUrl: 'https://github.com/MiniMax-AI/MiniMax-H3',
+    }
+    const requests: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => fixtureSkill } as any,
+      cache: createCompileCache(),
+      readModels: async () => [{
+        id: 23,
+        model_name: 'fixture-compiler',
+        provider: 'fixture',
+        display_name: 'Fixture Compiler',
+        capabilities: { chat: true, vision: true, negative_prompt: true },
+      } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        requests.push(request)
+        return {
+          content: JSON.stringify({
+            skill_name: 'h3-prompt-writing',
+            skill_version: H3_REVISION,
+            mode: 'Ref2VA',
+            prompt: H3_REF2VA_PROMPT,
+            negative_prompt: H3_NEGATIVE_PROMPT,
+            parameters: {},
+            references_used: ['references/base-en.txt', 'references/ref-en.txt'],
+            warnings: [],
+          }),
+        }
+      },
+    })
+    const orderedAssets: CanvasReferenceAsset[] = [
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
+      { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_role: 'character' },
+      { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_role: 'last_frame' },
+    ]
+    const baseInput = {
+      packId: 'MiniMax-H3',
+      skillName: 'h3-prompt-writing',
+      rawPrompt: 'Build a coherent bakery sequence from the ordered references.',
+      mode: 'image_to_video' as const,
+      nodeParams: { aspect_ratio: '16:9' },
+      activeWorkspace: '/fixture-multi-reference-workspace',
+      compilerModelId: 23,
+    }
+
+    const first = await compiler({ ...baseInput, incomingAssets: orderedAssets })
+    const repeated = await compiler({
+      ...baseInput,
+      incomingAssets: orderedAssets.map(asset => ({ ...asset, source_asset_ids: [...(asset.source_asset_ids ?? [])] })),
+    })
+    const reorderedAssets = [orderedAssets[2]!, orderedAssets[1]!, orderedAssets[0]!].map(asset => ({
+      ...asset,
+      source_asset_ids: [...(asset.source_asset_ids ?? [])],
+    }))
+    const reordered = await compiler({ ...baseInput, incomingAssets: reorderedAssets })
+
+    expect(requests).toHaveLength(2)
+    for (const request of requests) {
+      const system = String(request.messages[0].content)
+      expect(system).toContain('REFERENCE references/base-en.txt\nH3_BASE_GUIDE_CONTRACT')
+      expect(system).toContain('REFERENCE references/ref-en.txt\nH3_REF_GUIDE_CONTRACT')
+    }
+    const firstUserParts = requests[0].messages[1].content as any[]
+    expect(firstUserParts.filter(part => part.type === 'image_url').map(part => part.image_url.url)).toEqual(
+      orderedAssets.map(asset => asset.url),
+    )
+    expect(JSON.stringify(firstUserParts)).toContain('REFERENCE IMAGE 1\\nROLE: first_frame\\nSOURCE ASSET IDS: [42]')
+    expect(JSON.stringify(firstUserParts)).toContain('REFERENCE IMAGE 2\\nROLE: character\\nSOURCE ASSET IDS: [43]')
+    expect(JSON.stringify(firstUserParts)).toContain('REFERENCE IMAGE 3\\nROLE: last_frame\\nSOURCE ASSET IDS: [44]')
+    expect((requests[1].messages[1].content as any[]).filter(part => part.type === 'image_url').map(part => part.image_url.url)).toEqual(
+      reorderedAssets.map(asset => asset.url),
+    )
+    expect(first.inputHash).toMatch(/^[0-9a-f]{64}$/)
+    expect(repeated.inputHash).toBe(first.inputHash)
+    expect(repeated.cached).toBe(true)
+    expect(reordered.inputHash).not.toBe(first.inputHash)
+    expect(reordered.cached).toBe(false)
+    expect(first.result).toMatchObject({
+      mode: 'image_to_video',
+      references_used: ['references/base-en.txt', 'references/ref-en.txt'],
+      reference_mode_hint: 'Ref2VA',
+    })
+    expect(first.result.reference_bindings).toEqual([
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_id: 'reference-1', reference_role: 'first_frame' },
+      { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_id: 'reference-2', reference_role: 'character' },
+      { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_id: 'reference-3', reference_role: 'last_frame' },
+    ])
+  })
+
   test('does not treat H3 sub-mode aliases as generic Canvas media modes', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
     await mkdir(join(root, 'references'))

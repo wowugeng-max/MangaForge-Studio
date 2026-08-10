@@ -984,6 +984,120 @@ describe('canvas generate route', () => {
     })
   })
 
+  test('runs ordered multi-reference inputs through the public H3 compiler fixture with stable and order-sensitive audit hashes', async () => {
+    const workspace = await tempWorkspace()
+    const fixtureRoot = join(import.meta.dir, '../skills/fixtures/h3-prompt-writing')
+    const skillPath = join(fixtureRoot, 'SKILL.md')
+    const rawSkill = readFileSync(skillPath, 'utf8')
+    const [{ createPromptCompiler }, { createCompileCache }, { parseSkillDocument }, { classifySkillCompatibility }, { registerGenerateRoutes }] = await Promise.all([
+      import('../skills/compiler'),
+      import('../skills/compile-cache'),
+      import('../skills/frontmatter'),
+      import('../skills/registry'),
+      import('./generate'),
+    ])
+    const parsed = parseSkillDocument(rawSkill, skillPath)
+    const revision = 'b7227fa6a6206e9fb30562383d39e53cf3866a48'
+    const fixtureSkill = {
+      ...parsed.manifest,
+      ...classifySkillCompatibility(parsed.manifest, rawSkill),
+      packId: 'MiniMax-H3',
+      revision,
+      sourceUrl: 'https://github.com/MiniMax-AI/MiniMax-H3',
+    }
+    const compilerRequests: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => fixtureSkill } as any,
+      cache: createCompileCache(),
+      readModels: async () => [{
+        id: 23,
+        model_name: 'fixture-compiler',
+        provider: 'fixture',
+        display_name: 'Fixture Compiler',
+        capabilities: { chat: true, vision: true, negative_prompt: true },
+      } as any],
+      executeWithRuntimeModel: async (_activeWorkspace, request) => {
+        compilerRequests.push(request)
+        return {
+          content: JSON.stringify({
+            skill_name: 'h3-prompt-writing',
+            skill_version: revision,
+            mode: 'Ref2VA',
+            prompt: 'subject_definitions:\n<Subject 1> is the baker from <Picture 1>.\n\nsummary:\nThe target video follows <Subject 1>.\n\nretention_analysis:\n<Subject 1>: fully_preserved.\n\ndetailed_description:\n[Shot 1] <Subject 1> opens the bakery.\n\noverall_soundscape:\nTrays clink softly.\n\nnon_diegetic_music:\nN/A',
+            negative_prompt: '',
+            parameters: {},
+            references_used: ['references/base-en.txt', 'references/ref-en.txt'],
+            warnings: [],
+          }),
+        }
+      },
+    })
+    const { app, handlers } = createRouteHarness()
+    const executeRequests: any[] = []
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: compiler as any,
+      preflightTransport: async () => ({ model: { id: 77 } }),
+      execute: async (_activeWorkspace, request) => {
+        executeRequests.push(request)
+        return { content: 'video-result', finish_reason: 'stop', parsed: null } as any
+      },
+    })
+    const orderedAssets = [
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
+      { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_role: 'character' },
+      { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_role: 'last_frame' },
+    ]
+    const generate = (incomingAssets: any[]) => call(handlers.get('POST /api/generate'), {
+      body: {
+        type: 'image_to_video',
+        prompt: 'Build a coherent bakery sequence from the ordered references.',
+        skill_name: 'h3-prompt-writing',
+        skill_pack_id: 'MiniMax-H3',
+        compiler_model_id: 23,
+        params: { aspect_ratio: '16:9', incoming_assets: incomingAssets },
+      },
+    })
+
+    const first = await generate(orderedAssets)
+    const repeated = await generate(orderedAssets.map(asset => ({ ...asset, source_asset_ids: [...asset.source_asset_ids] })))
+    const reorderedAssets = [orderedAssets[2]!, orderedAssets[1]!, orderedAssets[0]!].map(asset => ({
+      ...asset,
+      source_asset_ids: [...asset.source_asset_ids],
+    }))
+    const reordered = await generate(reorderedAssets)
+
+    expect([first.statusCode, repeated.statusCode, reordered.statusCode]).toEqual([200, 200, 200])
+    expect(compilerRequests).toHaveLength(2)
+    expect((compilerRequests[0].messages[1].content as any[]).filter(part => part.type === 'image_url').map(part => part.image_url.url)).toEqual(
+      orderedAssets.map(asset => asset.url),
+    )
+    expect((compilerRequests[1].messages[1].content as any[]).filter(part => part.type === 'image_url').map(part => part.image_url.url)).toEqual(
+      reorderedAssets.map(asset => asset.url),
+    )
+    expect(first.body.compiled_input_hash).toMatch(/^[0-9a-f]{64}$/)
+    expect(repeated.body.compiled_input_hash).toBe(first.body.compiled_input_hash)
+    expect(reordered.body.compiled_input_hash).not.toBe(first.body.compiled_input_hash)
+    expect(first.body).toMatchObject({
+      compiled_references: ['references/base-en.txt', 'references/ref-en.txt'],
+      reference_mode_hint: 'Ref2VA',
+      source_asset_ids: [42, 43, 44],
+      reference_bindings: [
+        { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_id: 'reference-1', reference_role: 'first_frame' },
+        { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_id: 'reference-2', reference_role: 'character' },
+        { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_id: 'reference-3', reference_role: 'last_frame' },
+      ],
+    })
+    expect(executeRequests).toHaveLength(3)
+    expect(executeRequests[0].messages.at(-1).content).toEqual([
+      { type: 'text', text: first.body.compiled_prompt },
+      ...orderedAssets.map(asset => ({ type: 'image_url', image_url: { url: asset.url } })),
+    ])
+    expect(executeRequests[2].messages.at(-1).content).toEqual([
+      { type: 'text', text: reordered.body.compiled_prompt },
+      ...reorderedAssets.map(asset => ({ type: 'image_url', image_url: { url: asset.url } })),
+    ])
+  })
+
   test('rejects invalid reference collections before compiler, provider, Comfy, or task work', async () => {
     const workspace = await tempWorkspace()
     await writeFile(join(workspace, 'providers.json'), '{invalid-provider-json')

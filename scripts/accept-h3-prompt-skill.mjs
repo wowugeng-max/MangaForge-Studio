@@ -9,6 +9,7 @@ const EXPECTED_REFERENCES = ['references/base-en.txt', 'references/ref-en.txt']
 const REQUEST_TIMEOUT_MS = 15_000
 const LONG_REQUEST_TIMEOUT_MS = 660_000
 const MAX_API_RESPONSE_BYTES = 2 * 1024 * 1024
+const MAX_IMAGE_ASSET_IDS = 9
 
 export class H3AcceptanceError extends Error {
   constructor(code, message) {
@@ -74,10 +75,21 @@ export function normalizeLocalApiBase(value = DEFAULT_API_BASE) {
 }
 
 function positiveAssetId(value) {
-  if (!/^\d+$/.test(String(value || ''))) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID must be a positive integer')
-  const id = Number(value)
-  if (!Number.isSafeInteger(id) || id <= 0) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_ID must be a positive integer')
+  const normalized = String(value ?? '').trim()
+  if (!/^\d+$/.test(normalized)) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_IDS entries must be positive integers')
+  const id = Number(normalized)
+  if (!Number.isSafeInteger(id) || id <= 0) throw configurationError('MANGAFORGE_H3_IMAGE_ASSET_IDS entries must be positive integers')
   return id
+}
+
+function configuredImageAssetIds(env) {
+  const plural = env.MANGAFORGE_H3_IMAGE_ASSET_IDS
+  const raw = plural !== undefined ? plural : env.MANGAFORGE_H3_IMAGE_ASSET_ID
+  const entries = String(raw ?? '').split(',').map(entry => entry.trim())
+  if (entries.length > MAX_IMAGE_ASSET_IDS) {
+    throw configurationError(`MANGAFORGE_H3_IMAGE_ASSET_IDS accepts at most ${MAX_IMAGE_ASSET_IDS} image asset ids`)
+  }
+  return entries.map(positiveAssetId)
 }
 
 export function localImageAssetUrl(asset, expectedId) {
@@ -224,7 +236,7 @@ function assertPreview(preview, expectedMode, revision) {
 }
 
 async function preflight({ env, fetchImpl, baseUrl }) {
-  const imageAssetId = positiveAssetId(env.MANGAFORGE_H3_IMAGE_ASSET_ID)
+  const imageAssetIds = configuredImageAssetIds(env)
   await requestJson(fetchImpl, baseUrl, '/status')
   const settings = await requestJson(fetchImpl, baseUrl, '/skills/settings')
   const compilerModelId = Number(settings?.skill_compiler_model_id)
@@ -237,10 +249,13 @@ async function preflight({ env, fetchImpl, baseUrl }) {
   if (model.capabilities?.chat !== true || model.capabilities?.vision !== true) {
     throw configurationError('The configured canvas Skill compiler model must support chat and vision for T2V/I2V acceptance')
   }
-  const asset = await requestJson(fetchImpl, baseUrl, `/assets/${imageAssetId}`)
-  const imageUrl = localImageAssetUrl(asset, imageAssetId)
-  await preflightLocalImage(fetchImpl, baseUrl, imageUrl)
-  return { compilerModelId, imageAssetId, imageUrl }
+  const images = []
+  for (const imageAssetId of imageAssetIds) {
+    const asset = await requestJson(fetchImpl, baseUrl, `/assets/${imageAssetId}`)
+    images.push({ imageAssetId, imageUrl: localImageAssetUrl(asset, imageAssetId) })
+  }
+  for (const image of images) await preflightLocalImage(fetchImpl, baseUrl, image.imageUrl)
+  return { compilerModelId, images }
 }
 
 export async function runH3Acceptance({
@@ -254,7 +269,7 @@ export async function runH3Acceptance({
   }
   if (typeof fetchImpl !== 'function') throw configurationError('This runtime does not provide fetch')
   const baseUrl = normalizeLocalApiBase(env.MANGAFORGE_H3_API_BASE || DEFAULT_API_BASE)
-  const { compilerModelId, imageAssetId, imageUrl } = await preflight({ env, fetchImpl, baseUrl })
+  const { compilerModelId, images } = await preflight({ env, fetchImpl, baseUrl })
 
   const installed = await requestJson(fetchImpl, baseUrl, '/skills/packs', {
     method: 'POST',
@@ -292,7 +307,13 @@ export async function runH3Acceptance({
     ...common,
     prompt: 'I2VA: Start from the supplied first frame and develop a coherent 8-second cinematic action.',
     mode: 'image_to_video',
-    assets: [{ type: 'image', url: imageUrl, source_asset_ids: [imageAssetId] }],
+    assets: images.map(({ imageAssetId, imageUrl }, index) => ({
+      type: 'image',
+      url: imageUrl,
+      source_asset_ids: [imageAssetId],
+      reference_index: index + 1,
+      reference_role: index === 0 ? 'first_frame' : index === images.length - 1 ? 'last_frame' : 'character',
+    })),
   }
   const textPreview = assertPreview(
     await requestJson(fetchImpl, baseUrl, '/skills/compile-preview', { method: 'POST', body: textBody, timeoutMs: LONG_REQUEST_TIMEOUT_MS }),

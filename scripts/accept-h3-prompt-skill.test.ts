@@ -10,6 +10,16 @@ import {
 
 const REVISION = '0123456789abcdef0123456789abcdef01234567'
 const REFERENCES = ['references/base-en.txt', 'references/ref-en.txt']
+const IMAGE_FIXTURES = [
+  { id: 42, filePath: 'assets/first.png' },
+  { id: 43, filePath: 'assets/character.png' },
+  { id: 44, filePath: 'assets/last.png' },
+] as const
+const ORDERED_IMAGE_ASSETS = [
+  { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
+  { type: 'image', url: '/api/assets/media/assets%2Fcharacter.png', source_asset_ids: [43], reference_index: 2, reference_role: 'character' },
+  { type: 'image', url: '/api/assets/media/assets%2Flast.png', source_asset_ids: [44], reference_index: 3, reference_role: 'last_frame' },
+]
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -33,8 +43,12 @@ function assertionFlowFetch(faults: AssertionFaults = {}): typeof fetch {
     if (url.endsWith('/api/status')) return json({ ok: true })
     if (url.endsWith('/api/skills/settings')) return json({ skill_compiler_model_id: 7 })
     if (url.endsWith('/api/models')) return json([{ id: 7, capabilities: { chat: true, vision: true } }])
-    if (url.endsWith('/api/assets/42')) return json({ id: 42, type: 'image', data: { file_path: 'assets/ref.png' } })
-    if (url.endsWith('/api/assets/media/assets%2Fref.png')) return new Response(new Uint8Array([0x89]), { headers: { 'content-type': 'image/png' } })
+    for (const fixture of IMAGE_FIXTURES) {
+      if (url.endsWith(`/api/assets/${fixture.id}`)) return json({ id: fixture.id, type: 'image', data: { file_path: fixture.filePath } })
+      if (url.endsWith(`/api/assets/media/${encodeURIComponent(fixture.filePath)}`)) {
+        return new Response(new Uint8Array([0x89]), { headers: { 'content-type': 'image/png' } })
+      }
+    }
     if (url.endsWith('/api/skills/packs') && method === 'POST') return json({ record: { id: 'MiniMax-H3', revision } }, 201)
     if (url.endsWith('/api/skills') && method === 'GET') {
       return json({ skills: [{ packId: 'MiniMax-H3', name: 'h3-prompt-writing', revision, compatibility: 'prompt_ready', mediaModes: ['text_to_video', 'image_to_video'] }] })
@@ -83,6 +97,41 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(fetchCalls).toBe(0)
   })
 
+  test('rejects ten plural image asset ids before any network or Pack installation side effect', async () => {
+    let fetchCalls = 0
+    await expect(runH3Acceptance({
+      env: {
+        MANGAFORGE_H3_E2E: '1',
+        MANGAFORGE_H3_IMAGE_ASSET_IDS: Array.from({ length: 10 }, (_, index) => index + 1).join(','),
+        MANGAFORGE_H3_IMAGE_ASSET_ID: '42',
+      },
+      fetchImpl: async () => { fetchCalls += 1; return json({ ok: true }) },
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_CONFIGURATION' })
+    expect(fetchCalls).toBe(0)
+  })
+
+  test.each([
+    ['empty', '42,'],
+    ['zero', '42,0'],
+    ['negative', '42,-1'],
+    ['fractional', '42,1.5'],
+    ['unsafe', '42,9007199254740992'],
+    ['non-numeric', '42,nope'],
+  ])('rejects an invalid (%s) second plural image asset id before contacting the API', async (_label, assetIds) => {
+    let fetchCalls = 0
+    await expect(runH3Acceptance({
+      env: {
+        MANGAFORGE_H3_E2E: '1',
+        MANGAFORGE_H3_IMAGE_ASSET_IDS: assetIds,
+        MANGAFORGE_H3_IMAGE_ASSET_ID: '42',
+      },
+      fetchImpl: async () => { fetchCalls += 1; return json({ ok: true }) },
+      log: () => {},
+    })).rejects.toMatchObject({ code: 'H3_E2E_CONFIGURATION' })
+    expect(fetchCalls).toBe(0)
+  })
+
   test('accepts only loopback API bases and converts an API-resolved image asset into a local media URL', () => {
     expect(normalizeLocalApiBase('http://127.0.0.1:8787/api/')).toBe('http://127.0.0.1:8787/api')
     expect(normalizeLocalApiBase('https://localhost:18787/api')).toBe('https://localhost:18787/api')
@@ -120,6 +169,51 @@ describe('MiniMax H3 live acceptance harness', () => {
       fetchImpl: fetchImpl as typeof fetch,
       log: () => {},
     })).rejects.toMatchObject({ code: 'H3_E2E_CONFIGURATION' })
+    expect(calls.some(call => call.method === 'POST' && call.url.endsWith('/api/skills/packs'))).toBe(false)
+  })
+
+  test.each([
+    ['missing asset record', 'missing', 'H3_E2E_API'],
+    ['mismatched asset record', 'id', 'H3_E2E_CONFIGURATION'],
+    ['non-image asset record', 'record', 'H3_E2E_CONFIGURATION'],
+    ['non-image media response', 'media', 'H3_E2E_CONFIGURATION'],
+  ] as const)('fails on a %s for the second image before installing a Pack', async (_label, fault, expectedCode) => {
+    const calls: Array<{ url: string; method: string }> = []
+    const validFetch = assertionFlowFetch()
+    const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      const method = String(init.method || 'GET').toUpperCase()
+      calls.push({ url, method })
+      if (url.endsWith('/api/assets/43') && fault === 'missing') {
+        return json({ error_code: 'ASSET_NOT_FOUND', detail: 'Asset 43 was not found' }, 404)
+      }
+      if (url.endsWith('/api/assets/43') && fault === 'record') {
+        return json({ id: 43, type: 'video', data: { file_path: 'assets/character.mp4' } })
+      }
+      if (url.endsWith('/api/assets/43') && fault === 'id') {
+        return json({ id: 99, type: 'image', data: { file_path: 'assets/character.png' } })
+      }
+      if (url.endsWith('/api/assets/media/assets%2Fcharacter.png') && fault === 'media') {
+        return new Response('not an image', { headers: { 'content-type': 'text/plain' } })
+      }
+      return validFetch(input, init)
+    }
+
+    let caught: unknown
+    try {
+      await runH3Acceptance({
+        env: {
+          MANGAFORGE_H3_E2E: '1',
+          MANGAFORGE_H3_IMAGE_ASSET_IDS: ' 42, 43 , 44 ',
+          MANGAFORGE_H3_IMAGE_ASSET_ID: '42',
+        },
+        fetchImpl: fetchImpl as typeof fetch,
+        log: () => {},
+      })
+    } catch (error) { caught = error }
+
+    expect(caught).toMatchObject({ code: expectedCode })
+    expect(calls.some(call => call.url.endsWith('/api/assets/43'))).toBe(true)
     expect(calls.some(call => call.method === 'POST' && call.url.endsWith('/api/skills/packs'))).toBe(false)
   })
 
@@ -199,13 +293,73 @@ describe('MiniMax H3 live acceptance harness', () => {
     ['a changed repeated I2V hash', { repeatedImageHash: '3'.repeat(64) }],
   ] as Array<[string, AssertionFaults]>)('rejects %s with a typed assertion error', async (_label, faults) => {
     await expect(runH3Acceptance({
-      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      env: {
+        MANGAFORGE_H3_E2E: '1',
+        MANGAFORGE_H3_IMAGE_ASSET_IDS: '42,43,44',
+        MANGAFORGE_H3_IMAGE_ASSET_ID: '42',
+      },
       fetchImpl: assertionFlowFetch(faults),
       log: () => {},
     })).rejects.toMatchObject({ code: 'H3_E2E_ASSERTION' })
   })
 
-  test('runs the API-only install and deterministic T2V/I2V preview acceptance flow with fake HTTP responses', async () => {
+  test('retains the singular image asset id as a compatibility alias with first-frame metadata', async () => {
+    const imagePreviewAssets: any[][] = []
+    const validFetch = assertionFlowFetch()
+    const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      if (String(input).endsWith('/api/skills/compile-preview') && typeof init.body === 'string') {
+        const body = JSON.parse(init.body)
+        if (body.mode === 'image_to_video') imagePreviewAssets.push(body.assets)
+      }
+      return validFetch(input, init)
+    }
+
+    await runH3Acceptance({
+      env: { MANGAFORGE_H3_E2E: '1', MANGAFORGE_H3_IMAGE_ASSET_ID: '42' },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })
+
+    expect(imagePreviewAssets).toEqual([
+      [{ type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' }],
+      [{ type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' }],
+    ])
+  })
+
+  test('preserves repeated plural ids as distinct ordered references instead of deduplicating them', async () => {
+    const calls: string[] = []
+    const imagePreviewAssets: any[][] = []
+    const validFetch = assertionFlowFetch()
+    const fetchImpl = async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/skills/compile-preview') && typeof init.body === 'string') {
+        const body = JSON.parse(init.body)
+        if (body.mode === 'image_to_video') imagePreviewAssets.push(body.assets)
+      }
+      return validFetch(input, init)
+    }
+
+    await runH3Acceptance({
+      env: {
+        MANGAFORGE_H3_E2E: '1',
+        MANGAFORGE_H3_IMAGE_ASSET_IDS: '42,42',
+        MANGAFORGE_H3_IMAGE_ASSET_ID: '44',
+      },
+      fetchImpl: fetchImpl as typeof fetch,
+      log: () => {},
+    })
+
+    const expected = [
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 1, reference_role: 'first_frame' },
+      { type: 'image', url: '/api/assets/media/assets%2Ffirst.png', source_asset_ids: [42], reference_index: 2, reference_role: 'last_frame' },
+    ]
+    expect(imagePreviewAssets).toEqual([expected, expected])
+    expect(calls.filter(url => url.endsWith('/api/assets/42'))).toHaveLength(2)
+    expect(calls.filter(url => url.endsWith('/api/assets/media/assets%2Ffirst.png'))).toHaveLength(2)
+  })
+
+  test('runs the API-only install and deterministic ordered multi-reference preview acceptance flow with fake HTTP responses', async () => {
     const calls: Array<{ url: string; method: string; body?: any }> = []
     const logs: string[] = []
     const timeoutDelays: number[] = []
@@ -224,8 +378,12 @@ describe('MiniMax H3 live acceptance harness', () => {
       if (url.endsWith('/api/status')) return json({ ok: true })
       if (url.endsWith('/api/skills/settings')) return json({ skill_compiler_model_id: 7 })
       if (url.endsWith('/api/models')) return json([{ id: 7, model_name: 'vision-chat', capabilities: { chat: true, vision: true } }])
-      if (url.endsWith('/api/assets/42')) return json({ id: 42, type: 'image', data: { file_path: 'assets/ref.png' } })
-      if (url.endsWith('/api/assets/media/assets%2Fref.png')) return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'content-type': 'image/png' } })
+      for (const fixture of IMAGE_FIXTURES) {
+        if (url.endsWith(`/api/assets/${fixture.id}`)) return json({ id: fixture.id, type: 'image', data: { file_path: fixture.filePath } })
+        if (url.endsWith(`/api/assets/media/${encodeURIComponent(fixture.filePath)}`)) {
+          return new Response(new Uint8Array([0x89, 0x50, 0x4e, 0x47]), { headers: { 'content-type': 'image/png' } })
+        }
+      }
       if (url.endsWith('/api/skills/packs') && method === 'POST') {
         return json({
           record: { id: 'MiniMax-H3', sourceUrl: 'https://github.com/MiniMax-AI/MiniMax-H3', revision: REVISION, installedAt: '2026-08-09T00:00:00.000Z', status: 'installed' },
@@ -245,7 +403,7 @@ describe('MiniMax H3 live acceptance harness', () => {
         return json({
           result: {
             skill_name: 'h3-prompt-writing', skill_version: REVISION, mode: body.mode,
-            prompt: isImage ? 'I2VA compiled prompt' : 'T2VA compiled prompt', negative_prompt: '', parameters: {},
+            prompt: isImage ? 'Ref2VA compiled prompt' : 'T2VA compiled prompt', negative_prompt: '', parameters: {},
             references_used: REFERENCES, warnings: [],
           },
           cache_key: isImage ? '2'.repeat(64) : '1'.repeat(64),
@@ -260,6 +418,7 @@ describe('MiniMax H3 live acceptance harness', () => {
       result = await runH3Acceptance({
         env: {
           MANGAFORGE_H3_E2E: '1',
+          MANGAFORGE_H3_IMAGE_ASSET_IDS: '42,43,44',
           MANGAFORGE_H3_IMAGE_ASSET_ID: '42',
           MANGAFORGE_H3_API_BASE: 'http://127.0.0.1:8787/api',
         },
@@ -278,7 +437,17 @@ describe('MiniMax H3 live acceptance harness', () => {
     })
     const installIndex = calls.findIndex(call => call.method === 'POST' && call.url.endsWith('/api/skills/packs'))
     expect(installIndex).toBeGreaterThanOrEqual(0)
-    for (const path of ['/api/status', '/api/skills/settings', '/api/models', '/api/assets/42', '/api/assets/media/assets%2Fref.png']) {
+    for (const path of [
+      '/api/status',
+      '/api/skills/settings',
+      '/api/models',
+      '/api/assets/42',
+      '/api/assets/43',
+      '/api/assets/44',
+      '/api/assets/media/assets%2Ffirst.png',
+      '/api/assets/media/assets%2Fcharacter.png',
+      '/api/assets/media/assets%2Flast.png',
+    ]) {
       const preflightIndex = calls.findIndex(call => call.url.endsWith(path))
       expect(preflightIndex).toBeGreaterThanOrEqual(0)
       expect(preflightIndex).toBeLessThan(installIndex)
@@ -288,10 +457,13 @@ describe('MiniMax H3 live acceptance harness', () => {
     expect(previews).toHaveLength(3)
     expect(previews[0]).toMatchObject({ pack_id: 'MiniMax-H3', skill_name: 'h3-prompt-writing', mode: 'text_to_video', compiler_model_id: 7 })
     expect(previews[0].assets).toEqual([])
-    expect(previews[1]).toMatchObject({ mode: 'image_to_video', assets: [{ type: 'image', url: '/api/assets/media/assets%2Fref.png', source_asset_ids: [42] }] })
+    expect(previews[1]).toMatchObject({ mode: 'image_to_video' })
+    expect(previews[1].assets).toEqual(ORDERED_IMAGE_ASSETS)
     expect(previews[2]).toEqual(previews[1])
     expect(timeoutDelays).toEqual([
-      15_000, 15_000, 15_000, 15_000, 15_000,
+      15_000, 15_000, 15_000,
+      15_000, 15_000, 15_000,
+      15_000, 15_000, 15_000,
       660_000,
       15_000,
       660_000, 660_000, 660_000,
