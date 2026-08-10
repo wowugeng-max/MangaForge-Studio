@@ -6,6 +6,7 @@ import {
   executeWithRuntimeModel,
   preflightRuntimeRequestTransport,
   type RuntimeExecutionOptions,
+  type RuntimeRequestTransportPreflightOptions,
 } from '../llm/provider-runtime'
 import { hasLLMMessageContent, imageUrlFromLLMContentPart, stringifyLLMMessageContent, stringifyLLMMessageTextContent, textFromLLMContentPart, type LLMMessage, type LLMMessageContentPart, type LLMRequest, type LLMResponse } from '../llm/types'
 import { MultiReferenceTransportError } from '../llm/multi-reference-transport'
@@ -36,6 +37,7 @@ type GenerateRouteDeps = {
     activeWorkspace: string,
     request: LLMRequest,
     preferredModelId?: number,
+    options?: RuntimeRequestTransportPreflightOptions,
   ) => Promise<unknown>
   comfyExecute?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<LocalComfyResult>
   comfyInterrupt?: (options: ExecuteLocalComfyWorkflowOptions) => Promise<boolean> | boolean
@@ -1073,7 +1075,9 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
       if (!multiReferenceComfyTarget) {
         try {
           preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
-          const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId)
+          const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId, {
+            assumeNegativePrompt: Boolean(selectedSkill && compile),
+          })
           const selectedModelId = Number((preflightSelection as any)?.model?.id)
           if (Number.isSafeInteger(selectedModelId) && selectedModelId > 0) preferredModelId = selectedModelId
           runtimeTargetPreflighted = true
@@ -1159,6 +1163,19 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
     }
 
     if (!request) request = buildCanvasGenerateLLMRequest(payload)
+    if (compiledSkill) {
+      try {
+        if (!runtimeTargetPreflighted) preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
+        const preflightSelection = await preflightTransport(activeWorkspace, request, preferredModelId)
+        const selectedModelId = Number((preflightSelection as any)?.model?.id)
+        if (Number.isSafeInteger(selectedModelId) && selectedModelId > 0) preferredModelId = selectedModelId
+        runtimeTargetPreflighted = true
+      } catch (error) {
+        const code = error && typeof error === 'object' ? String((error as any).code || '') : ''
+        if (code.startsWith('MULTI_REFERENCE_')) return skillErrorResponse(res, error)
+        return res.status(500).json(errorBody(error))
+      }
+    }
     const sourceAssetIds = normalizeSourceAssetIds((request as any).source_asset_ids)
     if (!runtimeTargetPreflighted) preferredModelId = await resolvePreferredModelId(activeWorkspace, payload)
 

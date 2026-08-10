@@ -26,6 +26,10 @@ export type ProviderRequestTransportPlan = {
   fieldOwnership: readonly TransportFieldOwner[]
 }
 
+export type ProviderRequestTransportPlanOptions = {
+  assumeNegativePrompt?: boolean
+}
+
 export function explicitMultiReferenceFieldOwnsTransport(transport: MultiReferenceTransport) {
   return (
     ['model_capability', 'provider_capability'].includes(transport.source)
@@ -153,7 +157,10 @@ function outputPathLabel(path: TransportOutputPath) {
   )).join('') || '<body>'
 }
 
-function assertNoTransportFieldCollision(fieldOwnership: readonly TransportFieldOwner[]) {
+function assertNoTransportFieldCollision(
+  fieldOwnership: readonly TransportFieldOwner[],
+  assumedNegativePrompt: boolean,
+) {
   const multiOwners = fieldOwnership.filter(owner => owner.transport === 'multi_reference')
   const negativeOwners = fieldOwnership.filter(owner => owner.transport === 'negative_prompt')
   for (const multiOwner of multiOwners) {
@@ -166,7 +173,9 @@ function assertNoTransportFieldCollision(fieldOwnership: readonly TransportField
           : outputPathLabel(multiOwner.path)
       throw new MultiReferenceTransportError(
         'MULTI_REFERENCE_UNSUPPORTED',
-        `Multi-reference and negative-prompt transports both own provider output field "${field}"`,
+        assumedNegativePrompt
+          ? `Selected Skill may produce a negative prompt, and multi-reference and negative-prompt transports both own provider output field "${field}"`
+          : `Multi-reference and negative-prompt transports both own provider output field "${field}"`,
       )
     }
   }
@@ -176,6 +185,7 @@ export function resolveProviderRequestTransportPlan(
   request: LLMRequest,
   selection: RuntimeModelSelection,
   routeType = String(selection.routeType || (request as any).type || (request as any).mode || (request as any).task_type || ''),
+  options: ProviderRequestTransportPlanOptions = {},
 ): ProviderRequestTransportPlan {
   const multiReferenceTransport = resolveMultiReferenceTransport(request, selection)
   assertSafeExplicitMultiReferenceField(multiReferenceTransport)
@@ -190,12 +200,16 @@ export function resolveProviderRequestTransportPlan(
       'Multi-reference payload templates must render an object body',
     )
   }
-  const negativePromptPlan = prepareNegativePromptRequest(request, selection, routeType, payloadTemplate)
+  const negativePromptPlan = prepareNegativePromptRequest(request, selection, routeType, payloadTemplate, options)
   const fieldOwnership = resolvedTransportFieldOwnership(
     multiReferenceTransport,
     negativePromptPlan.transport,
     payloadTemplate,
   )
-  assertNoTransportFieldCollision(fieldOwnership)
+  const assumedNegativePrompt = Boolean(
+    options.assumeNegativePrompt
+    && !(typeof request.negative_prompt === 'string' && request.negative_prompt.trim()),
+  )
+  assertNoTransportFieldCollision(fieldOwnership, assumedNegativePrompt)
   return { multiReferenceTransport, negativePromptPlan, payloadTemplate, fieldOwnership }
 }

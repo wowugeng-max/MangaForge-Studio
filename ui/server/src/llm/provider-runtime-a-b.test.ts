@@ -257,8 +257,20 @@ describe('codex responses provider runtime a b', () => {
         messages: [{ role: 'user', content: '生成视频' }],
       } as any
       const originalRequest = structuredClone(request)
+      const potentialRequest = structuredClone(request)
+      delete potentialRequest.negative_prompt
+      const originalPotentialRequest = structuredClone(potentialRequest)
 
       const preflight = await preflightRuntimeRequestTransport(workspace, request, 141).then(
+        value => ({ value }),
+        error => ({ error }),
+      )
+      const potentialPreflight = await preflightRuntimeRequestTransport(
+        workspace,
+        potentialRequest,
+        141,
+        { assumeNegativePrompt: true } as any,
+      ).then(
         value => ({ value }),
         error => ({ error }),
       )
@@ -271,22 +283,30 @@ describe('codex responses provider runtime a b', () => {
         preflightCode: (preflight as any).error?.code,
         preflightStatus: (preflight as any).error?.status,
         preflightDetail: (preflight as any).error?.message,
+        potentialCode: (potentialPreflight as any).error?.code,
+        potentialStatus: (potentialPreflight as any).error?.status,
+        potentialDetail: (potentialPreflight as any).error?.message,
         executionCode: (execution as any).error?.code,
         executionStatus: (execution as any).error?.status,
         executionResultError: (execution as any).value?.error,
         fetchCalls,
         keysText: await readFile(join(workspace, 'keys.json'), 'utf8'),
         request,
+        potentialRequest,
       }).toEqual({
         preflightCode: 'MULTI_REFERENCE_UNSUPPORTED',
         preflightStatus: 422,
         preflightDetail: expect.stringContaining('assets'),
+        potentialCode: 'MULTI_REFERENCE_UNSUPPORTED',
+        potentialStatus: 422,
+        potentialDetail: expect.stringContaining('may produce'),
         executionCode: 'MULTI_REFERENCE_UNSUPPORTED',
         executionStatus: 422,
         executionResultError: undefined,
         fetchCalls: 0,
         keysText: originalKeysText,
         request: originalRequest,
+        potentialRequest: originalPotentialRequest,
       })
     } finally {
       await rm(workspace, { recursive: true, force: true })

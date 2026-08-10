@@ -2097,8 +2097,12 @@ describe('canvas generate route', () => {
     let compileCalls = 0
     let executeCalls = 0
     registerGenerateRoutes(app as any, () => workspace, {
-      preflightTransport: async () => {
-        events.push('preflight')
+      preflightTransport: async (...args: any[]) => {
+        const request = args[1]
+        const options = args[3]
+        events.push(options?.assumeNegativePrompt
+          ? 'preflight:potential'
+          : `preflight:actual:${request.negative_prompt || 'empty'}`)
         return { model: { id: 77 } }
       },
       compilePromptSkill: async () => {
@@ -2143,10 +2147,211 @@ describe('canvas generate route', () => {
     while (executeCalls < 2) await new Promise(resolve => setTimeout(resolve, 0))
 
     expect(events).toEqual([
-      'preflight', 'compile', 'execute:77',
-      'preflight', 'compile', 'execute:77',
+      'preflight:potential', 'compile', 'preflight:actual:empty', 'execute:77',
+      'preflight:potential', 'compile', 'preflight:actual:empty', 'execute:77',
     ])
     expect(compileCalls).toBe(2)
+  })
+
+  test('rejects potential Skill negative collisions before sync or background compilation even when output could be empty', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const keyId = 146
+    const originalKeysText = `${JSON.stringify([{
+      id: keyId,
+      provider: 'potential-collision-provider',
+      key: 'secret-key',
+      is_active: true,
+      failure_count: 6,
+      last_used: '2026-08-01T00:00:00.000Z',
+    }], null, 2)}\n`
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([{
+      id: 'potential-collision-provider',
+      display_name: 'Potential Collision Provider',
+      service_type: 'llm',
+      api_format: 'openai_compatible',
+      auth_type: 'bearer',
+      supported_modalities: ['image_to_video'],
+      default_base_url: 'https://api.example.com/v1',
+      is_active: true,
+      endpoints: { image_to_video: { url: 'videos/generations' } },
+      custom_headers: {},
+    }]))
+    await writeFile(join(workspace, 'keys.json'), originalKeysText)
+    await writeFile(join(workspace, 'models.json'), JSON.stringify([{
+      id: keyId,
+      api_key_id: keyId,
+      provider: 'potential-collision-provider',
+      display_name: 'Potential Collision Video',
+      model_name: 'potential-collision-video',
+      capabilities: { image_to_video: true },
+      health_status: 'healthy',
+      context_ui_params: {
+        multi_reference: { supported: true, field: 'assets', shape: 'urls', max: 9 },
+        negative_prompt: { supported: true, field: 'assets' },
+      },
+    }]))
+
+    let configuredNegativePrompt = 'NEG'
+    let compileCalls = 0
+    let executeCalls = 0
+    let taskCalls = 0
+    let removeCalls = 0
+    let fetchCalls = 0
+    const statusEvents: Record<string, any>[] = []
+    globalThis.fetch = (async () => {
+      fetchCalls += 1
+      throw new Error('potential collision must fail before fetch')
+    }) as typeof fetch
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({
+          skillName: 'h3-prompt-writing',
+          mode: 'image_to_video',
+          negativePrompt: configuredNegativePrompt,
+        }) as any
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      registerTask: () => { taskCalls += 1 },
+      unregisterTask: () => { removeCalls += 1 },
+      sendMessage: async (_clientId, message) => {
+        statusEvents.push(message)
+        return true
+      },
+    })
+
+    const baseBody = {
+      api_key_id: keyId,
+      provider: 'potential-collision-provider',
+      model: 'potential-collision-video',
+      type: 'image_to_video',
+      prompt: '生成视频',
+      skill_name: 'h3-prompt-writing',
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+          { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+        ],
+      },
+    }
+
+    for (const negativePrompt of ['NEG', '']) {
+      configuredNegativePrompt = negativePrompt
+      for (const clientId of ['', `potential-${negativePrompt || 'empty'}-background`]) {
+        const response = await call(handlers.get('POST /api/generate'), {
+          body: {
+            ...baseBody,
+            params: { ...baseBody.params, ...(clientId ? { client_id: clientId } : {}) },
+          },
+        })
+        expect(response.statusCode, `${negativePrompt || 'empty'}:${clientId || 'sync'}`).toBe(422)
+        expect(response.body.error_code).toBe('MULTI_REFERENCE_UNSUPPORTED')
+        expect(response.body.detail).toContain('may produce')
+        expect(response.body.detail).toContain('assets')
+      }
+    }
+
+    expect({
+      compileCalls,
+      executeCalls,
+      taskCalls,
+      removeCalls,
+      fetchCalls,
+      statusEvents,
+      keysText: readFileSync(join(workspace, 'keys.json'), 'utf8'),
+    }).toEqual({
+      compileCalls: 0,
+      executeCalls: 0,
+      taskCalls: 0,
+      removeCalls: 0,
+      fetchCalls: 0,
+      statusEvents: [],
+      keysText: originalKeysText,
+    })
+  })
+
+  test('runs actual compiled transport preflight before sync execution or background task registration', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const preflightInputs: Record<string, any>[] = []
+    let compileCalls = 0
+    let executeCalls = 0
+    let taskCalls = 0
+    let removeCalls = 0
+    const statusEvents: Record<string, any>[] = []
+    registerGenerateRoutes(app as any, () => workspace, {
+      preflightTransport: async (...args: any[]) => {
+        const request = args[1]
+        const options = args[3]
+        preflightInputs.push({
+          prompt: request.prompt,
+          negative_prompt: request.negative_prompt,
+          assumeNegativePrompt: Boolean(options?.assumeNegativePrompt),
+        })
+        if (request.negative_prompt === 'NEG') {
+          throw Object.assign(new Error('compiled transport collision'), {
+            code: 'MULTI_REFERENCE_UNSUPPORTED',
+            status: 422,
+          })
+        }
+        return { model: { id: 77 } }
+      },
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({
+          skillName: 'h3-prompt-writing',
+          mode: 'image_to_video',
+          prompt: 'compiled prompt',
+          negativePrompt: 'NEG',
+        }) as any
+      },
+      execute: async () => { executeCalls += 1; return { content: 'unexpected' } as any },
+      registerTask: () => { taskCalls += 1 },
+      unregisterTask: () => { removeCalls += 1 },
+      sendMessage: async (_clientId, message) => {
+        statusEvents.push(message)
+        return true
+      },
+    } as any)
+
+    const baseBody = {
+      model: 'video-model',
+      type: 'image_to_video',
+      prompt: '生成视频',
+      skill_name: 'h3-prompt-writing',
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+          { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+        ],
+      },
+    }
+
+    const syncResponse = await call(handlers.get('POST /api/generate'), { body: baseBody })
+    const backgroundResponse = await call(handlers.get('POST /api/generate'), {
+      body: { ...baseBody, params: { ...baseBody.params, client_id: 'compiled-preflight-background' } },
+    })
+
+    expect(syncResponse.statusCode).toBe(422)
+    expect(syncResponse.body).toMatchObject({ error_code: 'MULTI_REFERENCE_UNSUPPORTED' })
+    expect(backgroundResponse.statusCode).toBe(422)
+    expect(backgroundResponse.body).toMatchObject({ error_code: 'MULTI_REFERENCE_UNSUPPORTED' })
+    expect(preflightInputs).toEqual([
+      { prompt: undefined, negative_prompt: undefined, assumeNegativePrompt: true },
+      { prompt: 'compiled prompt', negative_prompt: 'NEG', assumeNegativePrompt: false },
+      { prompt: undefined, negative_prompt: undefined, assumeNegativePrompt: true },
+      { prompt: 'compiled prompt', negative_prompt: 'NEG', assumeNegativePrompt: false },
+    ])
+    expect({ compileCalls, executeCalls, taskCalls, removeCalls, statusEvents }).toEqual({
+      compileCalls: 2,
+      executeCalls: 0,
+      taskCalls: 0,
+      removeCalls: 0,
+      statusEvents: [],
+    })
   })
 
   test('preflights non-Comfy multi-reference requests before sync execution or background task registration', async () => {

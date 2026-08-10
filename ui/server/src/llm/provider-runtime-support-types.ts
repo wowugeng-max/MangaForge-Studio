@@ -19,6 +19,10 @@ export type RuntimeModelSelectionOptions = {
   routingStrategy?: RuntimeRoutingStrategy | string
 }
 
+export type RuntimeRequestTransportPreflightOptions = RuntimeModelSelectionOptions & {
+  assumeNegativePrompt?: boolean
+}
+
 export type RuntimeExecutionOptions = {
   signal?: AbortSignal
   timeoutMs?: number
@@ -32,4 +36,3 @@ type SafeRuntimeModelSelection = Omit<RuntimeModelSelection, 'key'> & {
     key_preview: string
   }
 }
-

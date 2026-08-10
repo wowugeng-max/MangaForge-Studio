@@ -83,6 +83,33 @@ describe('target negative-prompt transport', () => {
     }), 'text_to_image').transport).toEqual({ source: 'provider', field: 'provider_mode_negative' })
   })
 
+  test('resolves potential negative ownership without mutating an empty request', () => {
+    const request = {
+      model: 'image', prompt: 'POS', messages: [{ role: 'user', content: 'POS' }],
+      type: 'text_to_image',
+    } as any
+    const original = structuredClone(request)
+    const explicit = prepareNegativePromptRequest(request, selection({
+      model: {
+        ...selection().model,
+        context_ui_params: { negative_prompt: { supported: true, field: 'negative_text' } },
+      },
+    }), 'text_to_image', undefined, { assumeNegativePrompt: true })
+    const merged = prepareNegativePromptRequest(
+      request,
+      selection(),
+      'text_to_image',
+      undefined,
+      { assumeNegativePrompt: true },
+    )
+
+    expect(explicit.transport).toEqual({ source: 'model', field: 'negative_text' })
+    expect(explicit.request).toBe(request)
+    expect(merged.transport).toEqual({ source: 'merged' })
+    expect(merged.request).toBe(request)
+    expect(request).toEqual(original)
+  })
+
   test('clones fallback requests and remains idempotent while chat and empty negatives stay untouched', () => {
     const request = {
       model: 'image', prompt: 'POS',

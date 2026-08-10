@@ -13,6 +13,7 @@ import type {
   RuntimeExecutionOptions,
   RuntimeModelSelection,
   RuntimeModelSelectionOptions,
+  RuntimeRequestTransportPreflightOptions,
   RuntimeRoutingStrategy,
 } from './provider-runtime-support-types'
 import {
@@ -23,6 +24,7 @@ export type {
   RuntimeExecutionOptions,
   RuntimeModelSelection,
   RuntimeModelSelectionOptions,
+  RuntimeRequestTransportPreflightOptions,
   RuntimeRoutingStrategy,
 } from './provider-runtime-support-types'
 export {

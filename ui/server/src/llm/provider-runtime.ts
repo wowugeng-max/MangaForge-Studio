@@ -33,6 +33,7 @@ import type {
   RuntimeExecutionOptions,
   RuntimeModelSelection,
   RuntimeModelSelectionOptions,
+  RuntimeRequestTransportPreflightOptions,
   RuntimeRoutingStrategy,
 } from './provider-runtime-support'
 import {
@@ -84,6 +85,7 @@ export type {
   RuntimeExecutionOptions,
   RuntimeModelSelection,
   RuntimeModelSelectionOptions,
+  RuntimeRequestTransportPreflightOptions,
   RuntimeRoutingStrategy,
 } from './provider-runtime-support'
 
@@ -482,9 +484,12 @@ export async function selectRuntimeModel(
 export function preflightSelectedRuntimeRequestTransport(
   selection: RuntimeModelSelection,
   request: LLMRequest,
+  options: RuntimeRequestTransportPreflightOptions = {},
 ): RuntimeModelSelection {
   const routedSelection = selectionForRequestRoute(selection, request)
-  resolveProviderRequestTransportPlan(request, routedSelection, routedSelection.routeType)
+  resolveProviderRequestTransportPlan(request, routedSelection, routedSelection.routeType, {
+    assumeNegativePrompt: options.assumeNegativePrompt,
+  })
   return routedSelection
 }
 
@@ -492,13 +497,13 @@ export async function preflightRuntimeRequestTransport(
   activeWorkspace: string,
   request: LLMRequest,
   preferredModelId?: number,
-  options: RuntimeModelSelectionOptions = {},
+  options: RuntimeRequestTransportPreflightOptions = {},
 ): Promise<RuntimeModelSelection | null> {
   const selection = await selectRuntimeModel(activeWorkspace, preferredModelId, {
     routingStrategy: options.routingStrategy || (request as any).routingStrategy || (request as any).routing_strategy,
   })
   if (!selection) return null
-  return preflightSelectedRuntimeRequestTransport(selection, request)
+  return preflightSelectedRuntimeRequestTransport(selection, request, options)
 }
 
 // ── Main Entry Point ────────────────────────────────────────

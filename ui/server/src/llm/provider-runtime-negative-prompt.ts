@@ -6,6 +6,10 @@ export type NegativePromptTransport = {
   field?: string
 }
 
+export type NegativePromptPreparationOptions = {
+  assumeNegativePrompt?: boolean
+}
+
 type NegativePromptDeclaration = {
   supported: boolean
   field?: string
@@ -226,9 +230,11 @@ export function prepareNegativePromptRequest(
   selection: RuntimeModelSelection,
   routeType: string,
   payloadTemplate?: unknown,
+  options: NegativePromptPreparationOptions = {},
 ): { request: LLMRequest; transport: NegativePromptTransport } {
   const negativePrompt = typeof request.negative_prompt === 'string' ? request.negative_prompt : ''
-  if (!negativePrompt.trim()) return { request, transport: { source: 'empty' } }
+  const hasNegativePrompt = Boolean(negativePrompt.trim())
+  if (!hasNegativePrompt && !options.assumeNegativePrompt) return { request, transport: { source: 'empty' } }
   if (!isMediaRouteType(routeType)) return { request, transport: { source: 'non_media' } }
   if (templateConsumesNegativePrompt(payloadTemplate)) return { request, transport: { source: 'template' } }
 
@@ -239,6 +245,8 @@ export function prepareNegativePromptRequest(
       transport: { source: explicit.source, field: explicit.declaration.field },
     }
   }
+
+  if (!hasNegativePrompt) return { request, transport: { source: 'merged' } }
 
   const lastUser = [...(request.messages || [])].reverse().find(message => message.role === 'user')
   const positivePrompt = typeof request.prompt === 'string' && request.prompt.length > 0
