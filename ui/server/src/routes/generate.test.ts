@@ -337,9 +337,99 @@ describe('canvas generate route', () => {
     expect(legacyRequest.messages).toEqual(legacyMessages)
     expect(legacyRequest.reference_images).toBeUndefined()
     expect(promptOnlyRequest.messages.at(-1)?.content).toEqual([
-      { type: 'text', text: 'legacy prompt\n\n[连线素材]:\nkeep the original framing' },
+      { type: 'text', text: 'legacy prompt' },
+      { type: 'text', text: '[连线素材]:\nkeep the original framing' },
       { type: 'image_url', image_url: { url: '/legacy.png' } },
     ])
+  })
+
+  test('preserves interleaved non-image parts and appends canonical images without rewriting text', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const request = buildCanvasGenerateLLMRequest({
+      model: 'video-model',
+      type: 'image_to_video',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'text before' },
+          { type: 'image_url', image_url: { url: '/old.png' } },
+          { type: 'input_file', file_id: 'notes-file' },
+          { type: 'text', text: 'text after' },
+        ],
+      }],
+      params: {
+        incoming_assets: [
+          { type: 'image', url: '/a.png', reference_role: 'first_frame' },
+          { type: 'image', url: '/b.png', reference_role: 'last_frame' },
+        ],
+      },
+    }) as any
+
+    expect(request.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'text before' },
+      { type: 'input_file', file_id: 'notes-file' },
+      { type: 'text', text: 'text after' },
+      { type: 'image_url', image_url: { url: '/a.png' } },
+      { type: 'image_url', image_url: { url: '/b.png' } },
+    ])
+  })
+
+  test('appends prompt reference context as its own part after existing non-image parts and before images', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+
+    const request = buildCanvasGenerateLLMRequest({
+      model: 'video-model',
+      type: 'image_to_video',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'text before' },
+          { type: 'image_url', image_url: { url: '/old.png' } },
+          { type: 'input_file', file_id: 'notes-file' },
+          { type: 'text', text: 'text after' },
+        ],
+      }],
+      params: {
+        incoming_assets: [
+          { type: 'prompt', content: 'keep wardrobe continuity', reference_role: 'prompt_context' },
+          { type: 'image', url: '/canonical.png', reference_role: 'first_frame' },
+        ],
+      },
+    }) as any
+
+    expect(request.messages.at(-1)?.content).toEqual([
+      { type: 'text', text: 'text before' },
+      { type: 'input_file', file_id: 'notes-file' },
+      { type: 'text', text: 'text after' },
+      { type: 'text', text: '[连线素材]:\nkeep wardrobe continuity' },
+      { type: 'image_url', image_url: { url: '/canonical.png' } },
+    ])
+  })
+
+  test('deep-clones unknown structured message parts before returning the request', async () => {
+    const { buildCanvasGenerateLLMRequest } = await import('./generate')
+    const unknownPart = {
+      type: 'custom_context',
+      payload: { scene: { tags: ['night', 'rain'], camera: { lens: 50 } } },
+    }
+    const payload = {
+      model: 'video-model',
+      type: 'image_to_video',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'animate' }, unknownPart] }],
+      params: { incoming_assets: [{ type: 'image', url: '/frame.png', reference_role: 'first_frame' }] },
+    }
+
+    const request = buildCanvasGenerateLLMRequest(payload) as any
+    const returnedPart = request.messages[0].content.find((part: any) => part.type === 'custom_context')
+
+    expect(returnedPart).toEqual(unknownPart)
+    expect(returnedPart).not.toBe(unknownPart)
+    expect(returnedPart.payload).not.toBe(unknownPart.payload)
+    returnedPart.payload.scene.tags.push('request-only')
+    expect(unknownPart.payload.scene.tags).toEqual(['night', 'rain'])
+    unknownPart.payload.scene.camera.lens = 85
+    expect(returnedPart.payload.scene.camera.lens).toBe(50)
   })
 
   test('preserves file-only structured user messages when canonical image references are appended', async () => {
@@ -388,8 +478,8 @@ describe('canvas generate route', () => {
     expect(promptOnlyRequest.messages).toEqual([{
       role: 'user',
       content: [
-        { type: 'text', text: '[连线素材]:\nkeep the uploaded notes in context' },
         { type: 'input_file', file_url: '/notes.txt' },
+        { type: 'text', text: '[连线素材]:\nkeep the uploaded notes in context' },
       ],
     }])
     expect(emptyRequest.messages).toEqual([])

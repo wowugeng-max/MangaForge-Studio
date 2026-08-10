@@ -126,13 +126,21 @@ function hasRouteMessageContent(content: LLMMessage['content']): boolean {
   return Array.isArray(content) && content.some(hasMeaningfulStructuredMessagePart)
 }
 
+function cloneStructuredMessageValue<T>(value: T): T {
+  if (Array.isArray(value)) return value.map(item => cloneStructuredMessageValue(item)) as T
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).map(([key, item]) => [key, cloneStructuredMessageValue(item)]),
+  ) as T
+}
+
 function normalizeStructuredMessageContent(content: unknown): string | LLMMessageContentPart[] {
   if (!Array.isArray(content)) return stringifyLLMMessageContent(content)
   return content
     .map(part => {
       if (typeof part === 'string') return { type: 'text', text: part }
       if (!part || typeof part !== 'object') return null
-      const record = part as Record<string, any>
+      const record = cloneStructuredMessageValue(part) as Record<string, any>
       const text = typeof record.text === 'string' ? record.text : typeof record.content === 'string' ? record.content : ''
       if (text) return { ...record, type: record.type || 'text', text }
       const imageUrl = imageUrlFromLLMContentPart(record)
@@ -483,37 +491,27 @@ function appendIncomingAssetsToMessages(messages: LLMMessage[], assets: Incoming
   }
 
   const userMessage = nextMessages[userIndex]
-  const baseText = stringifyLLMMessageTextContent(userMessage.content).trim()
   const incomingText = textAssets.length ? `[连线素材]:\n${textAssets.join('\n')}` : ''
-  const text = [baseText, incomingText].filter(Boolean).join('\n\n') || '描述这些参考素材'
   const imageParts = imageAssets.map(asset => ({
     type: 'image_url' as const,
     image_url: { url: String(asset.url) },
   }))
 
   if (Array.isArray(userMessage.content)) {
-    const retainedParts = imageAssets.length
-      ? userMessage.content.filter(part => !isImageMessagePart(part))
-      : [...userMessage.content]
-    const rebuiltParts: LLMMessageContentPart[] = []
-    let textInserted = false
-    for (const part of retainedParts) {
-      if (isTextMessagePart(part)) {
-        if (!textInserted) {
-          rebuiltParts.push({ ...(part && typeof part === 'object' ? part : {}), type: 'text', text })
-          textInserted = true
-        }
-        continue
-      }
-      rebuiltParts.push(part)
-    }
-    if (!textInserted) rebuiltParts.unshift({ type: 'text', text })
-    rebuiltParts.push(...imageParts)
+    const existingImageParts = userMessage.content.filter(isImageMessagePart)
+    const rebuiltParts = userMessage.content.filter(part => !isImageMessagePart(part))
+    const hasExistingText = rebuiltParts.some(isTextMessagePart)
+    if (incomingText) rebuiltParts.push({ type: 'text', text: incomingText })
+    else if (imageParts.length && !hasExistingText) rebuiltParts.unshift({ type: 'text', text: '描述这些参考素材' })
+    rebuiltParts.push(...(imageParts.length ? imageParts : existingImageParts))
     userMessage.content = rebuiltParts
   } else if (imageParts.length) {
+    const baseText = stringifyLLMMessageTextContent(userMessage.content).trim()
+    const text = [baseText, incomingText].filter(Boolean).join('\n\n') || '描述这些参考素材'
     userMessage.content = [{ type: 'text', text }, ...imageParts]
   } else {
-    userMessage.content = text
+    const baseText = stringifyLLMMessageTextContent(userMessage.content).trim()
+    userMessage.content = [baseText, incomingText].filter(Boolean).join('\n\n') || '描述这些参考素材'
   }
   return nextMessages
 }
