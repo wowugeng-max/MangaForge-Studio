@@ -2066,6 +2066,123 @@ describe('canvas generate route', () => {
     expect(taskCalls).toBe(0)
   })
 
+  test('rejects invalid runtime body config before sync or background compiler, provider, metric, task, or status side effects', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let compileCalls = 0
+    let executeCalls = 0
+    let taskCalls = 0
+    const statusEvents: Record<string, any>[] = []
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        compileCalls += 1
+        return compiledSkillResult({ skillName: 'h3-prompt-writing', mode: 'image_to_video' }) as any
+      },
+      execute: async () => {
+        executeCalls += 1
+        return { content: 'unexpected' } as any
+      },
+      registerTask: () => { taskCalls += 1 },
+      sendMessage: async (_clientId, message) => {
+        statusEvents.push(message)
+        return true
+      },
+    })
+
+    const invalidConfigs = [
+      {
+        name: 'unsafe-field-route',
+        endpoints: { image_to_video: { url: 'videos/generations' } },
+        contextUiParams: {
+          multi_reference: { supported: true, field: '__proto__', shape: 'urls', max: 9 },
+        },
+      },
+      {
+        name: 'non-object-template-route',
+        endpoints: {
+          image_to_video: { url: 'videos/generations', payload_template: '{{reference_images}}' },
+        },
+        contextUiParams: {},
+      },
+    ]
+    const keyId = 145
+    const originalKeysText = `${JSON.stringify([
+      {
+        id: keyId,
+        provider: invalidConfigs[0].name,
+        key: 'secret-key',
+        is_active: true,
+        failure_count: 5,
+        last_used: '2026-08-01T00:00:00.000Z',
+      },
+    ], null, 2)}\n`
+
+    for (const invalid of invalidConfigs) {
+      const keysText = originalKeysText.replace(invalidConfigs[0].name, invalid.name)
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: invalid.name,
+          display_name: invalid.name,
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          supported_modalities: ['image_to_video'],
+          default_base_url: 'https://api.example.com/v1',
+          is_active: true,
+          endpoints: invalid.endpoints,
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), keysText)
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: keyId,
+          api_key_id: keyId,
+          provider: invalid.name,
+          display_name: invalid.name,
+          model_name: invalid.name,
+          capabilities: { image_to_video: true },
+          health_status: 'healthy',
+          context_ui_params: invalid.contextUiParams,
+        },
+      ]))
+      const baseBody = {
+        api_key_id: keyId,
+        provider: invalid.name,
+        model: invalid.name,
+        type: 'image_to_video',
+        prompt: '生成视频',
+        skill_name: 'h3-prompt-writing',
+        params: {
+          incoming_assets: [
+            { type: 'image', url: '/first.png', reference_index: 1, reference_role: 'first_frame' },
+            { type: 'image', url: '/last.png', reference_index: 2, reference_role: 'last_frame' },
+          ],
+        },
+      }
+
+      for (const clientId of ['', `${invalid.name}-background`]) {
+        const response = await call(handlers.get('POST /api/generate'), {
+          body: {
+            ...baseBody,
+            params: { ...baseBody.params, ...(clientId ? { client_id: clientId } : {}) },
+          },
+        })
+        expect(response.statusCode, `${invalid.name}:${clientId || 'sync'}`).toBe(422)
+        expect(response.body.error_code, `${invalid.name}:${clientId || 'sync'}`).toBe('MULTI_REFERENCE_UNSUPPORTED')
+      }
+      expect(readFileSync(join(workspace, 'keys.json'), 'utf8'), invalid.name).toBe(keysText)
+    }
+
+    expect({ compileCalls, executeCalls, taskCalls, statusEvents }).toEqual({
+      compileCalls: 0,
+      executeCalls: 0,
+      taskCalls: 0,
+      statusEvents: [],
+    })
+  })
+
   test('pins background-safe execution to the runtime model selected during multi-reference preflight', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')

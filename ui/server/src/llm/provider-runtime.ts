@@ -55,6 +55,7 @@ import {
   rankModelsByBalancedKey,
   recordRuntimeKeyMetrics,
   requestWithLocalAssetDataUris,
+  resolveProviderRequestTransportPlan,
   runtimeRequestCanceledError,
   sanitizeRuntimeSelection,
   shouldUseOpenAIResponsesSdk,
@@ -77,7 +78,7 @@ import {
   parseProviderResponsePayload,
   readProviderStream,
 } from './provider-runtime-stream'
-import { resolveMultiReferenceTransport } from './multi-reference-transport'
+import { isMultiReferenceTransportError } from './multi-reference-transport'
 
 export type {
   RuntimeExecutionOptions,
@@ -483,7 +484,7 @@ export function preflightSelectedRuntimeRequestTransport(
   request: LLMRequest,
 ): RuntimeModelSelection {
   const routedSelection = selectionForRequestRoute(selection, request)
-  resolveMultiReferenceTransport(request, routedSelection)
+  resolveProviderRequestTransportPlan(request, routedSelection)
   return routedSelection
 }
 
@@ -535,6 +536,7 @@ export async function executeWithRuntimeModel<T = any>(
     await recordRuntimeKeyMetrics(activeWorkspace, selection.key.id, startedAt, true)
     return { ...response, runtimeSelection: sanitizeRuntimeSelection(selection) as any }
   } catch (error) {
+    if (isMultiReferenceTransportError(error)) throw error
     await recordRuntimeKeyMetrics(activeWorkspace, selection.key.id, startedAt, false)
     console.error(`[provider-runtime] Request failed: ${error}`)
     return {

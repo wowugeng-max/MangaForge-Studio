@@ -22,13 +22,19 @@ import {
   shouldStreamWithModelOverride,
 } from './model-runtime-overrides'
 import type { RuntimeModelSelection } from './provider-runtime-support-types'
-import { routeDslValue } from './provider-runtime-support-route-dsl'
 import {
   isMultiReferenceImageBearingRole,
   MultiReferenceTransportError,
-  resolveMultiReferenceTransport,
   type MultiReferenceTransport,
 } from './multi-reference-transport'
+import {
+  applyExplicitMultiReferenceField,
+  explicitMultiReferenceFieldOwnsTransport,
+  requestWithoutNativeImageParts,
+  resolveProviderRequestTransportPlan,
+} from './provider-runtime-multi-reference-plan'
+
+export { resolveProviderRequestTransportPlan } from './provider-runtime-multi-reference-plan'
 
 // ── Request Body ────────────────────────────────────────────
 
@@ -113,11 +119,14 @@ function toOpenAIBody(
     // return the image inside the message content.
     if (String(selection.endpoint || '').includes('chat/completions')) {
       const prompt = ((request as any).prompt || textPromptFromMessages(request.messages)) + mediaSizePromptHint((request as any).size)
-      const referenceParts = (request.reference_images || []).map(reference => ({
-        type: 'image_url',
-        image_url: { url: reference.url },
-      }))
-      const imageUrl = String((request as any).image_url || '').trim()
+      const explicitFieldOwnsReferences = explicitMultiReferenceFieldOwnsTransport(multiReferenceTransport)
+      const referenceParts = explicitFieldOwnsReferences
+        ? []
+        : (request.reference_images || []).map(reference => ({
+          type: 'image_url',
+          image_url: { url: reference.url },
+        }))
+      const imageUrl = explicitFieldOwnsReferences ? '' : String((request as any).image_url || '').trim()
       const imageParts = referenceParts.length
         ? referenceParts
         : imageUrl
@@ -145,7 +154,6 @@ function toOpenAIBody(
       if (passthroughBlocked.has(key)) continue
       body[key] = value
     }
-    applyExplicitMultiReferenceField(body, request, multiReferenceTransport)
     // openai 风格媒体端点用 x 分隔尺寸；星号是 DashScope 风格（那条链路走 DSL 模板并自行归一化）
     if (typeof body.size === 'string') body.size = body.size.replace(/\*/g, 'x')
     if (typeof request.negative_prompt === 'string' && request.negative_prompt.trim()) {
@@ -492,31 +500,6 @@ function buildTemplateContext(request: LLMRequest, selection: RuntimeModelSelect
   return context
 }
 
-function applyExplicitMultiReferenceField(
-  body: Record<string, any>,
-  request: LLMRequest,
-  transport: MultiReferenceTransport,
-) {
-  if (
-    !['model_capability', 'provider_capability'].includes(transport.source)
-    || !transport.field
-    || (request.reference_images?.length || 0) <= 1
-  ) return
-  const field = transport.field
-  if (['__proto__', 'prototype', 'constructor'].includes(field)) {
-    throw new MultiReferenceTransportError(
-      'MULTI_REFERENCE_UNSUPPORTED',
-      'Multi-reference provider field is unsafe',
-    )
-  }
-  body[field] = transport.shape === 'urls'
-    ? request.reference_images!.map(reference => reference.url)
-    : request.reference_images!.map(reference => ({
-      ...reference,
-      ...(reference.source_asset_ids ? { source_asset_ids: [...reference.source_asset_ids] } : {}),
-    }))
-}
-
 function requestWithCanonicalReferenceMessageParts(
   request: LLMRequest,
   selection: RuntimeModelSelection,
@@ -657,8 +640,7 @@ export function parseGeminiGenerateContentResponse<T = any>(raw: any): LLMRespon
 }
 
 export function buildProviderRequestBody(request: LLMRequest, selection: RuntimeModelSelection): Record<string, any> {
-  const multiReferenceTransport = resolveMultiReferenceTransport(request, selection)
-  const payloadTemplate = routeDslValue(selection.routeConfig, 'payload_template', 'payloadTemplate')
+  const { multiReferenceTransport, payloadTemplate } = resolveProviderRequestTransportPlan(request, selection)
   if (payloadTemplate) {
     const templateContext = buildTemplateContext(request, selection)
     if (
@@ -683,13 +665,20 @@ export function buildProviderRequestBody(request: LLMRequest, selection: Runtime
     applyExplicitMultiReferenceField(rendered, request, multiReferenceTransport)
     return rendered
   }
-  const nativeRequest = ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
-    ? requestWithCanonicalReferenceMessageParts(request, selection)
-    : request
-  if (isClaudeCodeFormat(selection.apiFormat)) return toAnthropicBody(nativeRequest, selection)
-  if (isGeminiNativeFormat(selection.apiFormat)) return toGeminiGenerateContentBody(nativeRequest)
-  if (isCodexResponsesFormat(selection.apiFormat)) return toCodexResponsesBody(request, selection)
-  return toOpenAIBody(request, selection, multiReferenceTransport)
+  const nativeRequest = explicitMultiReferenceFieldOwnsTransport(multiReferenceTransport)
+    ? requestWithoutNativeImageParts(request)
+    : ['model_capability', 'provider_capability'].includes(multiReferenceTransport.source)
+      ? requestWithCanonicalReferenceMessageParts(request, selection)
+      : request
+  const body = isClaudeCodeFormat(selection.apiFormat)
+    ? toAnthropicBody(nativeRequest, selection)
+    : isGeminiNativeFormat(selection.apiFormat)
+      ? toGeminiGenerateContentBody(nativeRequest)
+      : isCodexResponsesFormat(selection.apiFormat)
+        ? toCodexResponsesBody(nativeRequest, selection)
+        : toOpenAIBody(nativeRequest, selection, multiReferenceTransport)
+  applyExplicitMultiReferenceField(body, request, multiReferenceTransport)
+  return body
 }
 
 export function runtimeRequestCanceledError() {

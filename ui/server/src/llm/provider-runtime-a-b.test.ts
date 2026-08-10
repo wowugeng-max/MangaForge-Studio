@@ -202,6 +202,114 @@ describe('codex responses provider runtime a b', () => {
     }
   })
 
+  test('preflight and execute reject deterministic unsafe field or template bodies without fetch or metric writes', async () => {
+    const invalidConfigs = [
+      {
+        name: 'unsafe-field',
+        endpoints: { image_to_video: { url: 'videos/generations' } },
+        contextUiParams: {
+          multi_reference: { supported: true, field: '__proto__', shape: 'urls', max: 9 },
+        },
+      },
+      {
+        name: 'non-object-template',
+        endpoints: {
+          image_to_video: { url: 'videos/generations', payload_template: '{{reference_images}}' },
+        },
+        contextUiParams: {},
+      },
+    ]
+
+    for (const [index, invalid] of invalidConfigs.entries()) {
+      const workspace = await mkdtemp(join(tmpdir(), `mangaforge-runtime-${invalid.name}-`))
+      try {
+        const keyId = 140 + index
+        await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+          {
+            id: invalid.name,
+            display_name: invalid.name,
+            service_type: 'llm',
+            api_format: 'openai_compatible',
+            auth_type: 'bearer',
+            supported_modalities: ['image_to_video'],
+            default_base_url: 'https://api.example.com/v1',
+            is_active: true,
+            endpoints: invalid.endpoints,
+            custom_headers: {},
+          },
+        ]))
+        const originalKeysText = `${JSON.stringify([
+          {
+            id: keyId,
+            provider: invalid.name,
+            key: 'secret-key',
+            is_active: true,
+            failure_count: 7,
+            last_used: '2026-08-01T00:00:00.000Z',
+          },
+        ], null, 2)}\n`
+        await writeFile(join(workspace, 'keys.json'), originalKeysText)
+        await writeFile(join(workspace, 'models.json'), JSON.stringify([
+          {
+            id: keyId,
+            api_key_id: keyId,
+            provider: invalid.name,
+            display_name: invalid.name,
+            model_name: invalid.name,
+            capabilities: { image_to_video: true },
+            health_status: 'healthy',
+            context_ui_params: invalid.contextUiParams,
+          },
+        ]))
+
+        let fetchCalls = 0
+        globalThis.fetch = (async () => {
+          fetchCalls += 1
+          throw new Error('invalid transport must fail before fetch')
+        }) as typeof fetch
+        const request = {
+          model: 'balanced',
+          type: 'image_to_video',
+          image_url: '/first.png',
+          reference_images: [
+            { url: '/first.png', reference_index: 1 },
+            { url: '/last.png', reference_index: 2 },
+          ],
+          messages: [{ role: 'user', content: '生成视频' }],
+        } as any
+
+        const preflight = await preflightRuntimeRequestTransport(workspace, request, keyId).then(
+          value => ({ value }),
+          error => ({ error }),
+        )
+        const execution = await executeWithRuntimeModel(workspace, request, keyId, { maxRetries: 0 }).then(
+          value => ({ value }),
+          error => ({ error }),
+        )
+
+        expect({
+          preflightCode: (preflight as any).error?.code,
+          preflightStatus: (preflight as any).error?.status,
+          executionCode: (execution as any).error?.code,
+          executionStatus: (execution as any).error?.status,
+          executionResultError: (execution as any).value?.error,
+          fetchCalls,
+          keysText: await readFile(join(workspace, 'keys.json'), 'utf8'),
+        }, invalid.name).toEqual({
+          preflightCode: 'MULTI_REFERENCE_UNSUPPORTED',
+          preflightStatus: 422,
+          executionCode: 'MULTI_REFERENCE_UNSUPPORTED',
+          executionStatus: 422,
+          executionResultError: undefined,
+          fetchCalls: 0,
+          keysText: originalKeysText,
+        })
+      } finally {
+        await rm(workspace, { recursive: true, force: true })
+      }
+    }
+  })
+
   test('preflight leaves existing no-runtime-model handling unchanged', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-empty-preflight-'))
     try {

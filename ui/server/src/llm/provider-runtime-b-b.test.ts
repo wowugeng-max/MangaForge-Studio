@@ -992,6 +992,80 @@ describe('gemini chat-style image generation routing', () => {
     ])
   })
 
+  test('explicit fields own duplicate-preserving multi-reference transport across native adapters', () => {
+    const referenceImages = [
+      { url: 'https://example.com/same.png', reference_index: 1, reference_role: 'first_frame', source_asset_ids: [11] },
+      { url: 'https://example.com/same.png', reference_index: 2, reference_role: 'character', source_asset_ids: [12] },
+      { url: 'https://example.com/last.png', reference_index: 3, reference_role: 'last_frame', source_asset_ids: [13] },
+    ]
+    const request = {
+      model: 'x',
+      type: 'image_to_video',
+      image_url: referenceImages[0].url,
+      reference_images: referenceImages,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'preserve every declared binding' },
+          ...referenceImages.map(reference => ({ type: 'image_url', image_url: { url: reference.url } })),
+        ],
+      }],
+    } as any
+    const original = structuredClone(request)
+    const adapters = [
+      {
+        name: 'anthropic',
+        selection: { apiFormat: 'anthropic', endpoint: 'messages' },
+        nativeImageUrls: (body: any) => body.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+          .map((part: any) => part.source?.url || '')
+          .filter(Boolean),
+      },
+      {
+        name: 'gemini',
+        selection: { apiFormat: 'gemini_native', endpoint: 'models/gemini-video:generateContent' },
+        nativeImageUrls: (body: any) => body.contents.flatMap((message: any) => message.parts || [])
+          .map((part: any) => part.fileData?.fileUri || '')
+          .filter(Boolean),
+      },
+      {
+        name: 'codex',
+        selection: { apiFormat: 'codex_responses', endpoint: 'responses' },
+        nativeImageUrls: (body: any) => body.input.flatMap((message: any) => message.content || [])
+          .map((part: any) => part.type === 'input_image' ? part.image_url : '')
+          .filter(Boolean),
+      },
+      {
+        name: 'openai-chat',
+        selection: { apiFormat: 'openai_compatible', endpoint: 'chat/completions', routeType: 'image_to_video' },
+        nativeImageUrls: (body: any) => body.messages.flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+          .map((part: any) => part.image_url?.url || '')
+          .filter(Boolean),
+      },
+    ]
+
+    for (const shape of ['urls', 'metadata'] as const) {
+      for (const adapter of adapters) {
+        const body = buildProviderRequestBody(request, openaiSelection({
+          ...adapter.selection,
+          model: {
+            ...selection().model,
+            capabilities: { image_to_video: true },
+            context_ui_params: {
+              multi_reference: { supported: true, field: 'declared_images', shape, max: 9 },
+            },
+          },
+        }))
+
+        expect(body.declared_images, `${adapter.name}:${shape}`).toEqual(
+          shape === 'urls' ? referenceImages.map(reference => reference.url) : referenceImages,
+        )
+        expect(Object.hasOwn(body, 'declared_images'), `${adapter.name}:${shape}:own-field`).toBe(true)
+        expect(adapter.nativeImageUrls(body), `${adapter.name}:${shape}`).toEqual([])
+        expect(request, `${adapter.name}:${shape}:input`).toEqual(original)
+      }
+    }
+  })
+
   test('template bodies consume explicit model or provider multi-reference fields', () => {
     const baseRequest = {
       model: 'x',

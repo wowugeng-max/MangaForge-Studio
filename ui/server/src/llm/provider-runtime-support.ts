@@ -42,6 +42,7 @@ import {
   providerEnvelopeCandidates,
   requestRouteType,
   requestWithLocalAssetDataUris,
+  resolveProviderRequestTransportPlan,
   runtimeRequestCanceledError,
   summarizeProviderRequestBodyForLog,
 } from './provider-runtime-support-bodies'
@@ -58,6 +59,7 @@ export {
   providerEnvelopeCandidates,
   requestRouteType,
   requestWithLocalAssetDataUris,
+  resolveProviderRequestTransportPlan,
   runtimeRequestCanceledError,
   summarizeProviderRequestBodyForLog,
 }
@@ -417,4 +419,3 @@ export function describeProviderRequestContext(selection: RuntimeModelSelection,
 
 
 // ── HTTP Request with Retry ─────────────────────────────────
-
