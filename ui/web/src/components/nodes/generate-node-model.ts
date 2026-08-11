@@ -131,8 +131,40 @@ export function selectInstalledGenerateNodeSkill<T extends {
 }
 
 export type GenerateNodeSkillInstallOutcome = {
-  status: 'selected' | 'choose' | 'installed_no_compatible'
+  status: 'selected' | 'choose' | 'installed_no_compatible' | 'installed_preserved'
   selection: GenerateNodeSkillIdentity | null
+}
+
+export type GenerateNodeSkillListRequestChannel = 'all' | 'ready'
+export type GenerateNodeSkillListRequestToken = {
+  channel: GenerateNodeSkillListRequestChannel
+  generation: number
+  sequence: number
+}
+
+export function createGenerateNodeSkillListRequestCoordinator() {
+  let generation = 0
+  const sequences: Record<GenerateNodeSkillListRequestChannel, number> = { all: 0, ready: 0 }
+  return {
+    start(channel: GenerateNodeSkillListRequestChannel): GenerateNodeSkillListRequestToken {
+      sequences[channel] += 1
+      return { channel, generation, sequence: sequences[channel] }
+    },
+    invalidate() {
+      generation += 1
+    },
+    isCurrent(token: GenerateNodeSkillListRequestToken) {
+      return token.generation === generation && token.sequence === sequences[token.channel]
+    },
+  }
+}
+
+function areGenerateNodeSkillIdentitiesEqual(
+  left: GenerateNodeSkillIdentity | null,
+  right: GenerateNodeSkillIdentity | null,
+) {
+  if (!left || !right) return left === right
+  return left.packId === right.packId && left.name === right.name && left.revision === right.revision
 }
 
 export function resolveGenerateNodeSkillInstallOutcome<T extends {
@@ -166,6 +198,37 @@ export function resolveGenerateNodeSkillInstallOutcome<T extends {
     status: matches.length > 1 ? 'choose' : 'installed_no_compatible',
     selection: input.previousSelection,
   }
+}
+
+export function resolveGenerateNodeSkillInstallApplication<T extends {
+  packId: string
+  name: string
+  revision: string
+  compatibility: string
+  mediaModes: readonly string[]
+}>(input: {
+  skills: readonly T[]
+  packId: string
+  revision: string
+  requestTargetMode: GenerateNodeSkillTargetMode
+  currentTargetMode: GenerateNodeSkillTargetMode | undefined
+  requestSelection: GenerateNodeSkillIdentity | null
+  currentSelection: GenerateNodeSkillIdentity | null
+}): GenerateNodeSkillInstallOutcome {
+  if (!input.currentTargetMode) {
+    return { status: 'installed_preserved', selection: input.currentSelection }
+  }
+  const outcome = resolveGenerateNodeSkillInstallOutcome({
+    skills: input.skills,
+    packId: input.packId,
+    revision: input.revision,
+    targetMode: input.currentTargetMode,
+    previousSelection: input.currentSelection,
+  })
+  const contextUnchanged = input.requestTargetMode === input.currentTargetMode
+    && areGenerateNodeSkillIdentitiesEqual(input.requestSelection, input.currentSelection)
+  if (contextUnchanged || outcome.status === 'choose') return outcome
+  return { status: 'installed_preserved', selection: input.currentSelection }
 }
 
 export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {

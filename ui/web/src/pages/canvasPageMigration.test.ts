@@ -234,6 +234,10 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain('installSkillPack(skillPackInstallUrl.trim())')
     expect(generateNode).toContain('skillPackInstallError.error_code')
     expect(generateNode).toContain('skillPackInstallError.detail')
+    expect(generateNode).toContain('createGenerateNodeSkillListRequestCoordinator()')
+    expect(generateNode).toContain('skillListRequestCoordinatorRef.current.invalidate()')
+    expect(generateNode).toContain('generateNodeMountedRef.current')
+    expect(generateNode).toContain('skillPackInstallRequestRef.current')
     expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
 
     for (const helper of ['listSkills', 'installSkillPack', 'compileSkillPreview', 'readSkillSettings', 'writeSkillSettings']) {

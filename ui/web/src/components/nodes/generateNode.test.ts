@@ -3170,8 +3170,108 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(source).toContain('listSkills()')
     expect(source).toContain('listSkills(effectiveSkillCompileMode, true)')
     expect(source).toContain('setSkillPackInstallUrl(\'\')')
-    expect(source).toContain('resolveGenerateNodeSkillInstallOutcome({')
+    expect(source).toContain('resolveGenerateNodeSkillInstallApplication({')
     expect(source).toContain('setSkillCompileEnabled(true)')
+  })
+
+  test('invalidates pre-install Skill lists and accepts only the latest request in each channel', async () => {
+    const model = await import('./generate-node-model')
+    const coordinator = model.createGenerateNodeSkillListRequestCoordinator()
+    const deferred = <T>() => {
+      let resolve!: (value: T) => void
+      const promise = new Promise<T>(next => { resolve = next })
+      return { promise, resolve }
+    }
+    const staleAll = deferred<string[]>()
+    const preInstallToken = coordinator.start('all')
+    const applied: string[][] = []
+    const staleApply = staleAll.promise.then(skills => {
+      if (coordinator.isCurrent(preInstallToken)) applied.push(skills)
+    })
+
+    coordinator.invalidate()
+    const postInstallToken = coordinator.start('all')
+    expect(coordinator.isCurrent(preInstallToken)).toBe(false)
+    expect(coordinator.isCurrent(postInstallToken)).toBe(true)
+    staleAll.resolve(['stale-before-install'])
+    await staleApply
+    expect(applied).toEqual([])
+
+    const installReadyToken = coordinator.start('ready')
+    const targetReadyToken = coordinator.start('ready')
+    expect(coordinator.isCurrent(installReadyToken)).toBe(false)
+    expect(coordinator.isCurrent(targetReadyToken)).toBe(true)
+    expect(coordinator.isCurrent(postInstallToken)).toBe(true)
+  })
+
+  test('preserves current target and selection when install context changed before a unique result resolves', async () => {
+    const model = await import('./generate-node-model')
+    const installed = [{
+      packId: 'h3', name: 'video', revision: 'locked', compatibility: 'prompt_ready', mediaModes: ['text_to_video'],
+    }]
+    const requestSelection = { packId: 'old', name: 'portrait', revision: 'r1' }
+    const currentSelection = { packId: 'user', name: 'new-choice', revision: 'r2' }
+    let resolveInstall!: (value: typeof installed) => void
+    const install = new Promise<typeof installed>(resolve => { resolveInstall = resolve })
+    const outcomePromise = install.then(skills => model.resolveGenerateNodeSkillInstallApplication({
+      skills,
+      packId: 'h3',
+      revision: 'locked',
+      requestTargetMode: 'text_to_video',
+      currentTargetMode: 'image_to_video',
+      requestSelection,
+      currentSelection,
+    }))
+
+    resolveInstall(installed)
+    expect(await outcomePromise).toEqual({ status: 'installed_preserved', selection: currentSelection })
+  })
+
+  test('auto-selects a unique installed Skill only when target and selection context are unchanged', async () => {
+    const model = await import('./generate-node-model')
+    const previousSelection = { packId: 'old', name: 'portrait', revision: 'r1' }
+    const skills = [{
+      packId: 'h3', name: 'video', revision: 'locked', compatibility: 'prompt_ready', mediaModes: ['text_to_video'],
+    }]
+
+    expect(model.resolveGenerateNodeSkillInstallApplication({
+      skills,
+      packId: 'h3',
+      revision: 'locked',
+      requestTargetMode: 'text_to_video',
+      currentTargetMode: 'text_to_video',
+      requestSelection: previousSelection,
+      currentSelection: previousSelection,
+    })).toEqual({
+      status: 'selected',
+      selection: { packId: 'h3', name: 'video', revision: 'locked' },
+    })
+
+    expect(model.resolveGenerateNodeSkillInstallApplication({
+      skills,
+      packId: 'h3',
+      revision: 'locked',
+      requestTargetMode: 'text_to_video',
+      currentTargetMode: 'text_to_video',
+      requestSelection: previousSelection,
+      currentSelection: { packId: 'user', name: 'new-choice', revision: 'r2' },
+    })).toEqual({
+      status: 'installed_preserved',
+      selection: { packId: 'user', name: 'new-choice', revision: 'r2' },
+    })
+  })
+
+  test('guards Skill list and install writes with shared request, mount, target, and selection refs', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('createGenerateNodeSkillListRequestCoordinator()')
+    expect(source).toContain('skillListRequestCoordinatorRef.current.invalidate()')
+    expect(source).toContain('skillListRequestCoordinatorRef.current.isCurrent(')
+    expect(source).toContain('generateNodeMountedRef.current')
+    expect(source).toContain('skillPackInstallRequestRef.current')
+    expect(source).toContain('effectiveSkillCompileModeRef.current')
+    expect(source).toContain('skillSelectionIdentityRef.current')
+    expect(source).toContain('resolveGenerateNodeSkillInstallApplication({')
   })
 
   test('builds a Chat direct Skill result packet without losing audit, reference order, or lineage', async () => {

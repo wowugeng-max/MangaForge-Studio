@@ -53,6 +53,7 @@ import {
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
+  createGenerateNodeSkillListRequestCoordinator,
   freezeGenerateNodeExecutionReferences,
   getGenerateNodeAspectRatioSize,
   isGenerateNodeMuted,
@@ -70,6 +71,7 @@ import {
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillInstallApplication,
   resolveGenerateNodeSkillInstallOutcome,
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
@@ -129,6 +131,7 @@ export {
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
+  createGenerateNodeSkillListRequestCoordinator,
   freezeGenerateNodeExecutionReferences,
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
@@ -144,6 +147,7 @@ export {
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillInstallApplication,
   resolveGenerateNodeSkillInstallOutcome,
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
@@ -167,6 +171,8 @@ export type {
   GenerateNodeRunToken,
   GenerateNodeSkillIdentity,
   GenerateNodeSkillInstallOutcome,
+  GenerateNodeSkillListRequestChannel,
+  GenerateNodeSkillListRequestToken,
   GenerateNodeSkillSelectionError,
   GenerateNodeSkillTargetMode,
   GenerateNodeSkillTargetTransitionOrigin,
@@ -264,7 +270,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const [skillPackInstallUrl, setSkillPackInstallUrl] = useState('')
   const [skillPackInstalling, setSkillPackInstalling] = useState(false)
   const [skillPackInstallStatus, setSkillPackInstallStatus] = useState<{
-    status: 'selected' | 'choose' | 'installed_no_compatible'
+    status: 'selected' | 'choose' | 'installed_no_compatible' | 'installed_preserved'
     packId: string
     revision: string
   } | null>(null)
@@ -335,6 +341,9 @@ function GenerateNodeImpl(props: NodeProps) {
   const appliedSkillTargetResolutionRef = useRef('')
   const pendingSkillTargetUserResolutionRef = useRef(false)
   const skillPreviewRequestTrackerRef = useRef(createGenerateNodePreviewRequestTracker())
+  const skillListRequestCoordinatorRef = useRef(createGenerateNodeSkillListRequestCoordinator())
+  const skillPackInstallRequestRef = useRef(0)
+  const generateNodeMountedRef = useRef(true)
   const nodeRef = useRef<HTMLDivElement>(null)
 
   const cancelChatSkillCompileRun = useCallback(() => {
@@ -374,6 +383,10 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
   const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
   const effectiveSkillCompileMode = resolveGenerateNodeSkillCompileMode({ nodeMode: mode, skillTargetMode })
+  const effectiveSkillCompileModeRef = useRef(effectiveSkillCompileMode)
+  effectiveSkillCompileModeRef.current = effectiveSkillCompileMode
+  const skillSelectionIdentityRef = useRef<GenerateNodeSkillIdentity | null>(null)
+  skillSelectionIdentityRef.current = skillName ? { packId: skillPackId, name: skillName, revision: skillRevision } : null
   const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
   const commandSkillArgumentKey = parsedSkillCommand ? `${parsedSkillCommand.packId || ''}:${parsedSkillCommand.name}` : ''
   const commandSkillArguments = commandSkillArgumentKey ? commandSkillArgumentsByCommand[commandSkillArgumentKey] || {} : {}
@@ -502,8 +515,15 @@ function GenerateNodeImpl(props: NodeProps) {
       appliedSkillTargetResolutionRef.current = `command:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
     }
     pendingSkillTargetUserResolutionRef.current = false
-    if (transition.targetMode !== skillTargetMode) setSkillTargetMode(transition.targetMode)
+    if (transition.targetMode !== skillTargetMode) {
+      effectiveSkillCompileModeRef.current = resolveGenerateNodeSkillCompileMode({
+        nodeMode: mode,
+        skillTargetMode: transition.targetMode,
+      })
+      setSkillTargetMode(transition.targetMode)
+    }
     if (transition.clearSkill && !parsedSkillCommand) {
+      skillSelectionIdentityRef.current = null
       setSkillPackId('')
       setSkillName('')
       setSkillRevision('')
@@ -625,10 +645,26 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [])
 
   useEffect(() => {
+    generateNodeMountedRef.current = true
+    return () => {
+      generateNodeMountedRef.current = false
+      skillPackInstallRequestRef.current += 1
+      skillListRequestCoordinatorRef.current.invalidate()
+    }
+  }, [])
+
+  useEffect(() => {
     let cancelled = false
+    const allSkillsToken = skillListRequestCoordinatorRef.current.start('all')
     listSkills()
-      .then(res => { if (!cancelled) setAllSkills(Array.isArray(res.data?.skills) ? res.data.skills : []) })
-      .catch(() => { if (!cancelled) setAllSkills([]) })
+      .then(res => {
+        if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(allSkillsToken)) {
+          setAllSkills(Array.isArray(res.data?.skills) ? res.data.skills : [])
+        }
+      })
+      .catch(() => {
+        if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(allSkillsToken)) setAllSkills([])
+      })
     readSkillSettings()
       .then(res => { if (!cancelled) setSkillSettings(res.data) })
       .catch(() => { if (!cancelled) setSkillSettings({ skill_compiler_model_id: null }) })
@@ -645,24 +681,30 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [])
 
   useEffect(() => {
+    const readySkillsToken = skillListRequestCoordinatorRef.current.start('ready')
     if (!supportsPromptSkills) {
       setReadySkills([])
       setSkillsLoading(false)
       return
     }
-    let cancelled = false
+    if (!effectiveSkillCompileMode) {
+      setReadySkills([])
+      setSkillsLoading(false)
+      return
+    }
     setSkillsLoading(true)
-    if (!effectiveSkillCompileMode) return
     listSkills(effectiveSkillCompileMode, true)
       .then(res => {
-        if (cancelled) return
+        if (!generateNodeMountedRef.current || !skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) return
         const skills = Array.isArray(res.data?.skills) ? res.data.skills : []
         setReadySkills(skills)
-        setAllSkills(current => Array.from(new Map([...current, ...skills].map(skill => [`${skill.packId}:${skill.name}:${skill.revision}`, skill])).values()))
       })
-      .catch(() => { if (!cancelled) setReadySkills([]) })
-      .finally(() => { if (!cancelled) setSkillsLoading(false) })
-    return () => { cancelled = true }
+      .catch(() => {
+        if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) setReadySkills([])
+      })
+      .finally(() => {
+        if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) setSkillsLoading(false)
+      })
   }, [effectiveSkillCompileMode, supportsPromptSkills])
 
   useEffect(() => {
@@ -1318,6 +1360,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const selectPromptSkill = (value: string) => {
     pendingSkillTargetUserResolutionRef.current = false
     if (!value) {
+      skillSelectionIdentityRef.current = null
       setSkillPackId('')
       setSkillName('')
       setSkillRevision('')
@@ -1327,6 +1370,7 @@ function GenerateNodeImpl(props: NodeProps) {
     }
     const skill = knownSkills.find(item => skillOptionKey(item) === value)
     if (!skill) return
+    skillSelectionIdentityRef.current = { packId: skill.packId, name: skill.name, revision: skill.revision }
     setSkillPackId(skill.packId)
     setSkillName(skill.name)
     setSkillRevision(skill.revision)
@@ -1336,27 +1380,47 @@ function GenerateNodeImpl(props: NodeProps) {
 
   const handleInstallSkillPack = async () => {
     const installUrl = skillPackInstallUrl.trim()
-    if (!installUrl || skillPackInstalling || !effectiveSkillCompileMode) return
+    const requestTargetMode = effectiveSkillCompileModeRef.current
+    if (!installUrl || skillPackInstalling || !requestTargetMode) return
+    const requestSelection = skillSelectionIdentityRef.current
+      ? { ...skillSelectionIdentityRef.current }
+      : null
+    const installRequestId = ++skillPackInstallRequestRef.current
+    const isCurrentInstallRequest = () => (
+      generateNodeMountedRef.current && skillPackInstallRequestRef.current === installRequestId
+    )
     setSkillPackInstalling(true)
     setSkillPackInstallError(null)
     setSkillPackInstallStatus(null)
     try {
       const response = await installSkillPack(skillPackInstallUrl.trim())
+      if (!isCurrentInstallRequest()) return
       const installedSkills = Array.isArray(response.data?.skills) ? response.data.skills : []
       const packId = String(response.data?.record?.id || '')
       const revision = String(response.data?.record?.revision || '')
       const mergeSkills = (current: CanvasSkillSummary[], incoming: CanvasSkillSummary[]) => Array.from(new Map(
         [...current, ...incoming].map(skill => [skillOptionKey(skill), skill]),
       ).values())
-      setAllSkills(current => mergeSkills(current, installedSkills))
-      setReadySkills(current => mergeSkills(current, installedSkills))
+      const currentTargetMode = effectiveSkillCompileModeRef.current
+      const currentSelection = skillSelectionIdentityRef.current
+        ? { ...skillSelectionIdentityRef.current }
+        : null
+      const installedReadySkills = currentTargetMode
+        ? filterGenerateNodeCompatibleSkills(installedSkills, currentTargetMode)
+        : []
 
-      const outcome = resolveGenerateNodeSkillInstallOutcome({
+      skillListRequestCoordinatorRef.current.invalidate()
+      setAllSkills(current => mergeSkills(current, installedSkills))
+      setReadySkills(current => mergeSkills(current, installedReadySkills))
+
+      const outcome = resolveGenerateNodeSkillInstallApplication({
         skills: installedSkills,
         packId,
         revision,
-        targetMode: effectiveSkillCompileMode,
-        previousSelection: skillName ? { packId: skillPackId, name: skillName, revision: skillRevision } : null,
+        requestTargetMode,
+        currentTargetMode,
+        requestSelection,
+        currentSelection,
       })
       if (outcome.status === 'selected' && outcome.selection) {
         const installedSkill = installedSkills.find(skill => (
@@ -1364,6 +1428,7 @@ function GenerateNodeImpl(props: NodeProps) {
           && skill.name === outcome.selection?.name
           && skill.revision === outcome.selection?.revision
         ))
+        skillSelectionIdentityRef.current = { ...outcome.selection }
         setSkillPackId(outcome.selection.packId)
         setSkillName(outcome.selection.name)
         setSkillRevision(outcome.selection.revision)
@@ -1375,27 +1440,30 @@ function GenerateNodeImpl(props: NodeProps) {
       setSkillPackInstallStatus({ status: outcome.status, packId, revision })
       setSkillPackInstallUrl('')
 
-      const [allResult, readyResult] = await Promise.allSettled([
-        listSkills(),
-        listSkills(effectiveSkillCompileMode, true),
-      ])
-      if (allResult.status === 'fulfilled') {
-        const refreshed = Array.isArray(allResult.value.data?.skills) ? allResult.value.data.skills : []
-        setAllSkills(current => mergeSkills(current, refreshed))
-      }
-      if (readyResult.status === 'fulfilled') {
-        const refreshed = Array.isArray(readyResult.value.data?.skills) ? readyResult.value.data.skills : []
-        setReadySkills(current => mergeSkills(current, refreshed))
-        setAllSkills(current => mergeSkills(current, refreshed))
-      }
+      const allSkillsToken = skillListRequestCoordinatorRef.current.start('all')
+      const readySkillsToken = skillListRequestCoordinatorRef.current.start('ready')
+      const allRefresh = listSkills().then(result => {
+        if (!isCurrentInstallRequest() || !skillListRequestCoordinatorRef.current.isCurrent(allSkillsToken)) return
+        const refreshed = Array.isArray(result.data?.skills) ? result.data.skills : []
+        setAllSkills(mergeSkills(refreshed, installedSkills))
+      })
+      const readyRefresh = currentTargetMode
+        ? listSkills(currentTargetMode, true).then(result => {
+          if (!isCurrentInstallRequest() || !skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) return
+          const refreshed = Array.isArray(result.data?.skills) ? result.data.skills : []
+          setReadySkills(mergeSkills(refreshed, installedReadySkills))
+        })
+        : Promise.resolve()
+      await Promise.allSettled([allRefresh, readyRefresh])
     } catch (error: any) {
+      if (!isCurrentInstallRequest()) return
       const body = (error?.response?.data || {}) as Partial<CanvasSkillApiError>
       setSkillPackInstallError({
         error_code: String(body.error_code || 'SKILL_PACK_INSTALL_FAILED'),
         detail: String(body.detail || error?.message || 'Skill Pack 安装失败'),
       })
     } finally {
-      setSkillPackInstalling(false)
+      if (isCurrentInstallRequest()) setSkillPackInstalling(false)
     }
   }
 
@@ -1408,6 +1476,10 @@ function GenerateNodeImpl(props: NodeProps) {
       origin: 'user',
       requestedTargetMode,
       skill: effectiveSkill,
+    })
+    effectiveSkillCompileModeRef.current = resolveGenerateNodeSkillCompileMode({
+      nodeMode: mode,
+      skillTargetMode: transition.targetMode,
     })
     setSkillTargetMode(transition.targetMode)
     if (transition.clearSkill && !parsedSkillCommand) selectPromptSkill('')
@@ -1581,7 +1653,13 @@ function GenerateNodeImpl(props: NodeProps) {
           block
           value={mode}
           options={MODES}
-          onChange={nextMode => { setMode(nextMode as string); setSelectedModel(''); setParams({}) }}
+          onChange={nextMode => {
+            const nextNodeMode = nextMode as string
+            effectiveSkillCompileModeRef.current = resolveGenerateNodeSkillCompileMode({ nodeMode: nextNodeMode, skillTargetMode })
+            setMode(nextNodeMode)
+            setSelectedModel('')
+            setParams({})
+          }}
         />
         <Space.Compact block>
           <Select
@@ -1915,7 +1993,9 @@ function GenerateNodeImpl(props: NodeProps) {
                                 ? '已自动选择此 Pack 中唯一兼容的 Skill，并启用编译。'
                                 : skillPackInstallStatus.status === 'choose'
                                   ? '发现多个兼容 Skill，请从上方列表选择；原选择已保留。'
-                                  : '安装成功，但当前目标没有兼容的 prompt_ready Skill；原选择已保留。'}
+                                  : skillPackInstallStatus.status === 'installed_preserved'
+                                    ? '安装成功；由于目标或 Skill 选择已更改，当前选择已保留。'
+                                    : '安装成功，但当前目标没有兼容的 prompt_ready Skill；原选择已保留。'}
                             </Text>
                           </div>
                         )}
