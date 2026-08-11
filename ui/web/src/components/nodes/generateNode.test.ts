@@ -25,6 +25,11 @@ async function loadGenerateNodeReferenceApi() {
   return module as typeof module & Record<string, any>
 }
 
+async function loadGenerateNodeCompilerSelectorApi() {
+  const module = await import('./generate-node-model')
+  return module as typeof module & Record<string, any>
+}
+
 describe('GenerateNode migration behavior', () => {
   test('refreshes React Flow handles after generation mode changes', () => {
     const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
@@ -2400,6 +2405,320 @@ describe('GenerateNode Skill review regressions', () => {
       selectedName: 'stale-skill',
       selectedRevision: 'stale-revision',
     })).toEqual({ packId: '', name: 'other-skill', revision: '' })
+  })
+})
+
+describe('GenerateNode Skill compiler source selector', () => {
+  const keys = [
+    { id: 1, description: ' Primary Key ', provider: 'ignored-provider', is_active: true },
+    { id: 2, description: '   ', provider: ' Provider Two ', is_active: true },
+    { id: 3, description: '', provider: '   ', is_active: true },
+    { id: 4, description: 'Inactive Key', provider: 'inactive-provider', is_active: false },
+  ]
+
+  const models = [
+    {
+      id: 11,
+      api_key_id: 1,
+      display_name: ' First Compiler ',
+      model_name: 'first-compiler',
+      provider: 'key-provider',
+      is_favorite: false,
+      capabilities: { chat: true },
+    },
+    {
+      id: 12,
+      api_key_id: 1,
+      display_name: ' Vision Compiler ',
+      model_name: 'vision-compiler',
+      provider: 'key-provider',
+      is_favorite: true,
+      capabilities: { chat: true, vision: true },
+    },
+    {
+      id: 13,
+      api_key_id: 2,
+      display_name: '   ',
+      model_name: ' provider-key-model ',
+      provider: 'key-provider-two',
+      capabilities: { chat: true },
+    },
+    {
+      id: 14,
+      api_key_id: 3,
+      display_name: '',
+      model_name: '   ',
+      capabilities: { chat: true },
+    },
+    {
+      id: 15,
+      api_key_id: 4,
+      display_name: ' Legacy First ',
+      model_name: 'legacy-first',
+      provider: ' Legacy Provider ',
+      capabilities: { chat: true },
+    },
+    {
+      id: 16,
+      display_name: 'Legacy Second',
+      model_name: 'legacy-second',
+      provider: 'Legacy Provider',
+      capabilities: { chat: true },
+    },
+    {
+      id: 17,
+      display_name: 'Unbound Compiler',
+      model_name: 'unbound-compiler',
+      provider: '   ',
+      capabilities: { chat: true },
+    },
+    {
+      id: 18,
+      display_name: 'Inactive Compiler',
+      provider: 'Excluded Inactive Provider',
+      is_active: false,
+      capabilities: { chat: true },
+    },
+    {
+      id: 19,
+      display_name: 'Disabled Compiler',
+      provider: 'Excluded Disabled Provider',
+      health_status: 'disabled',
+      capabilities: { chat: true },
+    },
+    {
+      id: 20,
+      display_name: 'Non-chat Compiler',
+      provider: 'Excluded Non-chat Provider',
+      capabilities: { vision: true },
+    },
+    {
+      id: Number.MAX_SAFE_INTEGER + 1,
+      display_name: 'Invalid ID Compiler',
+      provider: 'Excluded Invalid ID Provider',
+      capabilities: { chat: true },
+    },
+  ]
+
+  test('rejects inactive, disabled, non-chat, and invalid-id compiler models', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.isGenerateNodeCompilerModelEligible).toBe('function')
+    if (typeof model.isGenerateNodeCompilerModelEligible !== 'function') return
+
+    const base = { id: 21, capabilities: { chat: true } }
+    expect(model.isGenerateNodeCompilerModelEligible(base)).toBe(true)
+    expect(model.isGenerateNodeCompilerModelEligible({ ...base, is_active: false })).toBe(false)
+    expect(model.isGenerateNodeCompilerModelEligible({ ...base, health_status: 'disabled' })).toBe(false)
+    expect(model.isGenerateNodeCompilerModelEligible({ ...base, capabilities: { chat: false } })).toBe(false)
+    expect(model.isGenerateNodeCompilerModelEligible({ ...base, id: -1 })).toBe(false)
+    expect(model.isGenerateNodeCompilerModelEligible({ ...base, id: Number.MAX_SAFE_INTEGER + 1 })).toBe(false)
+  })
+
+  test('groups eligible models by active Key, legacy Provider, and unbound source in first-seen order', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: 12,
+      workspaceDefaultModelId: null,
+    })
+
+    expect(selector.sourceOptions).toEqual([
+      { value: 'workspace-default', label: '工作区默认' },
+      { value: 'key:1', label: 'Primary Key' },
+      { value: 'key:2', label: 'Provider Two' },
+      { value: 'key:3', label: 'Key 3' },
+      { value: 'provider:Legacy Provider', label: 'Legacy Provider' },
+      { value: 'unbound', label: '未绑定来源' },
+    ])
+    expect(selector.sourceValue).toBe('key:1')
+    expect(selector.modelOptions).toEqual([
+      { value: 11, label: 'First Compiler' },
+      { value: 12, label: 'Vision Compiler · Vision' },
+    ])
+    expect(selector.modelValue).toBe(12)
+    expect(selector.modelDisabled).toBe(false)
+
+    const fallbackModelSelector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: 14,
+      workspaceDefaultModelId: null,
+    })
+    expect(fallbackModelSelector.sourceValue).toBe('key:3')
+    expect(fallbackModelSelector.modelOptions).toEqual([{ value: 14, label: '模型 #14' }])
+  })
+
+  test('shows the configured workspace default with its actual source and model while disabled', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: null,
+      workspaceDefaultModelId: 13,
+    })
+
+    expect(selector.sourceValue).toBe('workspace-default')
+    expect(selector.sourceOptions).toEqual([
+      { value: 'workspace-default', label: '工作区默认 · Provider Two' },
+      { value: 'key:1', label: 'Primary Key' },
+      { value: 'key:2', label: 'Provider Two' },
+      { value: 'key:3', label: 'Key 3' },
+      { value: 'provider:Legacy Provider', label: 'Legacy Provider' },
+      { value: 'unbound', label: '未绑定来源' },
+    ])
+    expect(selector.modelValue).toBe(13)
+    expect(selector.modelOptions).toEqual([{ value: 13, label: 'provider-key-model' }])
+    expect(selector.modelDisabled).toBe(true)
+  })
+
+  test('shows an unconfigured sentinel for a null workspace default', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: null,
+      workspaceDefaultModelId: null,
+    })
+
+    expect(selector.sourceValue).toBe('workspace-default')
+    expect(selector.sourceOptions[0]).toEqual({ value: 'workspace-default', label: '工作区默认' })
+    expect(selector.modelValue).toBe('workspace-default-unconfigured')
+    expect(selector.modelOptions).toEqual([
+      { value: 'workspace-default-unconfigured', label: '未配置' },
+    ])
+    expect(selector.modelDisabled).toBe(true)
+  })
+
+  test('keeps an unavailable workspace default visible while disabled', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: null,
+      workspaceDefaultModelId: 999,
+    })
+
+    expect(selector.sourceValue).toBe('workspace-default')
+    expect(selector.sourceOptions[0]).toEqual({
+      value: 'workspace-default',
+      label: '工作区默认 · 来源不可用',
+    })
+    expect(selector.modelValue).toBe(999)
+    expect(selector.modelOptions).toEqual([{ value: 999, label: '模型 #999 · 不可用' }])
+    expect(selector.modelDisabled).toBe(true)
+  })
+
+  test('derives a valid explicit source and restricts the model choices to that source without mutation', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+    const before = JSON.stringify({ keys, models })
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: 16,
+      workspaceDefaultModelId: 12,
+    })
+
+    expect(selector.sourceValue).toBe('provider:Legacy Provider')
+    expect(selector.modelValue).toBe(16)
+    expect(selector.modelOptions).toEqual([
+      { value: 15, label: 'Legacy First' },
+      { value: 16, label: 'Legacy Second' },
+    ])
+    expect(selector.modelDisabled).toBe(false)
+    expect(selector.sourceOptions[0]).toEqual({
+      value: 'workspace-default',
+      label: '工作区默认 · Primary Key',
+    })
+    expect(JSON.stringify({ keys, models })).toBe(before)
+  })
+
+  test('appends an unavailable source and preserves a stale explicit override', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.buildGenerateNodeCompilerSelectorModel).toBe('function')
+    if (typeof model.buildGenerateNodeCompilerSelectorModel !== 'function') return
+
+    const selector = model.buildGenerateNodeCompilerSelectorModel({
+      keys,
+      models,
+      overrideModelId: 404,
+      workspaceDefaultModelId: null,
+    })
+
+    expect(selector.sourceValue).toBe('unavailable')
+    expect(selector.sourceOptions).toEqual([
+      { value: 'workspace-default', label: '工作区默认' },
+      { value: 'key:1', label: 'Primary Key' },
+      { value: 'key:2', label: 'Provider Two' },
+      { value: 'key:3', label: 'Key 3' },
+      { value: 'provider:Legacy Provider', label: 'Legacy Provider' },
+      { value: 'unbound', label: '未绑定来源' },
+      { value: 'unavailable', label: '来源不可用' },
+    ])
+    expect(selector.modelValue).toBe(404)
+    expect(selector.modelOptions).toEqual([{ value: 404, label: '模型 #404 · 不可用' }])
+    expect(selector.modelDisabled).toBe(true)
+  })
+
+  test('selects the first favorite model, then the first model, when changing concrete sources', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.resolveGenerateNodeCompilerModelIdForSource).toBe('function')
+    if (typeof model.resolveGenerateNodeCompilerModelIdForSource !== 'function') return
+    const before = JSON.stringify({ keys, models })
+
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'key:1',
+    })).toBe(12)
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'provider:Legacy Provider',
+    })).toBe(15)
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'unbound',
+    })).toBe(17)
+    expect(JSON.stringify({ keys, models })).toBe(before)
+  })
+
+  test('returns null for workspace-default and unknown source transitions', async () => {
+    const model = await loadGenerateNodeCompilerSelectorApi()
+    expect(typeof model.resolveGenerateNodeCompilerModelIdForSource).toBe('function')
+    if (typeof model.resolveGenerateNodeCompilerModelIdForSource !== 'function') return
+
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'workspace-default',
+    })).toBeNull()
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'unavailable',
+    })).toBeNull()
+    expect(model.resolveGenerateNodeCompilerModelIdForSource({
+      keys,
+      models,
+      sourceValue: 'provider:missing',
+    })).toBeNull()
   })
 })
 

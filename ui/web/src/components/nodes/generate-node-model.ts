@@ -497,6 +497,214 @@ export function normalizeGenerateNodeCompilerModelId(value: unknown): number | n
   return Number.isSafeInteger(normalized) && normalized >= 0 ? normalized : null
 }
 
+export type GenerateNodeCompilerKey = {
+  id: number | string
+  description?: string | null
+  provider?: string | null
+  is_active?: boolean | null
+}
+
+export type GenerateNodeCompilerModel = {
+  id: number | string
+  api_key_id?: number | string | null
+  provider?: string | null
+  display_name?: string | null
+  model_name?: string | null
+  is_active?: boolean | null
+  health_status?: string | null
+  is_favorite?: boolean | null
+  capabilities?: Record<string, boolean | undefined> | null
+}
+
+export type GenerateNodeCompilerSourceValue =
+  | 'workspace-default'
+  | `key:${number}`
+  | `provider:${string}`
+  | 'unbound'
+  | 'unavailable'
+
+export type GenerateNodeCompilerSelectOption = {
+  value: string | number
+  label: string
+}
+
+export type GenerateNodeCompilerSelectorModel = {
+  sourceValue: GenerateNodeCompilerSourceValue
+  sourceOptions: GenerateNodeCompilerSelectOption[]
+  modelValue: string | number
+  modelOptions: GenerateNodeCompilerSelectOption[]
+  modelDisabled: boolean
+}
+
+type GenerateNodeCompilerSourceGroup = {
+  value: Exclude<GenerateNodeCompilerSourceValue, 'workspace-default' | 'unavailable'>
+  label: string
+  models: Array<{ id: number; model: GenerateNodeCompilerModel }>
+}
+
+function trimGenerateNodeCompilerText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function isGenerateNodeCompilerModelEligible(model: GenerateNodeCompilerModel): boolean {
+  return normalizeGenerateNodeCompilerModelId(model?.id) !== null
+    && model?.is_active !== false
+    && model?.health_status !== 'disabled'
+    && model?.capabilities?.chat === true
+}
+
+function buildGenerateNodeCompilerSourceGroups(input: {
+  keys: readonly GenerateNodeCompilerKey[]
+  models: readonly GenerateNodeCompilerModel[]
+}): GenerateNodeCompilerSourceGroup[] {
+  const activeKeys = new Map<number, GenerateNodeCompilerKey>()
+  for (const key of input.keys) {
+    if (key?.is_active === false) continue
+    const keyId = normalizeGenerateNodeCompilerModelId(key?.id)
+    if (keyId !== null && !activeKeys.has(keyId)) activeKeys.set(keyId, key)
+  }
+
+  const groups = new Map<GenerateNodeCompilerSourceGroup['value'], GenerateNodeCompilerSourceGroup>()
+  for (const model of input.models) {
+    if (!isGenerateNodeCompilerModelEligible(model)) continue
+    const modelId = normalizeGenerateNodeCompilerModelId(model.id) as number
+    const apiKeyId = normalizeGenerateNodeCompilerModelId(model.api_key_id)
+    const activeKey = apiKeyId === null ? undefined : activeKeys.get(apiKeyId)
+    const provider = trimGenerateNodeCompilerText(model.provider)
+
+    let value: GenerateNodeCompilerSourceGroup['value']
+    let label: string
+    if (activeKey && apiKeyId !== null) {
+      value = `key:${apiKeyId}`
+      label = trimGenerateNodeCompilerText(activeKey.description)
+        || trimGenerateNodeCompilerText(activeKey.provider)
+        || `Key ${apiKeyId}`
+    } else if (provider) {
+      value = `provider:${provider}`
+      label = provider
+    } else {
+      value = 'unbound'
+      label = '未绑定来源'
+    }
+
+    const existingGroup = groups.get(value)
+    if (existingGroup) {
+      existingGroup.models.push({ id: modelId, model })
+    } else {
+      groups.set(value, { value, label, models: [{ id: modelId, model }] })
+    }
+  }
+  return Array.from(groups.values())
+}
+
+function labelGenerateNodeCompilerModel(id: number, model: GenerateNodeCompilerModel): string {
+  const label = trimGenerateNodeCompilerText(model.display_name)
+    || trimGenerateNodeCompilerText(model.model_name)
+    || `模型 #${id}`
+  return `${label}${model.capabilities?.vision === true ? ' · Vision' : ''}`
+}
+
+function optionGenerateNodeCompilerModel(
+  entry: GenerateNodeCompilerSourceGroup['models'][number],
+): GenerateNodeCompilerSelectOption {
+  return { value: entry.id, label: labelGenerateNodeCompilerModel(entry.id, entry.model) }
+}
+
+function findGenerateNodeCompilerModel(
+  groups: readonly GenerateNodeCompilerSourceGroup[],
+  modelId: number | null,
+): { group: GenerateNodeCompilerSourceGroup; entry: GenerateNodeCompilerSourceGroup['models'][number] } | undefined {
+  if (modelId === null) return undefined
+  for (const group of groups) {
+    const entry = group.models.find(candidate => candidate.id === modelId)
+    if (entry) return { group, entry }
+  }
+  return undefined
+}
+
+function unavailableGenerateNodeCompilerModelOption(modelId: number): GenerateNodeCompilerSelectOption {
+  return { value: modelId, label: `模型 #${modelId} · 不可用` }
+}
+
+export function buildGenerateNodeCompilerSelectorModel(input: {
+  keys: readonly GenerateNodeCompilerKey[]
+  models: readonly GenerateNodeCompilerModel[]
+  overrideModelId: unknown
+  workspaceDefaultModelId: unknown
+}): GenerateNodeCompilerSelectorModel {
+  const groups = buildGenerateNodeCompilerSourceGroups(input)
+  const overrideModelId = normalizeGenerateNodeCompilerModelId(input.overrideModelId)
+  const workspaceDefaultModelId = normalizeGenerateNodeCompilerModelId(input.workspaceDefaultModelId)
+  const workspaceDefaultMatch = findGenerateNodeCompilerModel(groups, workspaceDefaultModelId)
+  const workspaceDefaultLabel = workspaceDefaultModelId === null
+    ? '工作区默认'
+    : workspaceDefaultMatch
+      ? `工作区默认 · ${workspaceDefaultMatch.group.label}`
+      : '工作区默认 · 来源不可用'
+  const sourceOptions: GenerateNodeCompilerSelectOption[] = [
+    { value: 'workspace-default', label: workspaceDefaultLabel },
+    ...groups.map(group => ({ value: group.value, label: group.label })),
+  ]
+
+  if (overrideModelId === null) {
+    if (workspaceDefaultModelId === null) {
+      return {
+        sourceValue: 'workspace-default',
+        sourceOptions,
+        modelValue: 'workspace-default-unconfigured',
+        modelOptions: [{ value: 'workspace-default-unconfigured', label: '未配置' }],
+        modelDisabled: true,
+      }
+    }
+    if (!workspaceDefaultMatch) {
+      return {
+        sourceValue: 'workspace-default',
+        sourceOptions,
+        modelValue: workspaceDefaultModelId,
+        modelOptions: [unavailableGenerateNodeCompilerModelOption(workspaceDefaultModelId)],
+        modelDisabled: true,
+      }
+    }
+    return {
+      sourceValue: 'workspace-default',
+      sourceOptions,
+      modelValue: workspaceDefaultModelId,
+      modelOptions: [optionGenerateNodeCompilerModel(workspaceDefaultMatch.entry)],
+      modelDisabled: true,
+    }
+  }
+
+  const overrideMatch = findGenerateNodeCompilerModel(groups, overrideModelId)
+  if (overrideMatch) {
+    return {
+      sourceValue: overrideMatch.group.value,
+      sourceOptions,
+      modelValue: overrideModelId,
+      modelOptions: overrideMatch.group.models.map(optionGenerateNodeCompilerModel),
+      modelDisabled: false,
+    }
+  }
+
+  return {
+    sourceValue: 'unavailable',
+    sourceOptions: [...sourceOptions, { value: 'unavailable', label: '来源不可用' }],
+    modelValue: overrideModelId,
+    modelOptions: [unavailableGenerateNodeCompilerModelOption(overrideModelId)],
+    modelDisabled: true,
+  }
+}
+
+export function resolveGenerateNodeCompilerModelIdForSource(input: {
+  keys: readonly GenerateNodeCompilerKey[]
+  models: readonly GenerateNodeCompilerModel[]
+  sourceValue: GenerateNodeCompilerSourceValue
+}): number | null {
+  if (input.sourceValue === 'workspace-default') return null
+  const group = buildGenerateNodeCompilerSourceGroups(input).find(candidate => candidate.value === input.sourceValue)
+  if (!group) return null
+  return (group.models.find(entry => entry.model.is_favorite === true) || group.models[0])?.id ?? null
+}
+
 export function buildGenerateNodeSkillIdentity(input: {
   command?: ParsedCanvasSkillCommand | null
   selectedPackId?: string
