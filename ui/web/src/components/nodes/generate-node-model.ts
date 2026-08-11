@@ -37,6 +37,75 @@ export const GENERATE_NODE_ROUTING_STRATEGY_OPTIONS = [
   { label: '随机均衡', value: 'random' },
 ]
 
+export type GenerateNodeSkillTargetMode = 'text_to_image' | 'image_to_image' | 'text_to_video' | 'image_to_video'
+
+export const GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS = [
+  { label: '文生图', value: 'text_to_image' },
+  { label: '图生图', value: 'image_to_image' },
+  { label: '文生视频', value: 'text_to_video' },
+  { label: '图生视频', value: 'image_to_video' },
+] as const
+
+const GENERATE_NODE_SKILL_TARGET_MODES = new Set<GenerateNodeSkillTargetMode>(
+  GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS.map(option => option.value),
+)
+
+export function normalizeGenerateNodeSkillTargetMode(value: unknown): GenerateNodeSkillTargetMode {
+  const persistedValue = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>).skillTargetMode ?? (value as Record<string, unknown>).skill_target_mode
+    : value
+  return typeof persistedValue === 'string' && GENERATE_NODE_SKILL_TARGET_MODES.has(persistedValue as GenerateNodeSkillTargetMode)
+    ? persistedValue as GenerateNodeSkillTargetMode
+    : 'text_to_image'
+}
+
+export function resolveGenerateNodeSkillCompileMode(input: {
+  nodeMode: string
+  skillTargetMode?: unknown
+}): GenerateNodeSkillTargetMode | undefined {
+  if (input.nodeMode === 'chat') return normalizeGenerateNodeSkillTargetMode(input.skillTargetMode)
+  return GENERATE_NODE_SKILL_TARGET_MODES.has(input.nodeMode as GenerateNodeSkillTargetMode)
+    ? input.nodeMode as GenerateNodeSkillTargetMode
+    : undefined
+}
+
+export function filterGenerateNodeCompatibleSkills<T extends { compatibility: string; mediaModes: readonly string[] }>(
+  skills: readonly T[],
+  mode: GenerateNodeSkillTargetMode,
+): T[] {
+  return skills.filter(skill => (
+    skill.compatibility === 'prompt_ready'
+    && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode))
+  ))
+}
+
+export function resolveGenerateNodeSkillFallbackTarget<T extends { mediaModes: readonly string[] }>(input: {
+  skill: T
+  targetMode: GenerateNodeSkillTargetMode
+}): GenerateNodeSkillTargetMode | undefined {
+  if (input.skill.mediaModes.length === 0 || input.skill.mediaModes.includes(input.targetMode)) return input.targetMode
+  return GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS
+    .map(option => option.value)
+    .find(mode => input.skill.mediaModes.includes(mode))
+}
+
+export function selectInstalledGenerateNodeSkill<T extends {
+  packId: string
+  revision: string
+  compatibility: string
+  mediaModes: readonly string[]
+}>(input: {
+  skills: readonly T[]
+  packId: string
+  revision: string
+  targetMode: GenerateNodeSkillTargetMode
+}): T | undefined {
+  return filterGenerateNodeCompatibleSkills(
+    input.skills.filter(skill => skill.packId === input.packId && skill.revision === input.revision),
+    input.targetMode,
+  )[0]
+}
+
 export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {
   return getAspectRatioSize(value, customWidth, customHeight)
 }
@@ -712,6 +781,57 @@ export function normalizeGenerateNodeReferenceBindings(
 
   enforceGenerateNodeReferenceConstraints(bindings)
   return bindings
+}
+
+export function buildGenerateNodeChatSkillResultPacket(input: {
+  compile: {
+    skill_name: string
+    skill_version: string
+    mode: string
+    prompt: string
+    negative_prompt?: string
+    parameters?: Record<string, string | number | boolean>
+    references_used?: string[]
+    warnings?: string[]
+    reference_bindings?: readonly GenerateNodeIncomingAsset[]
+    reference_mode_hint?: string
+  }
+  cacheKey: string
+  cached: boolean
+  packId: string
+  packSource?: string
+  compilerModelId: number
+  rawPrompt: string
+}) {
+  const orderedBindings = normalizeGenerateNodeReferenceBindings(
+    [...(input.compile.reference_bindings || [])].sort((left, right) => (
+      Number(left.reference_index || 0) - Number(right.reference_index || 0)
+    )),
+  )
+  const sourceAssetIds = Array.from(new Set(orderedBindings.flatMap(binding => binding.source_asset_ids || [])))
+  const negativePrompt = String(input.compile.negative_prompt || '')
+  const referencesUsed = Array.isArray(input.compile.references_used) ? [...input.compile.references_used] : []
+  const warnings = Array.isArray(input.compile.warnings) ? [...input.compile.warnings] : []
+
+  return {
+    content: input.compile.prompt,
+    ...(negativePrompt ? { negative_prompt: negativePrompt } : {}),
+    skill_pack_id: input.packId,
+    ...(input.packSource ? { skill_pack_source: input.packSource } : {}),
+    skill_name: input.compile.skill_name,
+    skill_revision: input.compile.skill_version,
+    compiler_model_id: input.compilerModelId,
+    compiled_input_hash: input.cacheKey,
+    skill_preview_cached: input.cached,
+    compiled_prompt: input.compile.prompt,
+    compiled_negative_prompt: negativePrompt,
+    compiled_references: referencesUsed,
+    warnings,
+    ...(input.compile.reference_mode_hint ? { reference_mode_hint: input.compile.reference_mode_hint } : {}),
+    reference_bindings: orderedBindings,
+    source_asset_ids: sourceAssetIds,
+    raw_prompt: input.rawPrompt,
+  }
 }
 
 export function reorderGenerateNodeReferenceBindings(

@@ -2378,3 +2378,60 @@ describe('GenerateNode Skill review regressions', () => {
     })).toEqual({ packId: '', name: 'other-skill', revision: '' })
   })
 })
+
+describe('GenerateNode Chat Skill model helpers', () => {
+  test('normalizes persisted Chat prompt target aliases and invalid values', async () => {
+    const model = await import('./generate-node-model')
+    expect(model.normalizeGenerateNodeSkillTargetMode('image_to_video')).toBe('image_to_video')
+    expect(model.normalizeGenerateNodeSkillTargetMode({ skillTargetMode: 'image_to_image' })).toBe('image_to_image')
+    expect(model.normalizeGenerateNodeSkillTargetMode({ skill_target_mode: 'text_to_video' })).toBe('text_to_video')
+    expect(model.normalizeGenerateNodeSkillTargetMode('chat')).toBe('text_to_image')
+    expect(model.normalizeGenerateNodeSkillTargetMode('vision')).toBe('text_to_image')
+    expect(model.normalizeGenerateNodeSkillTargetMode('invalid')).toBe('text_to_image')
+    expect(model.normalizeGenerateNodeSkillTargetMode(undefined)).toBe('text_to_image')
+  })
+
+  test('uses Chat target mode only for Skill compilation', async () => {
+    const model = await import('./generate-node-model')
+    expect(model.resolveGenerateNodeSkillCompileMode({ nodeMode: 'chat', skillTargetMode: 'image_to_video' })).toBe('image_to_video')
+    expect(model.resolveGenerateNodeSkillCompileMode({ nodeMode: 'text_to_video', skillTargetMode: 'image_to_image' })).toBe('text_to_video')
+    expect(model.resolveGenerateNodeSkillCompileMode({ nodeMode: 'vision', skillTargetMode: 'image_to_image' })).toBeUndefined()
+  })
+
+  test('filters prompt-ready Skills by effective target and picks one compatible Skill after install', async () => {
+    const model = await import('./generate-node-model')
+    const skills = [
+      { packId: 'h3', name: 'h3-prompt-writing', revision: 'r1', compatibility: 'prompt_ready', mediaModes: ['text_to_video', 'image_to_video'] },
+      { packId: 'other', name: 'image-only', revision: 'r2', compatibility: 'prompt_ready', mediaModes: ['text_to_image'] },
+      { packId: 'other', name: 'workflow', revision: 'r2', compatibility: 'workflow_only', mediaModes: [] },
+    ]
+    expect(model.filterGenerateNodeCompatibleSkills(skills, 'text_to_video')).toEqual([skills[0]])
+    expect(model.selectInstalledGenerateNodeSkill({ skills, packId: 'h3', revision: 'r1', targetMode: 'image_to_video' })).toBe(skills[0])
+    expect(model.resolveGenerateNodeSkillFallbackTarget({ skill: skills[0], targetMode: 'text_to_image' })).toBe('text_to_video')
+    expect(model.resolveGenerateNodeSkillFallbackTarget({ skill: { mediaModes: [] }, targetMode: 'image_to_image' })).toBe('image_to_image')
+  })
+
+  test('builds a Chat direct Skill result packet without losing audit, reference order, or lineage', async () => {
+    const model = await import('./generate-node-model')
+    const packet = model.buildGenerateNodeChatSkillResultPacket({
+      compile: {
+        skill_name: 'h3-prompt-writing', skill_version: 'r1', mode: 'image_to_video', prompt: 'positive', negative_prompt: 'negative',
+        parameters: {}, references_used: ['hero', 'scene'], warnings: ['trimmed'], reference_mode_hint: 'Ref2VA',
+        reference_bindings: [
+          { reference_index: 2, reference_id: 'scene', reference_role: 'scene', type: 'image', url: 'https://cdn/scene.png', source_asset_ids: [42, 43] },
+          { reference_index: 1, reference_id: 'hero', reference_role: 'character', type: 'image', url: 'https://cdn/hero.png', source_asset_ids: [42] },
+        ],
+      },
+      cacheKey: 'sha256:input', cached: true, packId: 'h3', packSource: 'https://github.com/MiniMax-AI/MiniMax-H3', compilerModelId: 9, rawPrompt: 'hero prompt',
+    })
+    expect(packet).toMatchObject({
+      content: 'positive', negative_prompt: 'negative', compiled_prompt: 'positive', compiled_negative_prompt: 'negative',
+      skill_pack_id: 'h3', skill_pack_source: 'https://github.com/MiniMax-AI/MiniMax-H3', skill_name: 'h3-prompt-writing', skill_revision: 'r1',
+      compiled_input_hash: 'sha256:input', compiler_model_id: 9, skill_preview_cached: true, warnings: ['trimmed'], reference_mode_hint: 'Ref2VA',
+      raw_prompt: 'hero prompt', source_asset_ids: [42, 43],
+      reference_bindings: [{ reference_index: 1, reference_id: 'hero' }, { reference_index: 2, reference_id: 'scene' }],
+      compiled_references: ['hero', 'scene'],
+    })
+    expect(packet.content).not.toContain('negative')
+  })
+})
