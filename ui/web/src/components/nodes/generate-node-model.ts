@@ -826,9 +826,10 @@ export function buildGenerateNodeChatSkillResultPacket(input: {
   packSource?: string
   compilerModelId: number
   rawPrompt: string
+  executionReferences?: readonly GenerateNodeIncomingAsset[]
 }) {
   const orderedBindings = normalizeGenerateNodeReferenceBindings(
-    [...(input.compile.reference_bindings || [])].sort((left, right) => (
+    [...(input.compile.reference_bindings ?? input.executionReferences ?? [])].sort((left, right) => (
       Number(left.reference_index || 0) - Number(right.reference_index || 0)
     )),
   )
@@ -855,6 +856,42 @@ export function buildGenerateNodeChatSkillResultPacket(input: {
     reference_bindings: orderedBindings,
     source_asset_ids: sourceAssetIds,
     raw_prompt: input.rawPrompt,
+  }
+}
+
+export async function runGenerateNodeChatSkillCompilation(input: {
+  request: CanvasSkillCompileInput
+  compile: (request: CanvasSkillCompileInput) => Promise<{ data: CanvasSkillCompileResponse }>
+  isCurrent: () => boolean
+  packId: string
+  packSource?: string
+  compilerModelId: number
+  rawPrompt: string
+  executionReferences?: readonly GenerateNodeIncomingAsset[]
+}): Promise<
+  | { status: 'stale' }
+  | { status: 'current'; packet: ReturnType<typeof buildGenerateNodeChatSkillResultPacket> }
+> {
+  let response: { data: CanvasSkillCompileResponse }
+  try {
+    response = await input.compile(input.request)
+  } catch (error) {
+    if (!input.isCurrent()) return { status: 'stale' }
+    throw error
+  }
+  if (!input.isCurrent()) return { status: 'stale' }
+  return {
+    status: 'current',
+    packet: buildGenerateNodeChatSkillResultPacket({
+      compile: response.data.result,
+      cacheKey: response.data.cache_key,
+      cached: response.data.cached,
+      packId: input.packId,
+      packSource: input.packSource,
+      compilerModelId: input.compilerModelId,
+      rawPrompt: input.rawPrompt,
+      executionReferences: input.executionReferences,
+    }),
   }
 }
 

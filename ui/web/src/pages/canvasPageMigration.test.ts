@@ -251,6 +251,30 @@ describe('ComfyForge canvas feature migration', () => {
     }
   })
 
+  test('generate node splits Chat Skill compilation from legacy Provider generation', () => {
+    const generateNode = source('../components/nodes/GenerateNode.tsx')
+    const handleRunStart = generateNode.indexOf('const handleRun = async () => {')
+    const handleRunEnd = generateNode.indexOf('useEffect(() => {', handleRunStart)
+    const handleRun = generateNode.slice(handleRunStart, handleRunEnd)
+    const directStart = handleRun.indexOf('if (isChatSkillCompileOnly) {')
+    const providerStart = handleRun.indexOf('if (!selectedKey || !selectedModel)')
+    const directRun = handleRun.slice(directStart, providerStart)
+
+    expect(generateNode).toContain("const isChatSkillCompileOnly = mode === 'chat' && hasEffectiveSkill")
+    expect(directStart).toBeGreaterThan(-1)
+    expect(directStart).toBeLessThan(providerStart)
+    expect(directRun).toContain('compile: compileSkillPreview')
+    expect(directRun).not.toContain('createSSEClient')
+    expect(directRun).not.toContain("url: '/generate'")
+    expect(directRun).not.toContain('result: null')
+    expect(handleRun.slice(providerStart)).toContain('createSSEClient(id,')
+    expect(handleRun.slice(providerStart)).toContain("url: '/generate'")
+
+    const interrupt = generateNode.slice(generateNode.indexOf('const handleInterrupt = async () => {'), generateNode.indexOf('const handleSaveToAsset ='))
+    expect(interrupt).toContain('generateRunTrackerRef.current.invalidate()')
+    expect(interrupt).toContain("apiClient.post(`/interrupt/${id}`)")
+  })
+
   test('generate node uses a node-following config toolbar with quick access layers', () => {
     const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
 

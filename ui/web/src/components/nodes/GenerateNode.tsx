@@ -75,6 +75,7 @@ import {
   resolveGenerateNodeResultReferenceBindings,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
+  runGenerateNodeChatSkillCompilation,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
@@ -138,6 +139,7 @@ export {
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeResultReferenceBindings,
+  runGenerateNodeChatSkillCompilation,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
@@ -294,6 +296,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const referenceBindingsRef = useRef(referenceBindings)
   referenceBindingsRef.current = referenceBindings
   const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())
+  const chatSkillCompileRunTokenRef = useRef<GenerateNodeRunToken | null>(null)
   const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)
   const sseClientRef = useRef<SSEClient | null>(null)
   const prevRunSignalRef = useRef(data?._runSignal)
@@ -382,6 +385,7 @@ function GenerateNodeImpl(props: NodeProps) {
     }))
   }
   const hasEffectiveSkill = supportsPromptSkills && Boolean(effectiveSkillName)
+  const isChatSkillCompileOnly = mode === 'chat' && hasEffectiveSkill
   const effectiveCompilerModelId = skillCompilerModelId ?? (skillSettingsLoaded ? skillSettings?.skill_compiler_model_id ?? null : compilerModelId)
   const effectiveCompilerModel = compilerModels.find(model => Number(model.id) === Number(effectiveCompilerModelId))
   const effectiveSkillIncompatible = Boolean(hasEffectiveSkill && effectiveSkill && (
@@ -412,7 +416,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const { previewBlocked, runBlocked } = resolveGenerateNodeExecutionBlockState({
     skillBlocked: skillRunBlocked,
     referenceValidationError: effectiveReferenceValidationError,
-    executionCompatibilityError,
+    executionCompatibilityError: isChatSkillCompileOnly ? null : executionCompatibilityError,
   })
   const executionCompatibilityContextFingerprint = JSON.stringify({
     selectedKey,
@@ -484,6 +488,10 @@ function GenerateNodeImpl(props: NodeProps) {
     executionCompatibilityContextFingerprintRef.current = executionCompatibilityContextFingerprint
     setExecutionCompatibilityError(null)
   }, [executionCompatibilityContextFingerprint])
+
+  useEffect(() => {
+    if (isChatSkillCompileOnly && executionCompatibilityError) setExecutionCompatibilityError(null)
+  }, [executionCompatibilityError, isChatSkillCompileOnly])
 
   useEffect(() => {
     updateNodeData(id, {
@@ -897,7 +905,7 @@ function GenerateNodeImpl(props: NodeProps) {
         setSkillPreviewResult({
           skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
           skill_version: String(finalResult.skill_revision || effectiveSkillRevision || ''),
-          mode: mode as CanvasSkillMediaMode,
+          mode: (isChatSkillCompileOnly ? effectiveSkillCompileMode : mode) as CanvasSkillMediaMode,
           prompt: String(finalResult.compiled_prompt || ''),
           negative_prompt: String(finalResult.compiled_negative_prompt || ''),
           parameters: {},
@@ -953,11 +961,13 @@ function GenerateNodeImpl(props: NodeProps) {
         })
       }
     }
-    completeGenerateNodeRunAfterEffects(generateRunTrackerRef.current, runToken, commitSuccessfulGeneration)
+    const completed = completeGenerateNodeRunAfterEffects(generateRunTrackerRef.current, runToken, commitSuccessfulGeneration)
+    if (completed && chatSkillCompileRunTokenRef.current === runToken) chatSkillCompileRunTokenRef.current = null
   }
 
   const failGeneration = (error: unknown, runToken: GenerateNodeRunToken) => {
     if (!generateRunTrackerRef.current.complete(runToken)) return
+    if (chatSkillCompileRunTokenRef.current === runToken) chatSkillCompileRunTokenRef.current = null
     const compatibilityError = parseGenerateNodeExecutionCompatibilityError(error)
     if (compatibilityError) setExecutionCompatibilityError(compatibilityError)
     const value = error as any
@@ -1005,7 +1015,7 @@ function GenerateNodeImpl(props: NodeProps) {
     if (generateRunTrackerRef.current.hasActive()) return
     if (runBlocked) {
       setNodeStatus(id, 'error')
-      if (executionCompatibilityError) {
+      if (!isChatSkillCompileOnly && executionCompatibilityError) {
         return message.error(`${executionCompatibilityError.error_code}: ${executionCompatibilityError.detail}`)
       }
       if (effectiveReferenceValidationError) {
@@ -1021,6 +1031,56 @@ function GenerateNodeImpl(props: NodeProps) {
         return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
       }
       return message.error('当前配置不可运行')
+    }
+    if (isChatSkillCompileOnly) {
+      const executableReferenceBindings = prepareReferenceBindingsForExecution()
+      if (executableReferenceBindings === null) return
+      const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(executableReferenceBindings)
+      const runToken = generateRunTrackerRef.current.start(executionReferenceBindings)
+      if (!runToken) return message.info('当前节点已有生成任务运行中')
+      const runCompileFingerprint = compileInputFingerprint
+      chatSkillCompileRunTokenRef.current = runToken
+      setGenerating(true)
+      setProgressMsg('正在编译 Skill 提示词...')
+      setNodeStatus(id, 'running')
+      updateNodeData(id, { _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })
+
+      try {
+        const outcome = await runGenerateNodeChatSkillCompilation({
+          request: buildGenerateNodeSkillCompileRequest({
+            skillName: effectiveSkillName,
+            packId: effectiveSkillPackId,
+            revision: effectiveSkillRevision,
+            prompt,
+            mode: effectiveSkillCompileMode as GenerateNodeSkillTargetMode,
+            references: executionReferenceBindings,
+            nodeParams: skillNodeParams(),
+            arguments: effectiveSkillArguments,
+            compilerModelId: effectiveCompilerModelId as number,
+          }),
+          compile: compileSkillPreview,
+          isCurrent: () => (
+            generateRunTrackerRef.current.isCurrent(runToken)
+            && compileInputFingerprintRef.current === runCompileFingerprint
+          ),
+          packId: effectiveSkillPackId,
+          packSource: effectiveSkill?.sourceUrl,
+          compilerModelId: effectiveCompilerModelId as number,
+          rawPrompt: prompt,
+          executionReferences: executionReferenceBindings,
+        })
+        if (outcome.status === 'stale') {
+          generateRunTrackerRef.current.complete(runToken)
+          if (chatSkillCompileRunTokenRef.current === runToken) chatSkillCompileRunTokenRef.current = null
+          setGenerating(false)
+          setProgressMsg('')
+          return
+        }
+        finishGeneration(outcome.packet, runToken)
+      } catch (error: any) {
+        failGeneration(error, runToken)
+      }
+      return
     }
     if (!selectedKey || !selectedModel) {
       setNodeStatus(id, 'error')
@@ -1066,6 +1126,14 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [data?._runSignal])
 
   const handleInterrupt = async () => {
+    if (chatSkillCompileRunTokenRef.current) {
+      generateRunTrackerRef.current.invalidate()
+      chatSkillCompileRunTokenRef.current = null
+      setGenerating(false)
+      setProgressMsg('')
+      message.warning('已中断提示词编译')
+      return
+    }
     try { await apiClient.post(`/interrupt/${id}`); message.warning('已下发拦截指令') } catch { message.error('拦截信令发送失败') }
   }
 
@@ -1747,7 +1815,7 @@ function GenerateNodeImpl(props: NodeProps) {
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : !isChatSkillCompileOnly && executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'}
           </Button>
         </div>
 

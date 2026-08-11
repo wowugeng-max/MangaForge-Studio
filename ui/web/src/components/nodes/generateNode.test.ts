@@ -2380,6 +2380,187 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Chat Skill model helpers', () => {
+  test('runs one direct Chat Skill compile and returns its positive prompt packet without a Provider fallback', async () => {
+    const model = await import('./generate-node-model')
+    let compileCalls = 0
+    let providerCalls = 0
+    const request = model.buildGenerateNodeSkillCompileRequest({
+      skillName: 'h3-prompt-writing', packId: 'h3', revision: 'r1', prompt: 'hero prompt',
+      mode: 'image_to_video', compilerModelId: 9, references: [],
+    })
+
+    const outcome = await model.runGenerateNodeChatSkillCompilation({
+      request,
+      compile: async received => {
+        compileCalls += 1
+        expect(received).toBe(request)
+        return {
+          data: {
+            result: {
+              skill_name: 'h3-prompt-writing', skill_version: 'r1', mode: 'image_to_video',
+              prompt: 'positive', negative_prompt: 'negative', parameters: {}, references_used: [], warnings: ['trimmed'],
+            },
+            cache_key: 'sha256:input', cached: false,
+          },
+        }
+      },
+      isCurrent: () => true,
+      packId: 'h3', packSource: 'https://github.com/MiniMax-AI/MiniMax-H3', compilerModelId: 9, rawPrompt: 'hero prompt',
+    })
+
+    expect(compileCalls).toBe(1)
+    expect(providerCalls).toBe(0)
+    expect(outcome).toMatchObject({
+      status: 'current',
+      packet: {
+        content: 'positive', negative_prompt: 'negative', compiled_prompt: 'positive', compiled_negative_prompt: 'negative',
+        skill_pack_id: 'h3', compiler_model_id: 9, compiled_input_hash: 'sha256:input', warnings: ['trimmed'],
+      },
+    })
+  })
+
+  test('returns stale without a result packet when the direct Chat Skill response is no longer current', async () => {
+    const model = await import('./generate-node-model')
+    let compileCalls = 0
+    const outcome = await model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'source', mode: 'text_to_image', compilerModelId: 4, references: [],
+      }),
+      compile: async () => {
+        compileCalls += 1
+        return {
+          data: {
+            result: {
+              skill_name: 'skill', skill_version: 'r1', mode: 'text_to_image', prompt: 'late positive',
+              negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+            },
+            cache_key: 'late-hash', cached: true,
+          },
+        }
+      },
+      isCurrent: () => false,
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'source',
+    })
+
+    expect(compileCalls).toBe(1)
+    expect(outcome).toEqual({ status: 'stale' })
+  })
+
+  test('keeps the frozen execution provenance when a direct compile response omits optional bindings', async () => {
+    const model = await import('./generate-node-model')
+    const executionReferences = [{
+      reference_index: 1, reference_id: 'hero', reference_role: 'character' as const, type: 'image' as const,
+      url: 'https://cdn/hero.png', source_asset_ids: [42],
+    }]
+    const outcome = await model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'source', mode: 'image_to_video', compilerModelId: 4, references: executionReferences,
+      }),
+      compile: async () => ({
+        data: {
+          result: {
+            skill_name: 'skill', skill_version: 'r1', mode: 'image_to_video', prompt: 'positive',
+            negative_prompt: '', parameters: {}, references_used: ['hero'], warnings: [],
+          },
+          cache_key: 'hash', cached: false,
+        },
+      }),
+      isCurrent: () => true,
+      executionReferences,
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'source',
+    })
+
+    expect(outcome).toMatchObject({
+      status: 'current',
+      packet: { reference_bindings: [{ reference_id: 'hero', source_asset_ids: [42] }], source_asset_ids: [42] },
+    })
+  })
+
+  test('propagates a typed direct Chat Skill compile failure without invoking a Provider fallback', async () => {
+    const model = await import('./generate-node-model')
+    const typedFailure = {
+      response: { data: { error_code: 'SKILL_COMPILER_VISION_REQUIRED', detail: 'compiler needs Vision' } },
+    }
+    let compileCalls = 0
+    let providerCalls = 0
+
+    await expect(model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'source', mode: 'image_to_video', compilerModelId: 4, references: [],
+      }),
+      compile: async () => {
+        compileCalls += 1
+        throw typedFailure
+      },
+      isCurrent: () => true,
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'source',
+    })).rejects.toBe(typedFailure)
+
+    expect(compileCalls).toBe(1)
+    expect(providerCalls).toBe(0)
+  })
+
+  test('ignores a late direct Chat Skill rejection after the run becomes stale', async () => {
+    const model = await import('./generate-node-model')
+    const lateFailure = new Error('late compiler failure')
+
+    const outcome = await model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'source', mode: 'text_to_image', compilerModelId: 4, references: [],
+      }),
+      compile: async () => { throw lateFailure },
+      isCurrent: () => false,
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'source',
+    })
+
+    expect(outcome).toEqual({ status: 'stale' })
+  })
+
+  test('routes Chat plus Skill through the compiler before Key/model and keeps legacy generation transport separate', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain("const isChatSkillCompileOnly = mode === 'chat' && hasEffectiveSkill")
+    const handleRunStart = source.indexOf('const handleRun = async () => {')
+    const handleRunEnd = source.indexOf('useEffect(() => {', handleRunStart)
+    const handleRunSource = source.slice(handleRunStart, handleRunEnd)
+    const directStart = handleRunSource.indexOf('if (isChatSkillCompileOnly) {')
+    const legacyStart = handleRunSource.indexOf('if (!selectedKey || !selectedModel)')
+    const directSource = handleRunSource.slice(directStart, legacyStart)
+    const legacySource = handleRunSource.slice(legacyStart)
+
+    expect(directStart).toBeGreaterThan(-1)
+    expect(directStart).toBeLessThan(legacyStart)
+    expect(directSource).toContain('runGenerateNodeChatSkillCompilation({')
+    expect(directSource).toContain('compile: compileSkillPreview')
+    expect(directSource).toContain('compileInputFingerprintRef.current === runCompileFingerprint')
+    expect(directSource).toContain('finishGeneration(outcome.packet, runToken)')
+    expect(directSource).not.toContain('resolveProvider()')
+    expect(directSource).not.toContain('createSSEClient')
+    expect(directSource).not.toContain("url: '/generate'")
+    expect(directSource).not.toContain('result: null')
+    expect(source).toContain('executionCompatibilityError: isChatSkillCompileOnly ? null : executionCompatibilityError')
+    expect(source).toContain('if (isChatSkillCompileOnly && executionCompatibilityError) setExecutionCompatibilityError(null)')
+    expect(handleRunSource).toContain('if (!isChatSkillCompileOnly && executionCompatibilityError)')
+    expect(source).toContain('mode: (isChatSkillCompileOnly ? effectiveSkillCompileMode : mode) as CanvasSkillMediaMode')
+    expect(legacySource).toContain('createSSEClient(id,')
+    expect(legacySource).toContain("await apiClient.request({ url: '/generate', method: 'POST', data: payload })")
+    expect(legacySource).toContain('updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })')
+  })
+
+  test('interrupts a compiler-only Chat run locally while preserving the ordinary backend interrupt', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const interruptStart = source.indexOf('const handleInterrupt = async () => {')
+    const interruptEnd = source.indexOf('const handleSaveToAsset =', interruptStart)
+    const interruptSource = source.slice(interruptStart, interruptEnd)
+    const directEnd = interruptSource.indexOf('return')
+    const directInterrupt = interruptSource.slice(0, directEnd)
+
+    expect(interruptSource).toContain('chatSkillCompileRunTokenRef.current')
+    expect(directInterrupt).toContain('generateRunTrackerRef.current.invalidate()')
+    expect(directInterrupt).toContain('setGenerating(false)')
+    expect(directInterrupt).not.toContain("apiClient.post(`/interrupt/${id}`)")
+    expect(interruptSource).toContain("apiClient.post(`/interrupt/${id}`)")
+  })
+
   test('builds a canonical locked Skill compile request and omits empty optional fields', async () => {
     const model = await import('./GenerateNode')
     const references = [
