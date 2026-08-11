@@ -93,7 +93,7 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback returned an invalid redirect URL', error)
   }
 
-  const lexical = /^https:\/\/([A-Za-z0-9.-]+)\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*\/zip\/[0-9a-fA-F]{40}$/.exec(location)
+  const lexical = /^https:\/\/codeload\.github\.com\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*\/zip\/[0-9a-fA-F]{40}$/.exec(location)
   const parts = url.pathname.split('/')
   const [empty, owner, name, format, sha] = parts
   if (
@@ -101,7 +101,6 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
     url.hostname !== 'codeload.github.com' ||
     url.port ||
     !lexical ||
-    lexical[1].toLowerCase() !== 'codeload.github.com' ||
     url.search ||
     url.hash ||
     url.username ||

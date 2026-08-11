@@ -54,6 +54,7 @@ describe('Skill Pack installer', () => {
     for (const value of [
       `http://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://evil.example/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://CODELOAD.GITHUB.COM/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://user@codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://@codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://codeload.github.com:444/MiniMax-AI/MiniMax-H3/zip/${sha}`,
