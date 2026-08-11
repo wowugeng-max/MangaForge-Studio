@@ -2409,6 +2409,42 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Skill compiler source selector', () => {
+  test('renders linked Skill compiler source and model selectors without changing the ordinary model selector', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const compilerControlStart = source.indexOf('Skill 编译模型</Text>')
+    const compilerControlEnd = source.indexOf(
+      '{hasEffectiveSkill && !effectiveSkillSelectionError && missingEffectiveCompilerModel',
+      compilerControlStart,
+    )
+    const compilerControlRegion = source.slice(compilerControlStart, compilerControlEnd)
+
+    expect(compilerControlStart).toBeGreaterThanOrEqual(0)
+    expect(compilerControlEnd).toBeGreaterThan(compilerControlStart)
+    expect(compilerControlRegion).toContain('<Space.Compact block>')
+    expect(compilerControlRegion).toContain('aria-label="Skill 编译模型来源"')
+    expect(compilerControlRegion).toContain('value={compilerSelector.sourceValue}')
+    expect(compilerControlRegion).toContain('options={compilerSelector.sourceOptions}')
+    expect(compilerControlRegion).toContain('onChange={value => setSkillCompilerModelId(resolveGenerateNodeCompilerModelIdForSource({')
+    expect(compilerControlRegion).toContain('aria-label="Skill 编译模型"')
+    expect(compilerControlRegion).toContain('value={compilerSelector.modelValue}')
+    expect(compilerControlRegion).toContain('options={compilerSelector.modelOptions}')
+    expect(compilerControlRegion).toContain('disabled={compilerSelectorLoading || compilerSelector.modelDisabled}')
+    expect(source).not.toContain('const compilerModelOptions =')
+
+    const ordinarySelectorStart = source.indexOf('placeholder="选择 Key"')
+    const ordinarySelectorClose = source.indexOf('</Space.Compact>', ordinarySelectorStart)
+    const ordinarySelectorRegion = source.slice(
+      ordinarySelectorStart,
+      ordinarySelectorClose + '</Space.Compact>'.length,
+    )
+
+    expect(ordinarySelectorStart).toBeGreaterThanOrEqual(0)
+    expect(ordinarySelectorClose).toBeGreaterThan(ordinarySelectorStart)
+    expect(ordinarySelectorRegion).toContain('options={keys.map')
+    expect(ordinarySelectorRegion).toContain('options={selectableModels.map')
+    expect(ordinarySelectorRegion).toContain('showOnlyFavorites')
+  })
+
   const keys = [
     { id: 1, description: ' Primary Key ', provider: 'ignored-provider', is_active: true },
     { id: 2, description: '   ', provider: ' Provider Two ', is_active: true },
@@ -3565,7 +3601,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
   test('carries pending user target origin through Skill metadata loading without rewriting commands', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const skillHandler = source.slice(source.indexOf('const selectPromptSkill ='), source.indexOf('const selectSkillTargetMode ='))
-    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const workspaceCompilerModel ='))
+    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const compilerSelector ='))
     const transitionEffect = source.slice(source.indexOf("if (mode !== 'chat' || !effectiveSkill)"), source.indexOf('useEffect(() => {\n    if (reconciledIncomingFingerprintRef'))
 
     expect(targetHandler).toContain('pendingSkillTargetUserResolutionRef.current = true')
@@ -3580,7 +3616,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
 
   test('keeps saved dropdown identity when an active command conflicts with a user target change', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
-    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const workspaceCompilerModel ='))
+    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const compilerSelector ='))
 
     expect(targetHandler).toContain("if (transition.clearSkill && !parsedSkillCommand) selectPromptSkill('')")
     expect(targetHandler).not.toContain("if (transition.clearSkill) selectPromptSkill('')")

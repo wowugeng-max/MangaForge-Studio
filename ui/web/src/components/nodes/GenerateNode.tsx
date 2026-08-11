@@ -40,6 +40,7 @@ import {
   areGenerateNodeIncomingContextSnapshotsEqual,
   buildGenerateNodeAssetPayload,
   buildGenerateNodeCanonicalReferenceBindings,
+  buildGenerateNodeCompilerSelectorModel,
   buildGenerateNodeReferenceBindingsFingerprint,
   buildGenerateNodeReferenceBindingsLocalFingerprint,
   buildGenerateNodeIncomingContextSnapshot,
@@ -57,6 +58,7 @@ import {
   createGenerateNodeSkillListRequestCoordinator,
   freezeGenerateNodeExecutionReferences,
   getGenerateNodeAspectRatioSize,
+  isGenerateNodeCompilerModelEligible,
   isGenerateNodeMuted,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
@@ -80,6 +82,7 @@ import {
   resolveGenerateNodeEffectiveCompilerReferenceBindings,
   resolveGenerateNodeEffectiveReferenceValidationError,
   resolveGenerateNodeInitialRunStatus,
+  resolveGenerateNodeCompilerModelIdForSource,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
   resolveGenerateNodeChatSkillPreviewCached,
@@ -701,7 +704,7 @@ function GenerateNodeImpl(props: NodeProps) {
       .then(res => {
         if (cancelled) return
         const models = Array.isArray(res.data) ? res.data : []
-        setCompilerModels(models.filter((model: any) => model?.is_active !== false && model?.health_status !== 'disabled' && model?.capabilities?.chat === true))
+        setCompilerModels(models.filter(isGenerateNodeCompilerModelEligible))
       })
       .catch(() => { if (!cancelled) setCompilerModels([]) })
       .finally(() => { if (!cancelled) setCompilerModelsLoaded(true) })
@@ -1529,20 +1532,13 @@ function GenerateNodeImpl(props: NodeProps) {
     if (transition.clearSkill && !parsedSkillCommand) selectPromptSkill('')
   }
 
-  const workspaceCompilerModel = compilerModels.find(model => Number(model.id) === Number(skillSettings?.skill_compiler_model_id))
-  const compilerModelOptions = [
-    {
-      value: 'workspace-default',
-      label: `使用工作区默认${skillSettings?.skill_compiler_model_id === null ? '（未配置）' : ` · ${workspaceCompilerModel?.display_name || workspaceCompilerModel?.model_name || `模型 #${skillSettings?.skill_compiler_model_id}`}`}`,
-    },
-    ...compilerModels.map(model => ({
-      value: Number(model.id),
-      label: `${model.display_name || model.model_name || `模型 #${model.id}`}${model.capabilities?.vision === true ? ' · Vision' : ''}`,
-    })),
-  ]
-  if (skillCompilerModelId !== null && !compilerModels.some(model => Number(model.id) === skillCompilerModelId)) {
-    compilerModelOptions.push({ value: skillCompilerModelId, label: `模型 #${skillCompilerModelId} · 不可用` })
-  }
+  const compilerSelector = useMemo(() => buildGenerateNodeCompilerSelectorModel({
+    keys,
+    models: compilerModels,
+    overrideModelId: skillCompilerModelId,
+    workspaceDefaultModelId: skillSettings?.skill_compiler_model_id ?? null,
+  }), [compilerModels, keys, skillCompilerModelId, skillSettings?.skill_compiler_model_id])
+  const compilerSelectorLoading = !skillSettingsLoaded || !compilerModelsLoaded
 
   const renderParams = () => {
     const uiParams = selectedModelRecord?.context_ui_params?.[mode]
@@ -1932,13 +1928,32 @@ function GenerateNodeImpl(props: NodeProps) {
                 ))}
                 <div>
                   <Text type="secondary" style={{ display: 'block', fontSize: 11, marginBottom: 3 }}>Skill 编译模型</Text>
-                  <Select
-                    size="small"
-                    value={skillCompilerModelId ?? 'workspace-default'}
-                    options={compilerModelOptions}
-                    onChange={value => setSkillCompilerModelId(value === 'workspace-default' ? null : Number(value))}
-                    style={{ width: '100%' }}
-                  />
+                  <Space.Compact block>
+                    <Select
+                      aria-label="Skill 编译模型来源"
+                      size="small"
+                      value={compilerSelector.sourceValue}
+                      options={compilerSelector.sourceOptions}
+                      loading={compilerSelectorLoading}
+                      disabled={compilerSelectorLoading}
+                      onChange={value => setSkillCompilerModelId(resolveGenerateNodeCompilerModelIdForSource({
+                        keys,
+                        models: compilerModels,
+                        sourceValue: value,
+                      }))}
+                      style={{ width: 140 }}
+                    />
+                    <Select
+                      aria-label="Skill 编译模型"
+                      size="small"
+                      value={compilerSelector.modelValue}
+                      options={compilerSelector.modelOptions}
+                      loading={compilerSelectorLoading}
+                      disabled={compilerSelectorLoading || compilerSelector.modelDisabled}
+                      onChange={value => setSkillCompilerModelId(Number(value))}
+                      style={{ flex: 1, minWidth: 0 }}
+                    />
+                  </Space.Compact>
                 </div>
                 {hasEffectiveSkill && !effectiveSkillSelectionError && missingEffectiveCompilerModel && (
                   <Text type="danger" style={{ fontSize: 11 }}>
