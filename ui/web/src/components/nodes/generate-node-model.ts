@@ -159,6 +159,25 @@ export function createGenerateNodeSkillListRequestCoordinator() {
   }
 }
 
+export function beginGenerateNodeSkillReadyListRequest(
+  coordinator: ReturnType<typeof createGenerateNodeSkillListRequestCoordinator>,
+  setLoading: (loading: boolean) => void,
+) {
+  const token = coordinator.start('ready')
+  setLoading(true)
+  return token
+}
+
+export function settleGenerateNodeSkillReadyListRequest(
+  coordinator: ReturnType<typeof createGenerateNodeSkillListRequestCoordinator>,
+  token: GenerateNodeSkillListRequestToken,
+  setLoading: (loading: boolean) => void,
+) {
+  if (!coordinator.isCurrent(token)) return false
+  setLoading(false)
+  return true
+}
+
 function areGenerateNodeSkillIdentitiesEqual(
   left: GenerateNodeSkillIdentity | null,
   right: GenerateNodeSkillIdentity | null,
@@ -1295,6 +1314,18 @@ export function buildGenerateNodeReferenceBindingsFingerprint(
   })))
 }
 
+export function resolveGenerateNodeEffectiveCompilerReferenceBindings<T extends { type: string }>(input: {
+  nodeMode: string
+  effectiveTargetMode: GenerateNodeSkillTargetMode | undefined
+  bindings: readonly T[]
+}): T[] {
+  const excludesImages = input.nodeMode === 'chat'
+    && (input.effectiveTargetMode === 'text_to_image' || input.effectiveTargetMode === 'text_to_video')
+  return excludesImages
+    ? input.bindings.filter(binding => binding.type !== 'image')
+    : [...input.bindings]
+}
+
 export function buildGenerateNodeReferenceBindingsLocalFingerprint(
   bindings: readonly GenerateNodeReferenceBinding[],
 ) {
@@ -1500,6 +1531,7 @@ export function buildGenerateNodeAssetPayload(input: {
   compiledInputHash?: string
   warnings?: string[]
   compilerModelId?: number | string | null
+  skillPreviewCached?: boolean
   referenceModeHint?: string
 }) {
   const contentStr = String(input.resultContent || '')
@@ -1554,6 +1586,7 @@ export function buildGenerateNodeAssetPayload(input: {
       ...(hasCompileProvenance && input.compiledInputHash ? { compiled_input_hash: input.compiledInputHash } : {}),
       ...(hasCompileProvenance && Array.isArray(input.warnings) ? { warnings: input.warnings } : {}),
       ...(hasCompileProvenance && input.compilerModelId !== undefined && input.compilerModelId !== null ? { compiler_model_id: input.compilerModelId } : {}),
+      ...(hasCompileProvenance && input.skillPreviewCached !== undefined ? { skill_preview_cached: input.skillPreviewCached } : {}),
     },
     tags: ['AI_Generated', input.mode, input.selectedModel],
     thumbnail: assetType === 'image' ? contentStr : undefined,

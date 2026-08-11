@@ -152,6 +152,7 @@ describe('GenerateNode migration behavior', () => {
       compiledInputHash: 'sha256:compiled-input',
       warnings: ['reference was downscaled'],
       compilerModelId: 'compiler-model',
+      skillPreviewCached: false,
     } as any)
 
     expect(payload.data).toMatchObject({
@@ -166,7 +167,27 @@ describe('GenerateNode migration behavior', () => {
       compiled_input_hash: 'sha256:compiled-input',
       warnings: ['reference was downscaled'],
       compiler_model_id: 'compiler-model',
+      skill_preview_cached: false,
     })
+
+    const missingCacheAudit = buildGenerateNodeAssetPayload({
+      resultContent: 'compiled text',
+      mode: 'chat',
+      prompt: 'source',
+      selectedModel: 'compiler',
+      provider: 'skill-provider',
+      selectedRolePrompt: 'director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '1:1',
+      ratioSize: '1024*1024',
+      compiledPrompt: 'compiled text',
+      skillName: 'h3-prompt-writing',
+    })
+    expect(Object.prototype.hasOwnProperty.call(missingCacheAudit.data, 'skill_preview_cached')).toBe(false)
+
+    const componentSource = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(componentSource).toContain('skillPreviewCached: result.skill_preview_cached')
   })
 
   test('preserves source asset lineage from generation route packets', () => {
@@ -1934,8 +1955,9 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(source).toContain('const [executionCompatibilityError, setExecutionCompatibilityError]')
     expect(source).toContain('buildGenerateNodeReferencePersistencePayload(referenceBindings)')
     expect(source).toContain('reconcileGenerateNodeReferenceBindings')
-    expect(source).toContain('buildGenerateNodeReferenceBindingsFingerprint(referenceBindings)')
-    expect(source).toContain('buildGenerateNodeSkillCompileAssets(referenceBindings)')
+    expect(source).toContain('resolveGenerateNodeEffectiveCompilerReferenceBindings({')
+    expect(source).toContain('buildGenerateNodeReferenceBindingsFingerprint(effectiveCompilerReferenceBindings)')
+    expect(source).toContain('buildGenerateNodeSkillCompileAssets(effectiveCompilerReferenceBindings)')
     expect(source).toContain('referenceBindings,')
     expect(source).not.toContain('incoming_assets: incomingAssets.map')
     expect(source).toContain("key: 'references'")
@@ -2381,6 +2403,49 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Chat Skill model helpers', () => {
+  test('derives Chat target compiler references without mutating persistent image edges', async () => {
+    const model = await import('./generate-node-model')
+    const persistent = [
+      { reference_index: 1, reference_id: 'image-1', reference_role: 'character', type: 'image', url: '/hero.png', source_asset_ids: [7] },
+      { reference_index: 2, reference_id: 'prompt-1', reference_role: 'prompt_context', type: 'prompt', content: 'keep costume details' },
+    ] as const
+    const before = JSON.stringify(persistent)
+
+    const textTarget = model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: 'chat',
+      effectiveTargetMode: 'text_to_video',
+      bindings: persistent,
+    })
+    expect(textTarget.map(binding => binding.reference_id)).toEqual(['prompt-1'])
+    expect(model.buildGenerateNodeReferenceBindingsFingerprint(textTarget)).not.toContain('image-1')
+    expect(JSON.stringify(persistent)).toBe(before)
+
+    const imageTarget = model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: 'chat',
+      effectiveTargetMode: 'image_to_video',
+      bindings: persistent,
+    })
+    expect(imageTarget.map(binding => binding.reference_id)).toEqual(['image-1', 'prompt-1'])
+
+    const nineImages = Array.from({ length: 9 }, (_, index) => ({
+      reference_index: index + 1,
+      reference_id: `image-${index + 1}`,
+      reference_role: 'general' as const,
+      type: 'image' as const,
+      url: `/image-${index + 1}.png`,
+    }))
+    expect(model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: 'chat',
+      effectiveTargetMode: 'image_to_image',
+      bindings: nineImages,
+    })).toHaveLength(9)
+    expect(model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: 'image_to_video',
+      effectiveTargetMode: 'image_to_video',
+      bindings: persistent,
+    })).toEqual(persistent)
+  })
+
   test('runs one direct Chat Skill compile and returns its positive prompt packet without a Provider fallback', async () => {
     const model = await import('./generate-node-model')
     let compileCalls = 0
@@ -3204,6 +3269,48 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(coordinator.isCurrent(postInstallToken)).toBe(true)
   })
 
+  test('keeps ready-list loading owned by the newest token through install invalidation', async () => {
+    const model = await import('./generate-node-model')
+    const coordinator = model.createGenerateNodeSkillListRequestCoordinator()
+    let loading = false
+    const loadingEvents: boolean[] = []
+    const setLoading = (value: boolean) => {
+      loading = value
+      loadingEvents.push(value)
+    }
+    const deferred = () => {
+      let resolve!: () => void
+      const promise = new Promise<void>(next => { resolve = next })
+      return { promise, resolve }
+    }
+
+    const staleRequest = deferred()
+    const staleToken = model.beginGenerateNodeSkillReadyListRequest(coordinator, setLoading)
+    const staleSettlement = staleRequest.promise.finally(() => {
+      model.settleGenerateNodeSkillReadyListRequest(coordinator, staleToken, setLoading)
+    })
+    expect(loading).toBe(true)
+
+    coordinator.invalidate()
+    const installRequest = deferred()
+    const installToken = model.beginGenerateNodeSkillReadyListRequest(coordinator, setLoading)
+    const installSettlement = installRequest.promise.finally(() => {
+      model.settleGenerateNodeSkillReadyListRequest(coordinator, installToken, setLoading)
+    })
+    staleRequest.resolve()
+    await staleSettlement
+    expect(loading).toBe(true)
+
+    installRequest.resolve()
+    await installSettlement
+    expect(loading).toBe(false)
+    expect(loadingEvents).toEqual([true, true, false])
+
+    const noTargetToken = model.beginGenerateNodeSkillReadyListRequest(coordinator, setLoading)
+    model.settleGenerateNodeSkillReadyListRequest(coordinator, noTargetToken, setLoading)
+    expect(loading).toBe(false)
+  })
+
   test('preserves current target and selection when install context changed before a unique result resolves', async () => {
     const model = await import('./generate-node-model')
     const installed = [{
@@ -3272,6 +3379,8 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(source).toContain('effectiveSkillCompileModeRef.current')
     expect(source).toContain('skillSelectionIdentityRef.current')
     expect(source).toContain('resolveGenerateNodeSkillInstallApplication({')
+    expect(source).toContain('beginGenerateNodeSkillReadyListRequest(')
+    expect(source).toContain('settleGenerateNodeSkillReadyListRequest(')
   })
 
   test('builds a Chat direct Skill result packet without losing audit, reference order, or lineage', async () => {

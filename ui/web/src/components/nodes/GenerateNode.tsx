@@ -49,6 +49,7 @@ import {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
+  beginGenerateNodeSkillReadyListRequest,
   cancelGenerateNodeChatSkillRun,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
@@ -76,6 +77,7 @@ import {
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeExecutionBlockState,
+  resolveGenerateNodeEffectiveCompilerReferenceBindings,
   resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
@@ -84,6 +86,7 @@ import {
   resolveGenerateNodeSourceContent,
   runGenerateNodeChatSkillCompilation,
   settleGenerateNodeChatSkillRun,
+  settleGenerateNodeSkillReadyListRequest,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
@@ -127,6 +130,7 @@ export {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
+  beginGenerateNodeSkillReadyListRequest,
   cancelGenerateNodeChatSkillRun,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
@@ -143,6 +147,7 @@ export {
   reconcileGenerateNodeReferenceBindings,
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
+  resolveGenerateNodeEffectiveCompilerReferenceBindings,
   resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
@@ -155,6 +160,7 @@ export {
   resolveGenerateNodeChatSkillPreviewCached,
   runGenerateNodeChatSkillCompilation,
   settleGenerateNodeChatSkillRun,
+  settleGenerateNodeSkillReadyListRequest,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
@@ -456,13 +462,21 @@ function GenerateNodeImpl(props: NodeProps) {
     || !effectiveCompilerModel
   ))
   const skillRunBlocked = Boolean(hasEffectiveSkill && (effectiveSkillSelectionError || effectiveSkillIncompatible || missingEffectiveCompilerModel))
+  const effectiveCompilerReferenceBindings = useMemo(
+    () => resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: mode,
+      effectiveTargetMode: effectiveSkillCompileMode,
+      bindings: referenceBindings,
+    }),
+    [effectiveSkillCompileMode, mode, referenceBindings],
+  )
   const referenceBindingsFingerprint = useMemo(
-    () => buildGenerateNodeReferenceBindingsFingerprint(referenceBindings),
-    [referenceBindings],
+    () => buildGenerateNodeReferenceBindingsFingerprint(effectiveCompilerReferenceBindings),
+    [effectiveCompilerReferenceBindings],
   )
   const referenceExecutionValidationError = useMemo<GenerateNodeReferenceValidationState | null>(() => {
     try {
-      buildGenerateNodeSkillCompileAssets(referenceBindings)
+      buildGenerateNodeSkillCompileAssets(effectiveCompilerReferenceBindings)
       return null
     } catch (error) {
       return generateNodeReferenceValidationFromError(error)
@@ -681,18 +695,20 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [])
 
   useEffect(() => {
-    const readySkillsToken = skillListRequestCoordinatorRef.current.start('ready')
+    const readySkillsToken = beginGenerateNodeSkillReadyListRequest(
+      skillListRequestCoordinatorRef.current,
+      setSkillsLoading,
+    )
     if (!supportsPromptSkills) {
       setReadySkills([])
-      setSkillsLoading(false)
+      settleGenerateNodeSkillReadyListRequest(skillListRequestCoordinatorRef.current, readySkillsToken, setSkillsLoading)
       return
     }
     if (!effectiveSkillCompileMode) {
       setReadySkills([])
-      setSkillsLoading(false)
+      settleGenerateNodeSkillReadyListRequest(skillListRequestCoordinatorRef.current, readySkillsToken, setSkillsLoading)
       return
     }
-    setSkillsLoading(true)
     listSkills(effectiveSkillCompileMode, true)
       .then(res => {
         if (!generateNodeMountedRef.current || !skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) return
@@ -703,7 +719,9 @@ function GenerateNodeImpl(props: NodeProps) {
         if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) setReadySkills([])
       })
       .finally(() => {
-        if (generateNodeMountedRef.current && skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) setSkillsLoading(false)
+        if (generateNodeMountedRef.current) {
+          settleGenerateNodeSkillReadyListRequest(skillListRequestCoordinatorRef.current, readySkillsToken, setSkillsLoading)
+        }
       })
   }, [effectiveSkillCompileMode, supportsPromptSkills])
 
@@ -848,7 +866,7 @@ function GenerateNodeImpl(props: NodeProps) {
       return null
     }
     try {
-      return buildGenerateNodeSkillCompileAssets(referenceBindings)
+      return buildGenerateNodeSkillCompileAssets(effectiveCompilerReferenceBindings)
     } catch (error: any) {
       const validationError = generateNodeReferenceValidationFromError(error)
       setReferenceValidationError(validationError)
@@ -1274,6 +1292,7 @@ function GenerateNodeImpl(props: NodeProps) {
           compiledInputHash: result.compiled_input_hash,
           warnings: result.warnings || [],
           compilerModelId: result.compiler_model_id,
+          skillPreviewCached: result.skill_preview_cached,
         } : {}),
       }))
       message.success('已携带溯源信息固化到资产库！')
@@ -1441,7 +1460,10 @@ function GenerateNodeImpl(props: NodeProps) {
       setSkillPackInstallUrl('')
 
       const allSkillsToken = skillListRequestCoordinatorRef.current.start('all')
-      const readySkillsToken = skillListRequestCoordinatorRef.current.start('ready')
+      const readySkillsToken = beginGenerateNodeSkillReadyListRequest(
+        skillListRequestCoordinatorRef.current,
+        setSkillsLoading,
+      )
       const allRefresh = listSkills().then(result => {
         if (!isCurrentInstallRequest() || !skillListRequestCoordinatorRef.current.isCurrent(allSkillsToken)) return
         const refreshed = Array.isArray(result.data?.skills) ? result.data.skills : []
@@ -1452,8 +1474,16 @@ function GenerateNodeImpl(props: NodeProps) {
           if (!isCurrentInstallRequest() || !skillListRequestCoordinatorRef.current.isCurrent(readySkillsToken)) return
           const refreshed = Array.isArray(result.data?.skills) ? result.data.skills : []
           setReadySkills(mergeSkills(refreshed, installedReadySkills))
+        }).finally(() => {
+          if (isCurrentInstallRequest()) {
+            settleGenerateNodeSkillReadyListRequest(skillListRequestCoordinatorRef.current, readySkillsToken, setSkillsLoading)
+          }
         })
-        : Promise.resolve()
+        : Promise.resolve(settleGenerateNodeSkillReadyListRequest(
+          skillListRequestCoordinatorRef.current,
+          readySkillsToken,
+          setSkillsLoading,
+        ))
       await Promise.allSettled([allRefresh, readyRefresh])
     } catch (error: any) {
       if (!isCurrentInstallRequest()) return
