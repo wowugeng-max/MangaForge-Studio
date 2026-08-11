@@ -1326,6 +1326,16 @@ export function resolveGenerateNodeEffectiveCompilerReferenceBindings<T extends 
     : [...input.bindings]
 }
 
+export function resolveGenerateNodeEffectiveReferenceValidationError<T>(input: {
+  filteredImages: boolean
+  persistedError: T | null
+  effectiveError: T | null
+}): T | null {
+  return input.filteredImages
+    ? input.effectiveError
+    : input.persistedError || input.effectiveError
+}
+
 export function buildGenerateNodeReferenceBindingsLocalFingerprint(
   bindings: readonly GenerateNodeReferenceBinding[],
 ) {

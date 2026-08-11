@@ -78,6 +78,7 @@ import {
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeEffectiveCompilerReferenceBindings,
+  resolveGenerateNodeEffectiveReferenceValidationError,
   resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
@@ -148,6 +149,7 @@ export {
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeEffectiveCompilerReferenceBindings,
+  resolveGenerateNodeEffectiveReferenceValidationError,
   resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
@@ -482,7 +484,11 @@ function GenerateNodeImpl(props: NodeProps) {
       return generateNodeReferenceValidationFromError(error)
     }
   }, [referenceBindingsFingerprint])
-  const effectiveReferenceValidationError = referenceValidationError || referenceExecutionValidationError
+  const effectiveReferenceValidationError = resolveGenerateNodeEffectiveReferenceValidationError({
+    filteredImages: effectiveCompilerReferenceBindings.length !== referenceBindings.length,
+    persistedError: referenceValidationError,
+    effectiveError: referenceExecutionValidationError,
+  })
   const { previewBlocked, runBlocked } = resolveGenerateNodeExecutionBlockState({
     skillBlocked: skillRunBlocked,
     referenceValidationError: effectiveReferenceValidationError,
@@ -803,7 +809,7 @@ function GenerateNodeImpl(props: NodeProps) {
     skill: effectiveSkillIdentity,
     skillArguments: effectiveSkillArguments,
     compilerModelId: effectiveCompilerModelId,
-    referenceBindings: buildGenerateNodeReferenceBindingsFingerprint(referenceBindings),
+    referenceBindings: referenceBindingsFingerprint,
     externalSystemPrompt: incomingContext.externalSystemPrompt,
     nodeParams: skillNodeParams(),
     params,

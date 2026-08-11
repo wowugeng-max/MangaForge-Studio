@@ -2446,6 +2446,39 @@ describe('GenerateNode Chat Skill model helpers', () => {
     })).toEqual(persistent)
   })
 
+  test('uses only the effective compiler reference fingerprint in component compile inputs', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const fingerprintSource = source.slice(
+      source.indexOf('const compileInputFingerprint ='),
+      source.indexOf('compileInputFingerprintRef.current ='),
+    )
+
+    expect(fingerprintSource).toContain('referenceBindings: referenceBindingsFingerprint')
+    expect(fingerprintSource).not.toContain('buildGenerateNodeReferenceBindingsFingerprint(referenceBindings)')
+  })
+
+  test('ignores persisted validation only when Chat text targets filtered images and revalidates retained references', async () => {
+    const model = await import('./generate-node-model')
+    const imageError = { error_code: 'REFERENCE_LIMIT_EXCEEDED', detail: 'too many hidden images', reference_index: 10 }
+    const promptError = { error_code: 'REFERENCE_ROLE_INVALID', detail: 'bad retained prompt role', reference_index: 2 }
+
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteredImages: true,
+      persistedError: imageError,
+      effectiveError: null,
+    })).toBeNull()
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteredImages: true,
+      persistedError: imageError,
+      effectiveError: promptError,
+    })).toBe(promptError)
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteredImages: false,
+      persistedError: imageError,
+      effectiveError: null,
+    })).toBe(imageError)
+  })
+
   test('runs one direct Chat Skill compile and returns its positive prompt packet without a Provider fallback', async () => {
     const model = await import('./generate-node-model')
     let compileCalls = 0
