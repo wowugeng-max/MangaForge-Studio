@@ -57,7 +57,7 @@ export type SkillPackInstallResult = SkillPackRecord & { path: string }
 
 export type PublicGitHubRepo = { owner: string; repo: string; id: string }
 
-const MAX_ARCHIVE_BYTES = 50 * 1024 * 1024
+const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 const MAX_ENTRY_BYTES = 4 * 1024 * 1024
 const MAX_EXTRACTED_BYTES = 20 * 1024 * 1024
 
@@ -205,6 +205,10 @@ function normalizeArchiveName(name: string, commonRoot: string | undefined): str
   return commonRoot && normalized.startsWith(`${commonRoot}/`) ? normalized.slice(commonRoot.length + 1) : normalized
 }
 
+function isSkillPayloadPath(name: string): boolean {
+  return name === 'skills' || name.startsWith('skills/')
+}
+
 async function extractArchive(bytes: Uint8Array, destination: string): Promise<void> {
   if (bytes.byteLength > MAX_ARCHIVE_BYTES) {
     throw new SkillPackInstallError('SKILL_PACK_ARCHIVE_INVALID', `Archive exceeds ${MAX_ARCHIVE_BYTES} bytes`)
@@ -226,13 +230,18 @@ async function extractArchive(bytes: Uint8Array, destination: string): Promise<v
   // entry is decompressed or written to the destination.
   for (const entry of entries) {
     const type = archiveType(entry)
-    const original = entry.name.replaceAll('\\', '/')
+    const safeName = entry.name.replaceAll('\\', '/')
+    const original = (entry.unsafeOriginalName ?? entry.name).replaceAll('\\', '/')
     const sizeHint = Number((entry as unknown as { _data?: { uncompressedSize?: number } })._data?.uncompressedSize ?? 0)
-    validateSkillPackArchiveEntry(original, type, sizeHint)
-    const name = normalizeArchiveName(original, commonRoot)
+    const name = normalizeArchiveName(safeName, commonRoot)
+    const selected = Boolean(name && isSkillPayloadPath(name))
+    // Every repository entry still receives path and symlink validation. File
+    // size limits apply only to the Skill payload that can be installed.
+    validateSkillPackArchiveEntry(original, type, selected ? sizeHint : 0)
     if (!name) continue
     if (seen.has(name)) throw new SkillPackInstallError('SKILL_PACK_ARCHIVE_INVALID', `Duplicate archive entry: ${name}`)
     seen.add(name)
+    if (!selected) continue
     if (type === 'directory') continue
     if (sizeHint > MAX_ENTRY_BYTES) throw new SkillPackInstallError('SKILL_PACK_ARCHIVE_INVALID', `Archive entry too large: ${original}`)
     aggregate += sizeHint

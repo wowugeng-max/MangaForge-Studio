@@ -68,11 +68,32 @@ describe('Skill Pack installer', () => {
     const root = join(workspace, '.mangaforge', 'skill-packs', 'demo', sha)
     expect(await stat(join(root, 'skills/first/SKILL.md'))).toBeTruthy()
     expect(await stat(join(root, 'skills/second/SKILL.md'))).toBeTruthy()
-    expect(await readFile(join(root, 'postinstall.ts'), 'utf8')).toContain('must not execute')
+    await expect(access(join(root, 'postinstall.ts'))).rejects.toThrow()
     expect(await readFile(join(root, 'pack.json'), 'utf8')).toContain('"status":"installed"')
     const installedAt = (await import('./pack-installer')).readPackRecord(root)?.installedAt
     const again = await installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })
     expect(again.installedAt).toBe(installedAt)
+  })
+
+  test('accepts a repository-scale archive while extracting only the bounded skills payload', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const sha = '8989898989898989898989898989898989898989'
+    const archive = await zipBytes([
+      { name: 'demo-main/skills/h3-prompt-writing/SKILL.md', content: '---\nname: h3-prompt-writing\n---\nprompt' },
+      { name: 'demo-main/skills/h3-prompt-writing/references/base.txt', content: 'reference' },
+      { name: 'demo-main/assets/large-model.bin', content: 'x'.repeat(4 * 1024 * 1024 + 1) },
+      { name: 'demo-main/postinstall.ts', content: "throw new Error('must not install')" },
+    ])
+    const fetchImpl = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD')
+      ? response({ sha })
+      : new Response(archive, { headers: { 'content-length': '100367421' } })
+
+    const result = await installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })
+
+    expect(await readFile(join(result.path, 'skills/h3-prompt-writing/SKILL.md'), 'utf8')).toContain('name: h3-prompt-writing')
+    expect(await readFile(join(result.path, 'skills/h3-prompt-writing/references/base.txt'), 'utf8')).toBe('reference')
+    await expect(access(join(result.path, 'assets/large-model.bin'))).rejects.toThrow()
+    await expect(access(join(result.path, 'postinstall.ts'))).rejects.toThrow()
   })
 
   test('rejects unsafe archives and leaves previous revision untouched on download failure', async () => {
@@ -107,10 +128,26 @@ describe('Skill Pack installer', () => {
     await expect(access(join(workspace, '.mangaforge/skill-packs/demo', sha))).rejects.toThrow()
   })
 
-  test('rejects ZIP symlink entries before extraction', async () => {
+  test('rejects traversal in the original ZIP filename before JSZip can sanitize it', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
     const zip = new JSZip()
-    zip.file('demo-main/skills/link', 'outside', { unixPermissions: 0o120777 })
+    zip.file('../demo-main/skills/escape/SKILL.md', '---\nname: escape\n---\nbad', { createFolders: false })
+    const archive = await zip.generateAsync({ type: 'uint8array' })
+    const sha = 'efefefefefefefefefefefefefefefefefefefef'
+    const fetchImpl = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD')
+      ? response({ sha })
+      : new Response(archive)
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
+      expect.objectContaining({ code: 'SKILL_ARCHIVE_PATH_ESCAPE' }),
+    )
+    await expect(access(join(workspace, '.mangaforge/skill-packs/demo', sha))).rejects.toThrow()
+  })
+
+  test('rejects ZIP symlink entries outside the selected skills payload', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const zip = new JSZip()
+    zip.file('demo-main/assets/link', 'outside', { unixPermissions: 0o120777 })
     const archive = await zip.generateAsync({ type: 'uint8array', platform: 'UNIX' })
     const sha = 'dddddddddddddddddddddddddddddddddddddddd'
     const fetchImpl = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD') ? response({ sha }) : new Response(archive)
@@ -279,7 +316,7 @@ describe('Skill Pack installer', () => {
   test('enforces archive and uncompressed entry caps even without a content-length header', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
     const sha = 'abababababababababababababababababababab'
-    const huge = await zipBytes([{ name: 'demo-main/huge.bin', content: 'x'.repeat(4 * 1024 * 1024 + 1) }])
+    const huge = await zipBytes([{ name: 'demo-main/skills/demo/huge.bin', content: 'x'.repeat(4 * 1024 * 1024 + 1) }])
     const fetchHuge = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD')
       ? response({ sha })
       : new Response(huge)
@@ -289,7 +326,7 @@ describe('Skill Pack installer', () => {
     const headerSha = 'cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd'
     const fetchHeader = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD')
       ? response({ sha: headerSha })
-      : new Response(new Uint8Array([1]), { status: 200, headers: { 'content-length': String(50 * 1024 * 1024 + 1) } })
+      : new Response(new Uint8Array([1]), { status: 200, headers: { 'content-length': String(128 * 1024 * 1024 + 1) } })
     await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl: fetchHeader })).rejects.toThrow(
       expect.objectContaining({ code: 'SKILL_PACK_ARCHIVE_INVALID' }),
     )
