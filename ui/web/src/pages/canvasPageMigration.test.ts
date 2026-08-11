@@ -204,7 +204,7 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain('setUseRoleAsset(true)')
   })
 
-  test('canvas prompt Skill UI stays media-only and uses the typed Skill API without novel coupling', () => {
+  test('canvas prompt Skill UI supports explicit Chat targets and uses the typed Skill API without novel coupling', () => {
     const generateNode = source('../components/nodes/GenerateNode.tsx')
     const skillsApiPath = join(import.meta.dir, '../api/skills.ts')
     const apiExists = existsSync(skillsApiPath)
@@ -213,8 +213,14 @@ describe('ComfyForge canvas feature migration', () => {
     if (!apiExists) return
 
     const skillsApi = readFileSync(skillsApiPath, 'utf8')
-    expect(generateNode).toContain("const SKILL_MEDIA_MODES = new Set(['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])")
+    expect(generateNode).toContain("const SKILL_MEDIA_MODES = new Set(['chat', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])")
     expect(generateNode).toContain('const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)')
+    expect(generateNode).toContain('GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS')
+    expect(generateNode).toContain('effectiveSkillCompileMode')
+    expect(generateNode).toContain('目标提示词类型')
+    expect(generateNode).toContain("mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video')")
+    expect(generateNode).toContain('Chat Skill 仅编译提示词')
+    expect(generateNode).toContain("hasEffectiveSkill ? '生成提示词' : '运行'")
     expect(generateNode).toContain('提示词 Skill')
     expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
 

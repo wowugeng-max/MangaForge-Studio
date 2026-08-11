@@ -2515,6 +2515,78 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(model.resolveGenerateNodeSkillFallbackTarget({ skill: { mediaModes: [] }, targetMode: 'image_to_image' })).toBe('image_to_image')
   })
 
+  test('falls back to the first declared Skill target during hydration and command resolution', async () => {
+    const model = await import('./GenerateNode')
+    const skill = { mediaModes: ['image_to_video', 'text_to_video'] }
+
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'hydration',
+      requestedTargetMode: 'text_to_image',
+      skill,
+    })).toEqual({ targetMode: 'image_to_video', clearSkill: false })
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'command',
+      requestedTargetMode: 'image_to_image',
+      skill,
+    })).toEqual({ targetMode: 'image_to_video', clearSkill: false })
+  })
+
+  test('keeps deliberate target changes and clears only an incompatible selected Skill', async () => {
+    const model = await import('./GenerateNode')
+
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode: 'text_to_image',
+      skill: { mediaModes: ['image_to_video'] },
+    })).toEqual({ targetMode: 'text_to_image', clearSkill: true })
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode: 'image_to_image',
+      skill: { mediaModes: [] },
+    })).toEqual({ targetMode: 'image_to_image', clearSkill: false })
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode: 'image_to_video',
+      skill: { mediaModes: ['image_to_video'] },
+    })).toEqual({ targetMode: 'image_to_video', clearSkill: false })
+  })
+
+  test('Chat target wiring persists aliases, compiles with ordered references, and retains H3 video targets', async () => {
+    const model = await import('./GenerateNode')
+    const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
+    const references = Array.from({ length: 9 }, (_, index) => ({
+      reference_index: index + 1,
+      reference_id: `ref-${index + 1}`,
+      reference_role: 'general' as const,
+      type: 'image' as const,
+      url: `https://cdn.example/ref-${index + 1}.png`,
+    }))
+    const request = model.buildGenerateNodeSkillCompileRequest({
+      skillName: 'h3-prompt-writing',
+      packId: 'h3',
+      revision: 'r1',
+      prompt: 'animate this scene',
+      mode: 'image_to_video',
+      references,
+      nodeParams: {},
+      compilerModelId: 9,
+    })
+
+    expect(request.mode).toBe('image_to_video')
+    expect(request.incoming_assets?.map(reference => reference.reference_id)).toEqual(references.map(reference => reference.reference_id))
+    expect(request.incoming_assets).toHaveLength(9)
+    expect(model.filterGenerateNodeCompatibleSkills([
+      { compatibility: 'prompt_ready', mediaModes: ['text_to_video', 'image_to_video'] },
+    ], 'image_to_video')).toHaveLength(1)
+    expect(source).toContain('skillTargetMode')
+    expect(source).toContain('skill_target_mode')
+    expect(source).toContain('effectiveSkillCompileMode')
+    expect(source).toContain('GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS')
+    expect(source).toContain("mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video')")
+    expect(source).toContain('Chat Skill 仅编译提示词')
+    expect(source).toContain("hasEffectiveSkill ? '生成提示词' : '运行'")
+  })
+
   test('does not auto-select when multiple installed Skills are compatible', async () => {
     const model = await import('./generate-node-model')
     const skills = [

@@ -85,9 +85,31 @@ export function resolveGenerateNodeSkillFallbackTarget<T extends { mediaModes: r
   targetMode: GenerateNodeSkillTargetMode
 }): GenerateNodeSkillTargetMode | undefined {
   if (input.skill.mediaModes.length === 0 || input.skill.mediaModes.includes(input.targetMode)) return input.targetMode
-  return GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS
-    .map(option => option.value)
-    .find(mode => input.skill.mediaModes.includes(mode))
+  return input.skill.mediaModes.find(mode => (
+    GENERATE_NODE_SKILL_TARGET_MODES.has(mode as GenerateNodeSkillTargetMode)
+  )) as GenerateNodeSkillTargetMode | undefined
+}
+
+export type GenerateNodeSkillTargetTransitionOrigin = 'hydration' | 'command' | 'user'
+
+export function resolveGenerateNodeSkillTargetTransition<T extends { mediaModes: readonly string[] }>(input: {
+  origin: GenerateNodeSkillTargetTransitionOrigin
+  requestedTargetMode: GenerateNodeSkillTargetMode
+  skill?: T | null
+}): { targetMode: GenerateNodeSkillTargetMode; clearSkill: boolean } {
+  if (!input.skill || input.skill.mediaModes.length === 0 || input.skill.mediaModes.includes(input.requestedTargetMode)) {
+    return { targetMode: input.requestedTargetMode, clearSkill: false }
+  }
+  if (input.origin === 'user') {
+    return { targetMode: input.requestedTargetMode, clearSkill: true }
+  }
+  return {
+    targetMode: resolveGenerateNodeSkillFallbackTarget({
+      skill: input.skill,
+      targetMode: input.requestedTargetMode,
+    }) ?? input.requestedTargetMode,
+    clearSkill: false,
+  }
 }
 
 export function selectInstalledGenerateNodeSkill<T extends {

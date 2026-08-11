@@ -33,6 +33,7 @@ import {
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
   GENERATE_NODE_REFERENCE_ROLE_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
+  GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS,
   MODES,
   PRESET_ROLES,
   areGenerateNodeIncomingContextSnapshotsEqual,
@@ -57,6 +58,7 @@ import {
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeImageUrl,
   normalizeGenerateNodeSkillCompileAudit,
+  normalizeGenerateNodeSkillTargetMode,
   parseGenerateNodeExecutionCompatibilityError,
   parseCanvasSkillCommand,
   normalizeSelectOptions,
@@ -65,6 +67,9 @@ import {
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
+  resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillTargetTransition,
+  filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
@@ -81,12 +86,14 @@ import type {
   GenerateNodeReferenceValidationState,
   GenerateNodeRunToken,
   GenerateNodeSkillTargetMode,
+  GenerateNodeSkillTargetTransitionOrigin,
 } from './generate-node-model'
 
 export {
   GENERATE_NODE_ASPECT_RATIO_OPTIONS,
   GENERATE_NODE_REFERENCE_ROLE_OPTIONS,
   GENERATE_NODE_ROUTING_STRATEGY_OPTIONS,
+  GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS,
   GenerateNodeReferenceError,
   MAX_GENERATE_NODE_REFERENCE_IMAGES,
   getGenerateNodeAspectRatioSize,
@@ -119,6 +126,7 @@ export {
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeSkillCompileAudit,
+  normalizeGenerateNodeSkillTargetMode,
   normalizeGenerateNodeReferenceBindings,
   parseGenerateNodeExecutionCompatibilityError,
   reconcileGenerateNodeReferenceBindings,
@@ -126,6 +134,9 @@ export {
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
+  resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillTargetTransition,
+  filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeResultReferenceBindings,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
@@ -143,13 +154,15 @@ export type {
   GenerateNodeRunToken,
   GenerateNodeSkillIdentity,
   GenerateNodeSkillSelectionError,
+  GenerateNodeSkillTargetMode,
+  GenerateNodeSkillTargetTransitionOrigin,
   GenerateNodeUnresolvedReferenceSource,
 } from './generate-node-model'
 
 const { TextArea } = Input
 const { Text } = Typography
 
-const SKILL_MEDIA_MODES = new Set(['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])
+const SKILL_MEDIA_MODES = new Set(['chat', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'])
 const SKILL_AUDIT_KEYS = [
   'skill_pack_id', 'skill_pack_source', 'skill_name', 'skill_revision',
   'compiled_prompt', 'compiled_negative_prompt', 'compiled_references',
@@ -198,6 +211,9 @@ function GenerateNodeImpl(props: NodeProps) {
   const [allModels, setAllModels] = useState<any[]>([])
   const [modelLoading, setModelLoading] = useState(false)
   const [mode, setMode] = useState(data?.mode || 'chat')
+  const [skillTargetMode, setSkillTargetMode] = useState<GenerateNodeSkillTargetMode>(() => (
+    normalizeGenerateNodeSkillTargetMode(data?.skillTargetMode ?? data?.skill_target_mode)
+  ))
   const [prompt, setPrompt] = useState(data?.prompt || '')
   const [systemPrompt, setSystemPrompt] = useState(data?.systemPrompt || '')
   const [selectedKey, setSelectedKey] = useState<number | null>(Number(data?.api_key_id ?? data?.keyId) || null)
@@ -283,6 +299,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const prevRunSignalRef = useRef(data?._runSignal)
   const previousCompileInputFingerprintRef = useRef<string | null>(null)
   const compileInputFingerprintRef = useRef('')
+  const appliedSkillTargetResolutionRef = useRef('')
   const skillPreviewRequestTrackerRef = useRef(createGenerateNodePreviewRequestTracker())
   const nodeRef = useRef<HTMLDivElement>(null)
 
@@ -309,6 +326,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const visibleModels = allModels.filter(item => showOnlyFavorites ? item.is_favorite : true)
   const selectableModels = visibleModels.length > 0 ? visibleModels : allModels
   const supportsPromptSkills = SKILL_MEDIA_MODES.has(mode)
+  const effectiveSkillCompileMode = resolveGenerateNodeSkillCompileMode({ nodeMode: mode, skillTargetMode })
   const parsedSkillCommand = useMemo(() => parseCanvasSkillCommand(prompt), [prompt])
   const commandSkillArgumentKey = parsedSkillCommand ? `${parsedSkillCommand.packId || ''}:${parsedSkillCommand.name}` : ''
   const commandSkillArguments = commandSkillArgumentKey ? commandSkillArgumentsByCommand[commandSkillArgumentKey] || {} : {}
@@ -367,7 +385,8 @@ function GenerateNodeImpl(props: NodeProps) {
   const effectiveCompilerModel = compilerModels.find(model => Number(model.id) === Number(effectiveCompilerModelId))
   const effectiveSkillIncompatible = Boolean(hasEffectiveSkill && effectiveSkill && (
     effectiveSkill.compatibility !== 'prompt_ready'
-    || (effectiveSkill.mediaModes.length > 0 && !effectiveSkill.mediaModes.includes(mode as CanvasSkillMediaMode))
+    || !effectiveSkillCompileMode
+    || (effectiveSkill.mediaModes.length > 0 && !effectiveSkill.mediaModes.includes(effectiveSkillCompileMode))
   ))
   const missingEffectiveCompilerModel = Boolean(hasEffectiveSkill && (
     !skillSettingsLoaded
@@ -411,7 +430,21 @@ function GenerateNodeImpl(props: NodeProps) {
 
   useEffect(() => {
     updateNodeInternals(id)
-  }, [id, mode, updateNodeInternals])
+  }, [id, mode, skillTargetMode, updateNodeInternals])
+
+  useEffect(() => {
+    if (mode !== 'chat' || !effectiveSkill) return
+    const origin: GenerateNodeSkillTargetTransitionOrigin = parsedSkillCommand ? 'command' : 'hydration'
+    const resolutionKey = `${origin}:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
+    if (appliedSkillTargetResolutionRef.current === resolutionKey) return
+    appliedSkillTargetResolutionRef.current = resolutionKey
+    const transition = resolveGenerateNodeSkillTargetTransition({
+      origin,
+      requestedTargetMode: skillTargetMode,
+      skill: effectiveSkill,
+    })
+    if (transition.targetMode !== skillTargetMode) setSkillTargetMode(transition.targetMode)
+  }, [effectiveSkill, mode, parsedSkillCommand, skillTargetMode])
 
   useEffect(() => {
     if (reconciledIncomingFingerprintRef.current === incomingContext.fingerprint) return
@@ -436,6 +469,8 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => {
     updateNodeData(id, {
       mode,
+      skillTargetMode,
+      skill_target_mode: skillTargetMode,
       prompt,
       systemPrompt,
       model: selectedModel,
@@ -497,7 +532,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skill_pack_source: hasCompileMetadata ? skillPackSource || undefined : undefined,
       compiler_model_id: hasCompileMetadata ? compilerModelId ?? undefined : undefined,
     })
-  }, [id, mode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
+  }, [id, mode, skillTargetMode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
   useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
 
@@ -539,7 +574,8 @@ function GenerateNodeImpl(props: NodeProps) {
     }
     let cancelled = false
     setSkillsLoading(true)
-    listSkills(mode as CanvasSkillMediaMode, true)
+    if (!effectiveSkillCompileMode) return
+    listSkills(effectiveSkillCompileMode, true)
       .then(res => {
         if (cancelled) return
         const skills = Array.isArray(res.data?.skills) ? res.data.skills : []
@@ -549,7 +585,7 @@ function GenerateNodeImpl(props: NodeProps) {
       .catch(() => { if (!cancelled) setReadySkills([]) })
       .finally(() => { if (!cancelled) setSkillsLoading(false) })
     return () => { cancelled = true }
-  }, [mode, supportsPromptSkills])
+  }, [effectiveSkillCompileMode, supportsPromptSkills])
 
   useEffect(() => {
     if (!selectedKey) {
@@ -625,6 +661,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const compileInputFingerprint = JSON.stringify({
     prompt,
     mode,
+    effectiveSkillCompileMode,
     skill: effectiveSkillIdentity,
     skillArguments: effectiveSkillArguments,
     compilerModelId: effectiveCompilerModelId,
@@ -702,7 +739,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const handleSkillPreview = async () => {
     if (!hasEffectiveSkill) return message.info('请先选择 Skill 或在提示词开头输入 /skill 命令')
     if (effectiveSkillSelectionError) return message.error(`${effectiveSkillSelectionError.error_code}: ${effectiveSkillSelectionError.detail}`)
-    if (effectiveSkillIncompatible) return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容`)
+    if (effectiveSkillIncompatible) return message.error(effectiveSkill?.reason || `当前 Skill 与 ${effectiveSkillCompileMode || mode} 不兼容`)
     if (missingEffectiveCompilerModel || effectiveCompilerModelId === null) {
       return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
     }
@@ -718,7 +755,7 @@ function GenerateNodeImpl(props: NodeProps) {
         packId: effectiveSkillPackId,
         revision: effectiveSkillRevision,
         prompt,
-        mode: mode as GenerateNodeSkillTargetMode,
+        mode: effectiveSkillCompileMode as GenerateNodeSkillTargetMode,
         references: previewAssets,
         nodeParams: skillNodeParams(),
         arguments: effectiveSkillArguments,
@@ -959,7 +996,7 @@ function GenerateNodeImpl(props: NodeProps) {
         return message.error(`${effectiveSkillSelectionError.error_code}: ${effectiveSkillSelectionError.detail}`)
       }
       if (effectiveSkillIncompatible) {
-        return message.error(effectiveSkill?.reason || `当前 Skill 与 ${mode} 不兼容，请更换或清除`)
+        return message.error(effectiveSkill?.reason || `当前 Skill 与 ${effectiveSkillCompileMode || mode} 不兼容，请更换或清除`)
       }
       if (missingEffectiveCompilerModel) {
         return message.error(!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载 Skill 编译模型，请稍候' : '请先配置一个启用且支持 Chat 的 Skill 编译模型')
@@ -1113,10 +1150,9 @@ function GenerateNodeImpl(props: NodeProps) {
   }
 
   const skillOptionKey = (skill: Pick<CanvasSkillSummary, 'packId' | 'name' | 'revision'>) => `${skill.packId}:${skill.name}:${skill.revision}`
-  const compatibleReadySkills = readySkills.filter(skill => (
-    skill.compatibility === 'prompt_ready'
-    && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode))
-  ))
+  const compatibleReadySkills = effectiveSkillCompileMode
+    ? filterGenerateNodeCompatibleSkills(readySkills, effectiveSkillCompileMode)
+    : []
   const selectableSkills = selectedSkill && !compatibleReadySkills.some(skill => skillOptionKey(skill) === skillOptionKey(selectedSkill))
     ? [...compatibleReadySkills, selectedSkill]
     : compatibleReadySkills
@@ -1144,6 +1180,16 @@ function GenerateNodeImpl(props: NodeProps) {
     setSkillRevision(skill.revision)
     setSkillCompileEnabled(true)
     setSkillArguments(Object.fromEntries(skill.arguments.flatMap(argument => argument.default === undefined ? [] : [[argument.name, String(argument.default)]])))
+  }
+
+  const selectSkillTargetMode = (requestedTargetMode: GenerateNodeSkillTargetMode) => {
+    const transition = resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode,
+      skill: selectedSkill,
+    })
+    setSkillTargetMode(transition.targetMode)
+    if (transition.clearSkill) selectPromptSkill('')
   }
 
   const workspaceCompilerModel = compilerModels.find(model => Number(model.id) === Number(skillSettings?.skill_compiler_model_id))
@@ -1269,11 +1315,13 @@ function GenerateNodeImpl(props: NodeProps) {
     <>
       {(mode === 'chat' || mode === 'vision') && <TypedHandle id="system" type="target" position={Position.Left} dataType="text" label="系统提示词" color="#fadb14" top={30} collapsed={nodeCollapsed} />}
       <TypedHandle id="text" type="target" position={Position.Left} dataType="text" label="文本输入" top={70} collapsed={nodeCollapsed} />
-      {(mode === 'vision' || mode === 'image_to_image' || mode === 'image_to_video') && <TypedHandle id="image" type="target" position={Position.Left} dataType="image" label="图片输入" top={110} collapsed={nodeCollapsed} />}
+      {(mode === 'vision' || mode === 'image_to_image' || mode === 'image_to_video' || (mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video'))) && <TypedHandle id="image" type="target" position={Position.Left} dataType="image" label="图片输入" top={110} collapsed={nodeCollapsed} />}
     </>
   )
 
   const isImageVideoMode = ['text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(mode)
+  const showsChatSkillImageReferences = mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video')
+  const showsReferencePanel = isImageVideoMode || showsChatSkillImageReferences
   const hasModelSizeParam = (selectedModelRecord?.context_ui_params?.[mode] || []).some((param: any) => param?.name === 'size')
 
   // 选择比例时清掉模型自带的 size 参数，否则 params.size 优先级更高会让比例失效
@@ -1402,7 +1450,7 @@ function GenerateNodeImpl(props: NodeProps) {
               </Space>
             ),
           }] : []),
-          ...(isImageVideoMode ? [{
+          ...(showsReferencePanel ? [{
             key: 'references',
             label: '参考素材',
             children: (
@@ -1468,6 +1516,18 @@ function GenerateNodeImpl(props: NodeProps) {
             label: '提示词 Skill',
             children: (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                {mode === 'chat' && (
+                  <div>
+                    <Text type="secondary" style={{ display: 'block', fontSize: 11, marginBottom: 3 }}>目标提示词类型</Text>
+                    <Select
+                      size="small"
+                      value={skillTargetMode}
+                      options={GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS}
+                      onChange={value => selectSkillTargetMode(value)}
+                      style={{ width: '100%' }}
+                    />
+                  </div>
+                )}
                 {parsedSkillCommand && (
                   <div style={{ padding: 8, borderRadius: 8, background: '#fff7e6', border: '1px solid #ffd591' }}>
                     <Tag color="orange" style={{ marginBottom: 4 }}>命令生效</Tag>
@@ -1486,7 +1546,7 @@ function GenerateNodeImpl(props: NodeProps) {
                     ...(unresolvedSelectedSkillOption ? [unresolvedSelectedSkillOption] : []),
                     ...selectableSkills.map(skill => ({
                       value: skillOptionKey(skill),
-                      label: `${skill.packId}: ${skill.displayName || skill.name} · revision ${skill.revision}${skill.compatibility === 'prompt_ready' && (skill.mediaModes.length === 0 || skill.mediaModes.includes(mode as CanvasSkillMediaMode)) ? '' : ' · 不兼容'}`,
+                      label: `${skill.packId}: ${skill.displayName || skill.name} · revision ${skill.revision}${skill.compatibility === 'prompt_ready' && effectiveSkillCompileMode && (skill.mediaModes.length === 0 || skill.mediaModes.includes(effectiveSkillCompileMode)) ? '' : ' · 不兼容'}`,
                     })),
                   ]}
                 />
@@ -1540,6 +1600,9 @@ function GenerateNodeImpl(props: NodeProps) {
                   <Text type="danger" style={{ fontSize: 11 }}>
                     {!skillSettingsLoaded || !compilerModelsLoaded ? '正在加载可用编译模型…' : '需要配置一个启用且 capabilities.chat === true 的编译模型后才能预览或运行。'}
                   </Text>
+                )}
+                {mode === 'chat' && hasEffectiveSkill && (
+                  <Text type="secondary" style={{ fontSize: 11 }}>Chat Skill 仅编译提示词，不会调用媒体生成网络。</Text>
                 )}
                 <Button
                   block
@@ -1659,7 +1722,7 @@ function GenerateNodeImpl(props: NodeProps) {
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : hasEffectiveSkill ? '生成提示词' : '运行'}
           </Button>
         </div>
 
