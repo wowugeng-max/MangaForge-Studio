@@ -92,19 +92,15 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback returned an invalid redirect URL', error)
   }
 
-  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(location)?.[1]
-  const authorityHost = authority?.replace(/^[^@]*@/, '')
-  const hasRawWhitespaceOrControl = location.trim() !== location || /[\u0000-\u001F\u007F]/.test(location)
+  const lexical = /^https:\/\/([A-Za-z0-9.-]+)\/[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*\/zip\/[0-9a-fA-F]{40}$/.exec(location)
   const parts = url.pathname.split('/')
   const [empty, owner, name, format, sha] = parts
   if (
     url.protocol !== 'https:' ||
     url.hostname !== 'codeload.github.com' ||
     url.port ||
-    !authority ||
-    !authorityHost ||
-    authorityHost?.includes(':') ||
-    hasRawWhitespaceOrControl ||
+    !lexical ||
+    lexical[1].toLowerCase() !== 'codeload.github.com' ||
     url.search ||
     url.hash ||
     url.username ||

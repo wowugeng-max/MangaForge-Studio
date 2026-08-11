@@ -49,14 +49,20 @@ describe('Skill Pack installer', () => {
     const repo = parsePublicGitHubUrl('https://github.com/minimax-ai/minimax-h3')
     const sha = 'fa6891ff7cdaaa03fa4497e89ac64ff169219acf'
     expect(parseGitHubArchiveRedirect(`https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`, repo)).toBe(sha)
+    expect(parseGitHubArchiveRedirect(`https://codeload.github.com/minimax-ai/minimax-h3/zip/${sha}`, repo)).toBe(sha)
 
     for (const value of [
       `http://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://evil.example/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://user@codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://@codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://codeload.github.com:444/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com:443/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       ` https://codeload.github.com:443/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `\nhttps://codeload.github.com:443/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com/MiniMax-AI/x/../MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com\\MiniMax-AI\\MiniMax-H3\\zip\\${sha}`,
+      `https://codeload%2egithub.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
       `https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}?download=1`,
       `https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}#archive`,
       `https://codeload.github.com/other/MiniMax-H3/zip/${sha}`,
