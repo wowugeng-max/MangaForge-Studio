@@ -1127,6 +1127,7 @@ function GenerateNodeImpl(props: NodeProps) {
             chatSkillCompileRunTokenRef.current = null
             setGenerating(false)
             setProgressMsg('')
+            setNodeStatus(id, 'idle')
           }
           return
         }

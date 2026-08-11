@@ -2521,6 +2521,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
     let activeChatToken = oldToken
     let generating = true
     let progress = 'old compile'
+    let nodeStatus = 'running'
 
     // Interrupt the old run, then start a replacement before the old promise settles.
     tracker.invalidate()
@@ -2542,6 +2543,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
       activeChatToken = null
       generating = false
       progress = ''
+      nodeStatus = 'idle'
     }
 
     expect(shouldCleanupOldUi).toBe(false)
@@ -2549,6 +2551,69 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(activeChatToken).toBe(replacementToken)
     expect(generating).toBe(true)
     expect(progress).toBe('replacement compile')
+    expect(nodeStatus).toBe('running')
+  })
+
+  test('current stale success and rejection settle idle and allow a replacement run', async () => {
+    const model = await import('./generate-node-model')
+
+    for (const settlement of ['success', 'rejection'] as const) {
+      const tracker = model.createGenerateNodeRunTracker()
+      const runToken = tracker.start([])
+      expect(runToken).not.toBeNull()
+      let fingerprintCurrent = true
+      let resolveCompile!: (value: any) => void
+      let rejectCompile!: (error: unknown) => void
+      const compilation = model.runGenerateNodeChatSkillCompilation({
+        request: model.buildGenerateNodeSkillCompileRequest({
+          skillName: 'skill', prompt: settlement, mode: 'text_to_image', compilerModelId: 4, references: [],
+        }),
+        compile: () => new Promise((resolve, reject) => {
+          resolveCompile = resolve
+          rejectCompile = reject
+        }),
+        isCurrent: () => tracker.isCurrent(runToken) && fingerprintCurrent,
+        packId: 'pack', compilerModelId: 4, rawPrompt: settlement,
+      })
+      fingerprintCurrent = false
+      if (settlement === 'success') {
+        resolveCompile({
+          data: {
+            result: {
+              skill_name: 'skill', skill_version: 'r1', mode: 'text_to_image', prompt: 'stale success',
+              negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+            },
+            cache_key: 'stale', cached: false,
+          },
+        })
+      } else {
+        rejectCompile(new Error('stale rejection'))
+      }
+      expect(await compilation).toEqual({ status: 'stale' })
+
+      let activeChatToken = runToken
+      let generating = true
+      let progress = 'compiling'
+      let nodeStatus = 'running'
+      const settled = model.settleGenerateNodeChatSkillRun({
+        tracker,
+        token: runToken!,
+        activeChatToken,
+      })
+      if (settled) {
+        activeChatToken = null
+        generating = false
+        progress = ''
+        nodeStatus = 'idle'
+      }
+
+      expect(settled).toBe(true)
+      expect(activeChatToken).toBeNull()
+      expect(generating).toBe(false)
+      expect(progress).toBe('')
+      expect(nodeStatus).toBe('idle')
+      expect(tracker.start([])).not.toBeNull()
+    }
   })
 
   test('external cancellation invalidates late compile success and rejection while allowing replacement runs', async () => {
@@ -2699,6 +2764,19 @@ describe('GenerateNode Chat Skill model helpers', () => {
     const failStart = source.indexOf('const failGeneration =')
     const failEnd = source.indexOf('const handleSSEMessage =', failStart)
     expect(source.slice(failStart, failEnd)).toContain("setNodeStatus(id, 'error')")
+  })
+
+  test('restores idle only when the current stale Chat Skill run owns settlement', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const staleStart = source.indexOf("if (outcome.status === 'stale') {")
+    const staleEnd = source.indexOf('finishGeneration(outcome.packet, runToken)', staleStart)
+    const staleBranch = source.slice(staleStart, staleEnd)
+    const settledStart = staleBranch.indexOf('if (settleGenerateNodeChatSkillRun({')
+    const settledEnd = staleBranch.indexOf('\n          }\n          return', settledStart) + '\n          }'.length
+    const settledBranch = staleBranch.slice(settledStart, settledEnd)
+
+    expect(settledBranch).toContain("setNodeStatus(id, 'idle')")
+    expect(staleBranch.slice(settledEnd)).not.toContain("setNodeStatus(id, 'idle')")
   })
 
   test('external error subscription fires synchronously on transitions and cleans up', async () => {
