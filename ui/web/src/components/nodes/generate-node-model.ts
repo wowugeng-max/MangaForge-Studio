@@ -1564,6 +1564,23 @@ export function createGenerateNodeRunTracker() {
   }
 }
 
+export function cancelGenerateNodeChatSkillRun(input: {
+  tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'isCurrent' | 'invalidate'>
+  activeChatToken: GenerateNodeRunToken | null
+}) {
+  if (!input.activeChatToken || !input.tracker.isCurrent(input.activeChatToken)) return false
+  input.tracker.invalidate()
+  return true
+}
+
+export function resolveGenerateNodeInitialRunStatus(input: {
+  currentStatus?: string
+  hasResult: boolean
+}): 'idle' | 'success' | undefined {
+  if (input.currentStatus !== undefined) return undefined
+  return input.hasResult ? 'success' : 'idle'
+}
+
 export function settleGenerateNodeChatSkillRun(input: {
   tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'complete'>
   token: GenerateNodeRunToken

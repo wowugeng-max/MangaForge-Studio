@@ -48,6 +48,7 @@ import {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
+  cancelGenerateNodeChatSkillRun,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
@@ -71,6 +72,7 @@ import {
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeExecutionBlockState,
+  resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
   resolveGenerateNodeChatSkillPreviewCached,
@@ -121,6 +123,7 @@ export {
   buildGenerateNodeSkillCompileAssets,
   buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
+  cancelGenerateNodeChatSkillRun,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
@@ -135,6 +138,7 @@ export {
   reconcileGenerateNodeReferenceBindings,
   reorderGenerateNodeReferenceBindings,
   resolveGenerateNodeExecutionBlockState,
+  resolveGenerateNodeInitialRunStatus,
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeSkillCompileMode,
@@ -190,6 +194,16 @@ function generateNodeReferenceValidationFromError(error: unknown): GenerateNodeR
     detail: String(value?.message || '参考素材校验失败'),
     ...(value?.reference_index === undefined ? {} : { reference_index: Number(value.reference_index) }),
   }
+}
+
+export function subscribeToGenerateNodeExternalError(nodeId: string, onExternalError: () => void) {
+  return useCanvasStore.subscribe((state, previousState) => {
+    if (
+      state.nodeRunStatus[nodeId] !== 'error'
+      || previousState.nodeRunStatus[nodeId] === 'error'
+    ) return
+    onExternalError()
+  })
 }
 
 function GenerateNodeImpl(props: NodeProps) {
@@ -310,6 +324,19 @@ function GenerateNodeImpl(props: NodeProps) {
   const pendingSkillTargetUserResolutionRef = useRef(false)
   const skillPreviewRequestTrackerRef = useRef(createGenerateNodePreviewRequestTracker())
   const nodeRef = useRef<HTMLDivElement>(null)
+
+  const cancelChatSkillCompileRun = useCallback(() => {
+    const activeChatToken = chatSkillCompileRunTokenRef.current
+    if (!cancelGenerateNodeChatSkillRun({
+      tracker: generateRunTrackerRef.current,
+      activeChatToken,
+    })) return false
+
+    chatSkillCompileRunTokenRef.current = null
+    setGenerating(false)
+    setProgressMsg('')
+    return true
+  }, [])
 
   // UI-only helper states for camera controls
   const [cameraOpen, setCameraOpen] = useState(false)
@@ -565,7 +592,15 @@ function GenerateNodeImpl(props: NodeProps) {
     })
   }, [id, mode, skillTargetMode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
-  useEffect(() => { setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle') }, [id, generating, result, setNodeStatus])
+  useEffect(() => {
+    const initialStatus = resolveGenerateNodeInitialRunStatus({
+      currentStatus: useCanvasStore.getState().nodeRunStatus[id],
+      hasResult: Boolean(result),
+    })
+    if (initialStatus) setNodeStatus(id, initialStatus)
+  }, [id, result, setNodeStatus])
+
+  useEffect(() => subscribeToGenerateNodeExternalError(id, cancelChatSkillCompileRun), [cancelChatSkillCompileRun, id])
 
   useEffect(() => {
     apiClient.get('/keys/')
@@ -741,6 +776,7 @@ function GenerateNodeImpl(props: NodeProps) {
       compilerModelId: undefined,
       skillPreviewResult: undefined,
       skillPreviewCached: false,
+      skill_preview_cached: false,
       compiled_prompt: undefined,
       compiled_negative_prompt: undefined,
       compiled_references: undefined,
@@ -1144,11 +1180,8 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [data?._runSignal])
 
   const handleInterrupt = async () => {
-    if (chatSkillCompileRunTokenRef.current) {
-      generateRunTrackerRef.current.invalidate()
-      chatSkillCompileRunTokenRef.current = null
-      setGenerating(false)
-      setProgressMsg('')
+    if (cancelChatSkillCompileRun()) {
+      setNodeStatus(id, result ? 'success' : 'idle')
       message.warning('已中断提示词编译')
       return
     }

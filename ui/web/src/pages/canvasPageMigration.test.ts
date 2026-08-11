@@ -271,7 +271,7 @@ describe('ComfyForge canvas feature migration', () => {
     expect(handleRun.slice(providerStart)).toContain("url: '/generate'")
 
     const interrupt = generateNode.slice(generateNode.indexOf('const handleInterrupt = async () => {'), generateNode.indexOf('const handleSaveToAsset ='))
-    expect(interrupt).toContain('generateRunTrackerRef.current.invalidate()')
+    expect(interrupt).toContain('cancelChatSkillCompileRun()')
     expect(interrupt).toContain("apiClient.post(`/interrupt/${id}`)")
   })
 

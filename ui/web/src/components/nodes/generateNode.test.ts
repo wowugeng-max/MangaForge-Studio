@@ -18,6 +18,7 @@ import {
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
 } from './GenerateNode'
+import { useCanvasStore } from '../../stores/canvasStore'
 
 async function loadGenerateNodeReferenceApi() {
   const module = await import('./GenerateNode')
@@ -2550,6 +2551,64 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(progress).toBe('replacement compile')
   })
 
+  test('external cancellation invalidates late compile success and rejection while allowing replacement runs', async () => {
+    const model = await import('./generate-node-model')
+    const tracker = model.createGenerateNodeRunTracker()
+    const oldToken = tracker.start([])
+    expect(oldToken).not.toBeNull()
+    let resolveOld!: (value: any) => void
+    const oldSuccess = model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'old', mode: 'text_to_image', compilerModelId: 4, references: [],
+      }),
+      compile: () => new Promise(resolve => { resolveOld = resolve }),
+      isCurrent: () => tracker.isCurrent(oldToken),
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'old',
+    })
+
+    expect(model.cancelGenerateNodeChatSkillRun({ tracker, activeChatToken: oldToken })).toBe(true)
+    const replacementToken = tracker.start([])
+    expect(replacementToken).not.toBeNull()
+    resolveOld({
+      data: {
+        result: {
+          skill_name: 'skill', skill_version: 'r1', mode: 'text_to_image', prompt: 'late success',
+          negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+        },
+        cache_key: 'late', cached: false,
+      },
+    })
+    expect(await oldSuccess).toEqual({ status: 'stale' })
+    expect(tracker.isCurrent(replacementToken)).toBe(true)
+
+    expect(tracker.complete(replacementToken)).toBe(true)
+    const rejectedToken = tracker.start([])
+    expect(rejectedToken).not.toBeNull()
+    let rejectOld!: (error: unknown) => void
+    const oldRejection = model.runGenerateNodeChatSkillCompilation({
+      request: model.buildGenerateNodeSkillCompileRequest({
+        skillName: 'skill', prompt: 'reject', mode: 'text_to_image', compilerModelId: 4, references: [],
+      }),
+      compile: () => new Promise((_resolve, reject) => { rejectOld = reject }),
+      isCurrent: () => tracker.isCurrent(rejectedToken),
+      packId: 'pack', compilerModelId: 4, rawPrompt: 'reject',
+    })
+    expect(model.cancelGenerateNodeChatSkillRun({ tracker, activeChatToken: rejectedToken })).toBe(true)
+    const secondReplacement = tracker.start([])
+    rejectOld(new Error('late rejection'))
+    expect(await oldRejection).toEqual({ status: 'stale' })
+    expect(tracker.isCurrent(secondReplacement)).toBe(true)
+  })
+
+  test('initial status never overwrites an explicit terminal error with or without a prior result', async () => {
+    const model = await import('./generate-node-model')
+
+    expect(model.resolveGenerateNodeInitialRunStatus({ currentStatus: undefined, hasResult: false })).toBe('idle')
+    expect(model.resolveGenerateNodeInitialRunStatus({ currentStatus: undefined, hasResult: true })).toBe('success')
+    expect(model.resolveGenerateNodeInitialRunStatus({ currentStatus: 'error', hasResult: false })).toBeUndefined()
+    expect(model.resolveGenerateNodeInitialRunStatus({ currentStatus: 'error', hasResult: true })).toBeUndefined()
+  })
+
   test('routes Chat plus Skill through the compiler before Key/model and keeps legacy generation transport separate', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     expect(source).toContain("const isChatSkillCompileOnly = mode === 'chat' && hasEffectiveSkill")
@@ -2619,11 +2678,65 @@ describe('GenerateNode Chat Skill model helpers', () => {
     const directEnd = interruptSource.indexOf('return')
     const directInterrupt = interruptSource.slice(0, directEnd)
 
-    expect(interruptSource).toContain('chatSkillCompileRunTokenRef.current')
-    expect(directInterrupt).toContain('generateRunTrackerRef.current.invalidate()')
-    expect(directInterrupt).toContain('setGenerating(false)')
+    expect(interruptSource).toContain('cancelChatSkillCompileRun()')
+    expect(directInterrupt).not.toContain('generateRunTrackerRef.current.invalidate()')
+    expect(directInterrupt).toContain("setNodeStatus(id, result ? 'success' : 'idle')")
     expect(directInterrupt).not.toContain("apiClient.post(`/interrupt/${id}`)")
     expect(interruptSource).toContain("apiClient.post(`/interrupt/${id}`)")
+  })
+
+  test('subscribes to external error stops and preserves explicit lifecycle status', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    expect(source).toContain('useCanvasStore.subscribe((state, previousState) => {')
+    expect(source).toContain("state.nodeRunStatus[nodeId] !== 'error'")
+    expect(source).toContain("previousState.nodeRunStatus[nodeId] === 'error'")
+    expect(source).toContain('subscribeToGenerateNodeExternalError(id, cancelChatSkillCompileRun)')
+    expect(source).toContain('cancelChatSkillCompileRun()')
+    expect(source).toContain('resolveGenerateNodeInitialRunStatus({')
+    expect(source).toContain('currentStatus: useCanvasStore.getState().nodeRunStatus[id]')
+    expect(source).not.toContain("setNodeStatus(id, generating ? 'running' : result ? 'success' : 'idle')")
+
+    const failStart = source.indexOf('const failGeneration =')
+    const failEnd = source.indexOf('const handleSSEMessage =', failStart)
+    expect(source.slice(failStart, failEnd)).toContain("setNodeStatus(id, 'error')")
+  })
+
+  test('external error subscription fires synchronously on transitions and cleans up', async () => {
+    const model = await loadGenerateNodeReferenceApi()
+    expect(typeof model.subscribeToGenerateNodeExternalError).toBe('function')
+    const nodeId = 'chat-skill-external-stop-test'
+    const previousStatuses = useCanvasStore.getState().nodeRunStatus
+    useCanvasStore.setState({
+      nodeRunStatus: { ...previousStatuses, [nodeId]: 'idle' },
+    })
+    let cancellations = 0
+    const unsubscribe = model.subscribeToGenerateNodeExternalError(nodeId, () => {
+      cancellations += 1
+    })
+    try {
+      useCanvasStore.getState().setNodeStatus(nodeId, 'error')
+      expect(cancellations).toBe(1)
+      useCanvasStore.getState().setNodeStatus(nodeId, 'error')
+      expect(cancellations).toBe(1)
+
+      unsubscribe()
+      useCanvasStore.getState().setNodeStatus(nodeId, 'running')
+      useCanvasStore.getState().setNodeStatus(nodeId, 'error')
+      expect(cancellations).toBe(1)
+    } finally {
+      unsubscribe()
+      useCanvasStore.setState({ nodeRunStatus: previousStatuses })
+    }
+  })
+
+  test('clears both preview cache aliases when compile inputs change', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const fingerprintStart = source.indexOf('if (previous === compileInputFingerprint) return')
+    const fingerprintEnd = source.indexOf('const prepareReferenceBindingsForExecution =', fingerprintStart)
+    const invalidation = source.slice(fingerprintStart, fingerprintEnd)
+
+    expect(invalidation).toContain('skillPreviewCached: false')
+    expect(invalidation).toContain('skill_preview_cached: false')
   })
 
   test('builds a canonical locked Skill compile request and omits empty optional fields', async () => {
