@@ -219,8 +219,10 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain('effectiveSkillCompileMode')
     expect(generateNode).toContain('目标提示词类型')
     expect(generateNode).toContain("mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video')")
-    expect(generateNode).toContain('Chat Skill 仅编译提示词')
-    expect(generateNode).toContain("hasEffectiveSkill ? '生成提示词' : '运行'")
+    expect(generateNode).toContain('Chat Skill 仅使用 Skill 编译模型，不会调用上方选择的 Chat 模型。')
+    expect(generateNode).toContain("mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'")
+    expect(generateNode).toContain("if (mode !== 'chat' || !effectiveSkill) {")
+    expect(generateNode).toContain("appliedSkillTargetResolutionRef.current = ''")
     expect(generateNode).toContain('提示词 Skill')
     expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
 

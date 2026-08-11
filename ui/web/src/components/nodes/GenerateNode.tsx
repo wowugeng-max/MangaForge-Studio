@@ -433,7 +433,10 @@ function GenerateNodeImpl(props: NodeProps) {
   }, [id, mode, skillTargetMode, updateNodeInternals])
 
   useEffect(() => {
-    if (mode !== 'chat' || !effectiveSkill) return
+    if (mode !== 'chat' || !effectiveSkill) {
+      appliedSkillTargetResolutionRef.current = ''
+      return
+    }
     const origin: GenerateNodeSkillTargetTransitionOrigin = parsedSkillCommand ? 'command' : 'hydration'
     const resolutionKey = `${origin}:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
     if (appliedSkillTargetResolutionRef.current === resolutionKey) return
@@ -1602,7 +1605,7 @@ function GenerateNodeImpl(props: NodeProps) {
                   </Text>
                 )}
                 {mode === 'chat' && hasEffectiveSkill && (
-                  <Text type="secondary" style={{ fontSize: 11 }}>Chat Skill 仅编译提示词，不会调用媒体生成网络。</Text>
+                  <Text type="secondary" style={{ fontSize: 11 }}>Chat Skill 仅使用 Skill 编译模型，不会调用上方选择的 Chat 模型。</Text>
                 )}
                 <Button
                   block
@@ -1722,7 +1725,7 @@ function GenerateNodeImpl(props: NodeProps) {
             onClick={generating ? handleInterrupt : handleRun}
             style={{ height: 30, fontSize: 13, fontWeight: 700, borderRadius: 8, padding: '0 16px' }}
           >
-            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : hasEffectiveSkill ? '生成提示词' : '运行'}
+            {isMuted ? '已静音' : generating ? '中断' : executionCompatibilityError ? 'Provider 不兼容' : effectiveReferenceValidationError ? '参考素材待修复' : effectiveSkillSelectionError ? 'Skill 不可用' : skillRunBlocked ? 'Skill 配置待修复' : mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'}
           </Button>
         </div>
 

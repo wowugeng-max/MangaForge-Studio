@@ -2583,8 +2583,21 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(source).toContain('effectiveSkillCompileMode')
     expect(source).toContain('GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS')
     expect(source).toContain("mode === 'chat' && (skillTargetMode === 'image_to_image' || skillTargetMode === 'image_to_video')")
-    expect(source).toContain('Chat Skill 仅编译提示词')
-    expect(source).toContain("hasEffectiveSkill ? '生成提示词' : '运行'")
+    expect(source).toContain('Chat Skill 仅使用 Skill 编译模型，不会调用上方选择的 Chat 模型。')
+    expect(source).toContain("mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'")
+    expect(source).toContain("if (mode !== 'chat' || !effectiveSkill) {")
+    expect(source).toContain("appliedSkillTargetResolutionRef.current = ''")
+  })
+
+  test('resets target-resolution dedupe when Chat Skill resolution disappears', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const transitionEffect = source.slice(
+      source.indexOf("if (mode !== 'chat' || !effectiveSkill)"),
+      source.indexOf('const resolutionKey ='),
+    )
+
+    expect(transitionEffect).toContain("appliedSkillTargetResolutionRef.current = ''")
+    expect(transitionEffect.indexOf("appliedSkillTargetResolutionRef.current = ''")).toBeLessThan(transitionEffect.indexOf('return'))
   })
 
   test('does not auto-select when multiple installed Skills are compatible', async () => {
