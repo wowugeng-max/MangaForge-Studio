@@ -94,13 +94,17 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
 
   const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(location)?.[1]
   const authorityHost = authority?.replace(/^[^@]*@/, '')
+  const hasRawWhitespaceOrControl = location.trim() !== location || /[\u0000-\u001F\u007F]/.test(location)
   const parts = url.pathname.split('/')
   const [empty, owner, name, format, sha] = parts
   if (
     url.protocol !== 'https:' ||
     url.hostname !== 'codeload.github.com' ||
     url.port ||
+    !authority ||
+    !authorityHost ||
     authorityHost?.includes(':') ||
+    hasRawWhitespaceOrControl ||
     url.search ||
     url.hash ||
     url.username ||
