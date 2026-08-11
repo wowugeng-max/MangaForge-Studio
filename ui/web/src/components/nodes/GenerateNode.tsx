@@ -73,6 +73,7 @@ import {
   resolveGenerateNodeExecutionBlockState,
   resolveGenerateNodePreviewMediaSrc,
   resolveGenerateNodeResultReferenceBindings,
+  resolveGenerateNodeChatSkillPreviewCached,
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
   runGenerateNodeChatSkillCompilation,
@@ -140,6 +141,7 @@ export {
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeResultReferenceBindings,
+  resolveGenerateNodeChatSkillPreviewCached,
   runGenerateNodeChatSkillCompilation,
   settleGenerateNodeChatSkillRun,
   shouldInvalidateGenerateNodeInitialCompileAudit,
@@ -889,7 +891,10 @@ function GenerateNodeImpl(props: NodeProps) {
       : activeRunReferenceBindings
     const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
     const compilerOwnedBindings = finalResult.reference_bindings
-    const finalSkillPreviewCached = Boolean(finalResult.skill_preview_cached)
+    const finalSkillPreviewCached = resolveGenerateNodeChatSkillPreviewCached({
+      isChatSkillCompileOnly,
+      cached: finalResult.skill_preview_cached,
+    })
     const commitSuccessfulGeneration = () => {
       if (finalResult?.compiled_prompt !== undefined) {
         const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
@@ -904,7 +909,7 @@ function GenerateNodeImpl(props: NodeProps) {
         setCompileWarnings(warnings)
         setSkillPackSource(String(finalResult.skill_pack_source || ''))
         setCompilerModelId(actualCompilerModelId)
-        setSkillPreviewCached(finalSkillPreviewCached)
+        if (finalSkillPreviewCached !== undefined) setSkillPreviewCached(finalSkillPreviewCached)
         setSkillPreviewError(null)
         setSkillPreviewResult({
           skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
@@ -932,8 +937,10 @@ function GenerateNodeImpl(props: NodeProps) {
           compileWarnings: finalResult.warnings || [],
           skillPackSource: finalResult.skill_pack_source || '',
           compilerModelId: finalResult.compiler_model_id,
-          skillPreviewCached: finalSkillPreviewCached,
-          skill_preview_cached: finalSkillPreviewCached,
+          ...(finalSkillPreviewCached === undefined ? {} : {
+            skillPreviewCached: finalSkillPreviewCached,
+            skill_preview_cached: finalSkillPreviewCached,
+          }),
           skill_pack_id: finalResult.skill_pack_id,
           skill_pack_source: finalResult.skill_pack_source,
           skill_name: finalResult.skill_name,

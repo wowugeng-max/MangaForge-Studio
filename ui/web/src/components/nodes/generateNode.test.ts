@@ -2585,16 +2585,30 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(legacySource).toContain('updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })')
   })
 
-  test('commits direct compile cache hits to preview state and node persistence', () => {
+  test('resolves preview cache state only for direct Chat Skill completion', async () => {
+    const model = await import('./generate-node-model')
+
+    expect(model.resolveGenerateNodeChatSkillPreviewCached({ isChatSkillCompileOnly: true, cached: true })).toBe(true)
+    expect(model.resolveGenerateNodeChatSkillPreviewCached({ isChatSkillCompileOnly: true, cached: undefined })).toBe(false)
+    expect(model.resolveGenerateNodeChatSkillPreviewCached({ isChatSkillCompileOnly: false, cached: true })).toBeUndefined()
+    expect(model.resolveGenerateNodeChatSkillPreviewCached({ isChatSkillCompileOnly: false, cached: undefined })).toBeUndefined()
+  })
+
+  test('commits cache state for direct Chat Skill completion without mutating ordinary compiled results', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const finishStart = source.indexOf('const finishGeneration =')
     const failStart = source.indexOf('const failGeneration =', finishStart)
     const finishSource = source.slice(finishStart, failStart)
 
-    expect(finishSource).toContain('const finalSkillPreviewCached = Boolean(finalResult.skill_preview_cached)')
-    expect(finishSource).toContain('setSkillPreviewCached(finalSkillPreviewCached)')
+    expect(finishSource).toContain('const finalSkillPreviewCached = resolveGenerateNodeChatSkillPreviewCached({')
+    expect(finishSource).toContain('isChatSkillCompileOnly,')
+    expect(finishSource).toContain('cached: finalResult.skill_preview_cached,')
+    expect(finishSource).toContain('if (finalSkillPreviewCached !== undefined) setSkillPreviewCached(finalSkillPreviewCached)')
+    expect(finishSource).toContain('...(finalSkillPreviewCached === undefined ? {} : {')
     expect(finishSource).toContain('skillPreviewCached: finalSkillPreviewCached')
     expect(finishSource).toContain('skill_preview_cached: finalSkillPreviewCached')
+    expect(finishSource).not.toContain('const finalSkillPreviewCached = Boolean(finalResult.skill_preview_cached)')
+    expect(finishSource).not.toMatch(/\n\s*setSkillPreviewCached\(finalSkillPreviewCached\)/)
   })
 
   test('interrupts a compiler-only Chat run locally while preserving the ordinary backend interrupt', () => {

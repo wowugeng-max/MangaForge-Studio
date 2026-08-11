@@ -1573,6 +1573,13 @@ export function settleGenerateNodeChatSkillRun(input: {
   return input.tracker.complete(input.token)
 }
 
+export function resolveGenerateNodeChatSkillPreviewCached(input: {
+  isChatSkillCompileOnly: boolean
+  cached: unknown
+}): boolean | undefined {
+  return input.isChatSkillCompileOnly ? Boolean(input.cached) : undefined
+}
+
 export function completeGenerateNodeRunAfterEffects(
   tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'isCurrent' | 'complete'>,
   token: GenerateNodeRunToken,
