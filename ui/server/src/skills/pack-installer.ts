@@ -118,6 +118,10 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
   return sha
 }
 
+async function cancelResponseBody(response: Response): Promise<void> {
+  try { await response.body?.cancel() } catch { /* cleanup must not mask installer errors */ }
+}
+
 async function resolveGitHubRevision(repo: PublicGitHubRepo, fetchImpl: typeof fetch): Promise<string> {
   const headUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}/commits/HEAD`
   let headResponse: Response
@@ -133,6 +137,7 @@ async function resolveGitHubRevision(repo: PublicGitHubRepo, fetchImpl: typeof f
       throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub HEAD response did not contain a valid commit SHA', error)
     }
   }
+  await cancelResponseBody(headResponse)
   if (headResponse.status !== 403 && headResponse.status !== 429) {
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub HEAD request failed: ${headResponse.status}`)
   }
@@ -146,10 +151,12 @@ async function resolveGitHubRevision(repo: PublicGitHubRepo, fetchImpl: typeof f
   } catch (error) {
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `Unable to resolve GitHub archive HEAD for ${repo.owner}/${repo.repo}`, error)
   }
-  if (!GITHUB_REDIRECT_STATUSES.has(fallbackResponse.status)) {
-    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub archive fallback failed: ${fallbackResponse.status}`)
-  }
+  const fallbackStatus = fallbackResponse.status
   const location = fallbackResponse.headers.get('location')
+  await cancelResponseBody(fallbackResponse)
+  if (!GITHUB_REDIRECT_STATUSES.has(fallbackStatus)) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub archive fallback failed: ${fallbackStatus}`)
+  }
   if (!location) {
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback did not return a redirect location')
   }

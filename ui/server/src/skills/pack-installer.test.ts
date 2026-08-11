@@ -132,6 +132,33 @@ describe('Skill Pack installer', () => {
     ])
   })
 
+  test('releases rate-limited REST and manual fallback response bodies before installing', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const sha = '34567890abcdef1234567890abcdef1234567890'
+    const archive = await zipBytes([{ name: `demo-${sha}/skills/demo/SKILL.md`, content: '---\nname: demo\n---\ndemo' }])
+    let apiCanceled = false
+    let fallbackCanceled = false
+    const body = (onCancel: () => void) => new ReadableStream({
+      start() {},
+      cancel: onCancel,
+    })
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/commits/HEAD')) return new Response(body(() => { apiCanceled = true }), { status: 403 })
+      if (url === 'https://github.com/acme/demo/archive/HEAD.zip') {
+        return new Response(body(() => { fallbackCanceled = true }), {
+          status: 302,
+          headers: { location: `https://codeload.github.com/acme/demo/zip/${sha}` },
+        })
+      }
+      return new Response(archive)
+    }
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).resolves.toMatchObject({ revision: sha })
+    expect(apiCanceled).toBe(true)
+    expect(fallbackCanceled).toBe(true)
+  })
+
   test.each([301, 307, 308])('accepts GitHub archive redirect status %d during rate-limit fallback', async (redirectStatus) => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
     const sha = '234567890abcdef1234567890abcdef123456789'
@@ -151,15 +178,17 @@ describe('Skill Pack installer', () => {
   test('does not fall back after a non-rate-limit REST failure', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
     const calls: string[] = []
+    let canceled = false
     const fetchImpl = async (input: RequestInfo | URL) => {
       calls.push(String(input))
-      return response({}, 404)
+      return new Response(new ReadableStream({ start() {}, cancel: () => { canceled = true } }), { status: 404 })
     }
 
     await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
       expect.objectContaining({ code: 'SKILL_PACK_DOWNLOAD_FAILED', message: 'GitHub HEAD request failed: 404' }),
     )
     expect(calls).toEqual(['https://api.github.com/repos/acme/demo/commits/HEAD'])
+    expect(canceled).toBe(true)
   })
 
   test('does not fall back after a REST network failure', async () => {
@@ -179,6 +208,7 @@ describe('Skill Pack installer', () => {
 
   test.each([
     ['a non-redirect response', new Response(null, { status: 200 }), 'GitHub archive fallback failed: 200'],
+    ['a disallowed redirect response', new Response(null, { status: 303 }), 'GitHub archive fallback failed: 303'],
     ['a redirect without Location', new Response(null, { status: 302 }), 'GitHub archive fallback did not return a redirect location'],
     ['an untrusted redirect', new Response(null, { status: 302, headers: { location: 'https://evil.example/archive.zip' } }), 'GitHub archive fallback returned an untrusted redirect'],
   ])('rejects rate-limit fallback with %s before archive download', async (_label, fallbackResponse, message) => {
@@ -198,6 +228,22 @@ describe('Skill Pack installer', () => {
       'https://api.github.com/repos/acme/demo/commits/HEAD',
       'https://github.com/acme/demo/archive/HEAD.zip',
     ])
+  })
+
+  test('reports a typed error when the archive fallback request fails', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const failure = new Error('network unavailable')
+    const fetchImpl = async (input: RequestInfo | URL) => String(input).endsWith('/commits/HEAD')
+      ? response({}, 403)
+      : Promise.reject(failure)
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
+      expect.objectContaining({
+        code: 'SKILL_PACK_DOWNLOAD_FAILED',
+        message: 'Unable to resolve GitHub archive HEAD for acme/demo',
+        cause: failure,
+      }),
+    )
   })
 
   test('accepts a repository-scale archive while extracting only the bounded skills payload', async () => {
