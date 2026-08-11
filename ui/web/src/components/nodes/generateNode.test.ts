@@ -2383,7 +2383,6 @@ describe('GenerateNode Chat Skill model helpers', () => {
   test('runs one direct Chat Skill compile and returns its positive prompt packet without a Provider fallback', async () => {
     const model = await import('./generate-node-model')
     let compileCalls = 0
-    let providerCalls = 0
     const request = model.buildGenerateNodeSkillCompileRequest({
       skillName: 'h3-prompt-writing', packId: 'h3', revision: 'r1', prompt: 'hero prompt',
       mode: 'image_to_video', compilerModelId: 9, references: [],
@@ -2409,7 +2408,6 @@ describe('GenerateNode Chat Skill model helpers', () => {
     })
 
     expect(compileCalls).toBe(1)
-    expect(providerCalls).toBe(0)
     expect(outcome).toMatchObject({
       status: 'current',
       packet: {
@@ -2482,7 +2480,6 @@ describe('GenerateNode Chat Skill model helpers', () => {
       response: { data: { error_code: 'SKILL_COMPILER_VISION_REQUIRED', detail: 'compiler needs Vision' } },
     }
     let compileCalls = 0
-    let providerCalls = 0
 
     await expect(model.runGenerateNodeChatSkillCompilation({
       request: model.buildGenerateNodeSkillCompileRequest({
@@ -2497,7 +2494,6 @@ describe('GenerateNode Chat Skill model helpers', () => {
     })).rejects.toBe(typedFailure)
 
     expect(compileCalls).toBe(1)
-    expect(providerCalls).toBe(0)
   })
 
   test('ignores a late direct Chat Skill rejection after the run becomes stale', async () => {
@@ -2516,6 +2512,44 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(outcome).toEqual({ status: 'stale' })
   })
 
+  test('does not let a stale compile settlement clear or complete its replacement run', async () => {
+    const model = await import('./generate-node-model')
+    const tracker = model.createGenerateNodeRunTracker()
+    const oldToken = tracker.start([])
+    expect(oldToken).not.toBeNull()
+    let activeChatToken = oldToken
+    let generating = true
+    let progress = 'old compile'
+
+    // Interrupt the old run, then start a replacement before the old promise settles.
+    tracker.invalidate()
+    activeChatToken = null
+    generating = false
+    progress = ''
+    const replacementToken = tracker.start([])
+    expect(replacementToken).not.toBeNull()
+    activeChatToken = replacementToken
+    generating = true
+    progress = 'replacement compile'
+
+    const shouldCleanupOldUi = model.settleGenerateNodeChatSkillRun({
+      tracker,
+      token: oldToken!,
+      activeChatToken,
+    })
+    if (shouldCleanupOldUi) {
+      activeChatToken = null
+      generating = false
+      progress = ''
+    }
+
+    expect(shouldCleanupOldUi).toBe(false)
+    expect(tracker.isCurrent(replacementToken)).toBe(true)
+    expect(activeChatToken).toBe(replacementToken)
+    expect(generating).toBe(true)
+    expect(progress).toBe('replacement compile')
+  })
+
   test('routes Chat plus Skill through the compiler before Key/model and keeps legacy generation transport separate', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     expect(source).toContain("const isChatSkillCompileOnly = mode === 'chat' && hasEffectiveSkill")
@@ -2529,6 +2563,9 @@ describe('GenerateNode Chat Skill model helpers', () => {
 
     expect(directStart).toBeGreaterThan(-1)
     expect(directStart).toBeLessThan(legacyStart)
+    const directReturn = handleRunSource.lastIndexOf('return', legacyStart)
+    expect(directReturn).toBeGreaterThan(directStart)
+    expect(directReturn).toBeLessThan(legacyStart)
     expect(directSource).toContain('runGenerateNodeChatSkillCompilation({')
     expect(directSource).toContain('compile: compileSkillPreview')
     expect(directSource).toContain('compileInputFingerprintRef.current === runCompileFingerprint')
@@ -2537,6 +2574,8 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(directSource).not.toContain('createSSEClient')
     expect(directSource).not.toContain("url: '/generate'")
     expect(directSource).not.toContain('result: null')
+    expect(directSource).toContain('if (settleGenerateNodeChatSkillRun({')
+    expect(directSource).not.toContain('generateRunTrackerRef.current.complete(runToken)\n          if (chatSkillCompileRunTokenRef.current === runToken)')
     expect(source).toContain('executionCompatibilityError: isChatSkillCompileOnly ? null : executionCompatibilityError')
     expect(source).toContain('if (isChatSkillCompileOnly && executionCompatibilityError) setExecutionCompatibilityError(null)')
     expect(handleRunSource).toContain('if (!isChatSkillCompileOnly && executionCompatibilityError)')
@@ -2544,6 +2583,18 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(legacySource).toContain('createSSEClient(id,')
     expect(legacySource).toContain("await apiClient.request({ url: '/generate', method: 'POST', data: payload })")
     expect(legacySource).toContain('updateNodeData(id, { result: null, _finalSourcePrompt: prompt, _finalSystemPrompt: data?._systemPromptOverride || selectedRolePrompt })')
+  })
+
+  test('commits direct compile cache hits to preview state and node persistence', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const finishStart = source.indexOf('const finishGeneration =')
+    const failStart = source.indexOf('const failGeneration =', finishStart)
+    const finishSource = source.slice(finishStart, failStart)
+
+    expect(finishSource).toContain('const finalSkillPreviewCached = Boolean(finalResult.skill_preview_cached)')
+    expect(finishSource).toContain('setSkillPreviewCached(finalSkillPreviewCached)')
+    expect(finishSource).toContain('skillPreviewCached: finalSkillPreviewCached')
+    expect(finishSource).toContain('skill_preview_cached: finalSkillPreviewCached')
   })
 
   test('interrupts a compiler-only Chat run locally while preserving the ordinary backend interrupt', () => {

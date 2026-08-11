@@ -76,6 +76,7 @@ import {
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
   runGenerateNodeChatSkillCompilation,
+  settleGenerateNodeChatSkillRun,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
@@ -140,6 +141,7 @@ export {
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeResultReferenceBindings,
   runGenerateNodeChatSkillCompilation,
+  settleGenerateNodeChatSkillRun,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
   validateGenerateNodeReferenceBindingsForExecution,
@@ -887,6 +889,7 @@ function GenerateNodeImpl(props: NodeProps) {
       : activeRunReferenceBindings
     const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
     const compilerOwnedBindings = finalResult.reference_bindings
+    const finalSkillPreviewCached = Boolean(finalResult.skill_preview_cached)
     const commitSuccessfulGeneration = () => {
       if (finalResult?.compiled_prompt !== undefined) {
         const references = Array.isArray(finalResult.compiled_references) ? finalResult.compiled_references : []
@@ -901,6 +904,7 @@ function GenerateNodeImpl(props: NodeProps) {
         setCompileWarnings(warnings)
         setSkillPackSource(String(finalResult.skill_pack_source || ''))
         setCompilerModelId(actualCompilerModelId)
+        setSkillPreviewCached(finalSkillPreviewCached)
         setSkillPreviewError(null)
         setSkillPreviewResult({
           skill_name: String(finalResult.skill_name || effectiveSkillName || ''),
@@ -928,6 +932,8 @@ function GenerateNodeImpl(props: NodeProps) {
           compileWarnings: finalResult.warnings || [],
           skillPackSource: finalResult.skill_pack_source || '',
           compilerModelId: finalResult.compiler_model_id,
+          skillPreviewCached: finalSkillPreviewCached,
+          skill_preview_cached: finalSkillPreviewCached,
           skill_pack_id: finalResult.skill_pack_id,
           skill_pack_source: finalResult.skill_pack_source,
           skill_name: finalResult.skill_name,
@@ -1070,10 +1076,15 @@ function GenerateNodeImpl(props: NodeProps) {
           executionReferences: executionReferenceBindings,
         })
         if (outcome.status === 'stale') {
-          generateRunTrackerRef.current.complete(runToken)
-          if (chatSkillCompileRunTokenRef.current === runToken) chatSkillCompileRunTokenRef.current = null
-          setGenerating(false)
-          setProgressMsg('')
+          if (settleGenerateNodeChatSkillRun({
+            tracker: generateRunTrackerRef.current,
+            token: runToken,
+            activeChatToken: chatSkillCompileRunTokenRef.current,
+          })) {
+            chatSkillCompileRunTokenRef.current = null
+            setGenerating(false)
+            setProgressMsg('')
+          }
           return
         }
         finishGeneration(outcome.packet, runToken)

@@ -1564,6 +1564,15 @@ export function createGenerateNodeRunTracker() {
   }
 }
 
+export function settleGenerateNodeChatSkillRun(input: {
+  tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'complete'>
+  token: GenerateNodeRunToken
+  activeChatToken: GenerateNodeRunToken | null
+}) {
+  if (input.activeChatToken !== input.token) return false
+  return input.tracker.complete(input.token)
+}
+
 export function completeGenerateNodeRunAfterEffects(
   tracker: Pick<ReturnType<typeof createGenerateNodeRunTracker>, 'isCurrent' | 'complete'>,
   token: GenerateNodeRunToken,
