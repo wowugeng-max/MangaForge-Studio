@@ -6,6 +6,7 @@ import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, StarFille
 import apiClient from '../../api/client'
 import {
   compileSkillPreview,
+  installSkillPack,
   listSkills,
   readSkillSettings,
   type CanvasSkillApiError,
@@ -69,6 +70,7 @@ import {
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillInstallOutcome,
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeExecutionBlockState,
@@ -142,6 +144,7 @@ export {
   resolveGenerateNodeSkillSelection,
   resolveGenerateNodeSkillArguments,
   resolveGenerateNodeSkillCompileMode,
+  resolveGenerateNodeSkillInstallOutcome,
   resolveGenerateNodeSkillTargetTransition,
   filterGenerateNodeCompatibleSkills,
   resolveGenerateNodeResultReferenceBindings,
@@ -163,6 +166,7 @@ export type {
   GenerateNodeReferenceValidationState,
   GenerateNodeRunToken,
   GenerateNodeSkillIdentity,
+  GenerateNodeSkillInstallOutcome,
   GenerateNodeSkillSelectionError,
   GenerateNodeSkillTargetMode,
   GenerateNodeSkillTargetTransitionOrigin,
@@ -257,6 +261,14 @@ function GenerateNodeImpl(props: NodeProps) {
   const [readySkills, setReadySkills] = useState<CanvasSkillSummary[]>([])
   const [allSkills, setAllSkills] = useState<CanvasSkillSummary[]>([])
   const [skillsLoading, setSkillsLoading] = useState(false)
+  const [skillPackInstallUrl, setSkillPackInstallUrl] = useState('')
+  const [skillPackInstalling, setSkillPackInstalling] = useState(false)
+  const [skillPackInstallStatus, setSkillPackInstallStatus] = useState<{
+    status: 'selected' | 'choose' | 'installed_no_compatible'
+    packId: string
+    revision: string
+  } | null>(null)
+  const [skillPackInstallError, setSkillPackInstallError] = useState<Pick<CanvasSkillApiError, 'error_code' | 'detail'> | null>(null)
   const [skillPackId, setSkillPackId] = useState(String(data?.skillPackId ?? data?.skill_pack_id ?? ''))
   const [skillName, setSkillName] = useState(String(data?.skillName ?? data?.skill_name ?? ''))
   const [skillRevision, setSkillRevision] = useState(String(data?.skillRevision ?? data?.skill_revision ?? ''))
@@ -1322,6 +1334,71 @@ function GenerateNodeImpl(props: NodeProps) {
     setSkillArguments(Object.fromEntries(skill.arguments.flatMap(argument => argument.default === undefined ? [] : [[argument.name, String(argument.default)]])))
   }
 
+  const handleInstallSkillPack = async () => {
+    const installUrl = skillPackInstallUrl.trim()
+    if (!installUrl || skillPackInstalling || !effectiveSkillCompileMode) return
+    setSkillPackInstalling(true)
+    setSkillPackInstallError(null)
+    setSkillPackInstallStatus(null)
+    try {
+      const response = await installSkillPack(skillPackInstallUrl.trim())
+      const installedSkills = Array.isArray(response.data?.skills) ? response.data.skills : []
+      const packId = String(response.data?.record?.id || '')
+      const revision = String(response.data?.record?.revision || '')
+      const mergeSkills = (current: CanvasSkillSummary[], incoming: CanvasSkillSummary[]) => Array.from(new Map(
+        [...current, ...incoming].map(skill => [skillOptionKey(skill), skill]),
+      ).values())
+      setAllSkills(current => mergeSkills(current, installedSkills))
+      setReadySkills(current => mergeSkills(current, installedSkills))
+
+      const outcome = resolveGenerateNodeSkillInstallOutcome({
+        skills: installedSkills,
+        packId,
+        revision,
+        targetMode: effectiveSkillCompileMode,
+        previousSelection: skillName ? { packId: skillPackId, name: skillName, revision: skillRevision } : null,
+      })
+      if (outcome.status === 'selected' && outcome.selection) {
+        const installedSkill = installedSkills.find(skill => (
+          skill.packId === outcome.selection?.packId
+          && skill.name === outcome.selection?.name
+          && skill.revision === outcome.selection?.revision
+        ))
+        setSkillPackId(outcome.selection.packId)
+        setSkillName(outcome.selection.name)
+        setSkillRevision(outcome.selection.revision)
+        setSkillCompileEnabled(true)
+        setSkillArguments(Object.fromEntries((installedSkill?.arguments || []).flatMap(argument => (
+          argument.default === undefined ? [] : [[argument.name, String(argument.default)]]
+        ))))
+      }
+      setSkillPackInstallStatus({ status: outcome.status, packId, revision })
+      setSkillPackInstallUrl('')
+
+      const [allResult, readyResult] = await Promise.allSettled([
+        listSkills(),
+        listSkills(effectiveSkillCompileMode, true),
+      ])
+      if (allResult.status === 'fulfilled') {
+        const refreshed = Array.isArray(allResult.value.data?.skills) ? allResult.value.data.skills : []
+        setAllSkills(current => mergeSkills(current, refreshed))
+      }
+      if (readyResult.status === 'fulfilled') {
+        const refreshed = Array.isArray(readyResult.value.data?.skills) ? readyResult.value.data.skills : []
+        setReadySkills(current => mergeSkills(current, refreshed))
+        setAllSkills(current => mergeSkills(current, refreshed))
+      }
+    } catch (error: any) {
+      const body = (error?.response?.data || {}) as Partial<CanvasSkillApiError>
+      setSkillPackInstallError({
+        error_code: String(body.error_code || 'SKILL_PACK_INSTALL_FAILED'),
+        detail: String(body.detail || error?.message || 'Skill Pack 安装失败'),
+      })
+    } finally {
+      setSkillPackInstalling(false)
+    }
+  }
+
   const selectSkillTargetMode = (requestedTargetMode: GenerateNodeSkillTargetMode) => {
     if (effectiveSkillName && !effectiveSkill) pendingSkillTargetUserResolutionRef.current = true
     if (parsedSkillCommand && effectiveSkill) {
@@ -1800,6 +1877,58 @@ function GenerateNodeImpl(props: NodeProps) {
                     />
                   </div>
                 )}
+                <Collapse
+                  size="small"
+                  items={[{
+                    key: 'install-skill-pack',
+                    label: '安装 Skill Pack',
+                    children: (
+                      <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                        <Input
+                          size="small"
+                          value={skillPackInstallUrl}
+                          disabled={skillPackInstalling}
+                          placeholder="https://github.com/MiniMax-AI/MiniMax-H3"
+                          onChange={event => setSkillPackInstallUrl(event.target.value)}
+                          onPressEnter={() => void handleInstallSkillPack()}
+                        />
+                        <Button
+                          block
+                          size="small"
+                          type="primary"
+                          loading={skillPackInstalling}
+                          disabled={skillPackInstalling || !skillPackInstallUrl.trim() || !effectiveSkillCompileMode}
+                          onClick={() => void handleInstallSkillPack()}
+                        >
+                          安装
+                        </Button>
+                        {skillPackInstallStatus && (
+                          <div style={{ padding: 7, borderRadius: 7, background: '#f6ffed', border: '1px solid #b7eb8f' }}>
+                            <Space size={4} wrap>
+                              <Tag color="green" style={{ margin: 0 }}>Pack ID {skillPackInstallStatus.packId}</Tag>
+                              <Tooltip title={skillPackInstallStatus.revision}>
+                                <Tag color="blue" style={{ margin: 0 }}>锁定 {skillPackInstallStatus.revision.slice(0, 12)}</Tag>
+                              </Tooltip>
+                            </Space>
+                            <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 11 }}>
+                              {skillPackInstallStatus.status === 'selected'
+                                ? '已自动选择此 Pack 中唯一兼容的 Skill，并启用编译。'
+                                : skillPackInstallStatus.status === 'choose'
+                                  ? '发现多个兼容 Skill，请从上方列表选择；原选择已保留。'
+                                  : '安装成功，但当前目标没有兼容的 prompt_ready Skill；原选择已保留。'}
+                            </Text>
+                          </div>
+                        )}
+                        {skillPackInstallError && (
+                          <div style={{ padding: 7, borderRadius: 7, background: '#fff2f0', border: '1px solid #ffccc7' }}>
+                            <Text type="danger" strong style={{ display: 'block', fontSize: 11 }}>{skillPackInstallError.error_code}</Text>
+                            <Text type="danger" style={{ fontSize: 11 }}>{skillPackInstallError.detail}</Text>
+                          </div>
+                        )}
+                      </Space>
+                    ),
+                  }]}
+                />
               </Space>
             ),
           }] : []),

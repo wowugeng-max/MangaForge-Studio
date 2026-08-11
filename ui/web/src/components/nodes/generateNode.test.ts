@@ -3099,6 +3099,81 @@ describe('GenerateNode Chat Skill model helpers', () => {
     })).toBeUndefined()
   })
 
+  test('selects the only compatible Skill from the exact installed pack revision without mutating inputs', async () => {
+    const model = await import('./generate-node-model')
+    const previousSelection = { packId: 'previous', name: 'kept-unless-replaced', revision: 'old' }
+    const skills = [
+      { packId: 'h3', name: 'chosen', revision: 'locked-123', compatibility: 'prompt_ready', mediaModes: ['image_to_video'] },
+      { packId: 'h3', name: 'wrong-revision', revision: 'latest', compatibility: 'prompt_ready', mediaModes: ['image_to_video'] },
+      { packId: 'other', name: 'wrong-pack', revision: 'locked-123', compatibility: 'prompt_ready', mediaModes: ['image_to_video'] },
+      { packId: 'h3', name: 'wrong-target', revision: 'locked-123', compatibility: 'prompt_ready', mediaModes: ['text_to_image'] },
+      { packId: 'h3', name: 'not-ready', revision: 'locked-123', compatibility: 'workflow_only', mediaModes: [] },
+    ]
+    const before = JSON.stringify({ skills, previousSelection })
+
+    expect(model.resolveGenerateNodeSkillInstallOutcome({
+      skills,
+      packId: 'h3',
+      revision: 'locked-123',
+      targetMode: 'image_to_video',
+      previousSelection,
+    })).toEqual({
+      status: 'selected',
+      selection: { packId: 'h3', name: 'chosen', revision: 'locked-123' },
+    })
+    expect(JSON.stringify({ skills, previousSelection })).toBe(before)
+  })
+
+  test('preserves the previous selection when an installed revision needs a choice or has no compatible Skill', async () => {
+    const model = await import('./generate-node-model')
+    const previousSelection = { packId: 'previous', name: 'portrait', revision: 'old-1' }
+    const compatible = (name: string) => ({
+      packId: 'pack', name, revision: 'locked', compatibility: 'prompt_ready', mediaModes: ['text_to_image'],
+    })
+
+    expect(model.resolveGenerateNodeSkillInstallOutcome({
+      skills: [compatible('first'), compatible('second')],
+      packId: 'pack',
+      revision: 'locked',
+      targetMode: 'text_to_image',
+      previousSelection,
+    })).toEqual({ status: 'choose', selection: previousSelection })
+
+    expect(model.resolveGenerateNodeSkillInstallOutcome({
+      skills: [{ ...compatible('video-only'), mediaModes: ['text_to_video'] }],
+      packId: 'pack',
+      revision: 'locked',
+      targetMode: 'text_to_image',
+      previousSelection,
+    })).toEqual({ status: 'installed_no_compatible', selection: previousSelection })
+
+    expect(model.resolveGenerateNodeSkillInstallOutcome({
+      skills: [],
+      packId: 'pack',
+      revision: 'locked',
+      targetMode: 'text_to_image',
+      previousSelection: null,
+    })).toEqual({ status: 'installed_no_compatible', selection: null })
+  })
+
+  test('wires the GitHub Skill Pack installer through the typed API and refreshes both Skill lists', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+
+    expect(source).toContain('installSkillPack,')
+    expect(source).toContain("placeholder=\"https://github.com/MiniMax-AI/MiniMax-H3\"")
+    expect(source).toContain('安装 Skill Pack')
+    expect(source).toContain('installSkillPack(skillPackInstallUrl.trim())')
+    expect(source).toContain('disabled={skillPackInstalling}')
+    expect(source).toContain('loading={skillPackInstalling}')
+    expect(source).toContain('skillPackInstallError.error_code')
+    expect(source).toContain('skillPackInstallError.detail')
+    expect(source).toContain('listSkills()')
+    expect(source).toContain('listSkills(effectiveSkillCompileMode, true)')
+    expect(source).toContain('setSkillPackInstallUrl(\'\')')
+    expect(source).toContain('resolveGenerateNodeSkillInstallOutcome({')
+    expect(source).toContain('setSkillCompileEnabled(true)')
+  })
+
   test('builds a Chat direct Skill result packet without losing audit, reference order, or lineage', async () => {
     const model = await import('./generate-node-model')
     const packet = model.buildGenerateNodeChatSkillResultPacket({

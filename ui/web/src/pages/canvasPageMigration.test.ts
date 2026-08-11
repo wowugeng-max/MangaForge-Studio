@@ -229,6 +229,11 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain("'skill_preview_cached'")
     expect(generateNode).toContain('aria-label="目标提示词类型"')
     expect(generateNode).toContain('提示词 Skill')
+    expect(generateNode).toContain('安装 Skill Pack')
+    expect(generateNode).toContain('https://github.com/MiniMax-AI/MiniMax-H3')
+    expect(generateNode).toContain('installSkillPack(skillPackInstallUrl.trim())')
+    expect(generateNode).toContain('skillPackInstallError.error_code')
+    expect(generateNode).toContain('skillPackInstallError.detail')
     expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
 
     for (const helper of ['listSkills', 'installSkillPack', 'compileSkillPreview', 'readSkillSettings', 'writeSkillSettings']) {

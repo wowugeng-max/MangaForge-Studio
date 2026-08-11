@@ -130,6 +130,44 @@ export function selectInstalledGenerateNodeSkill<T extends {
   return compatibleMatches.length === 1 ? compatibleMatches[0] : undefined
 }
 
+export type GenerateNodeSkillInstallOutcome = {
+  status: 'selected' | 'choose' | 'installed_no_compatible'
+  selection: GenerateNodeSkillIdentity | null
+}
+
+export function resolveGenerateNodeSkillInstallOutcome<T extends {
+  packId: string
+  name: string
+  revision: string
+  compatibility: string
+  mediaModes: readonly string[]
+}>(input: {
+  skills: readonly T[]
+  packId: string
+  revision: string
+  targetMode: GenerateNodeSkillTargetMode
+  previousSelection: GenerateNodeSkillIdentity | null
+}): GenerateNodeSkillInstallOutcome {
+  const matches = filterGenerateNodeCompatibleSkills(
+    input.skills.filter(skill => skill.packId === input.packId && skill.revision === input.revision),
+    input.targetMode,
+  )
+  if (matches.length === 1) {
+    return {
+      status: 'selected',
+      selection: {
+        packId: matches[0].packId,
+        name: matches[0].name,
+        revision: matches[0].revision,
+      },
+    }
+  }
+  return {
+    status: matches.length > 1 ? 'choose' : 'installed_no_compatible',
+    selection: input.previousSelection,
+  }
+}
+
 export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {
   return getAspectRatioSize(value, customWidth, customHeight)
 }
