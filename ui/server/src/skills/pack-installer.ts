@@ -84,6 +84,39 @@ export function parsePublicGitHubUrl(source: string): PublicGitHubRepo {
   return { owner, repo, id: repo }
 }
 
+export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubRepo): string {
+  let url: URL
+  try {
+    url = new URL(location)
+  } catch (error) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback returned an invalid redirect URL', error)
+  }
+
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(location)?.[1]
+  const authorityHost = authority?.replace(/^[^@]*@/, '')
+  const parts = url.pathname.split('/')
+  const [empty, owner, name, format, sha] = parts
+  if (
+    url.protocol !== 'https:' ||
+    url.hostname !== 'codeload.github.com' ||
+    url.port ||
+    authorityHost?.includes(':') ||
+    url.search ||
+    url.hash ||
+    url.username ||
+    url.password ||
+    parts.length !== 5 ||
+    empty !== '' ||
+    owner?.toLowerCase() !== repo.owner.toLowerCase() ||
+    name?.toLowerCase() !== repo.repo.toLowerCase() ||
+    format !== 'zip' ||
+    !/^[0-9a-f]{40}$/i.test(sha ?? '')
+  ) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback returned an untrusted redirect')
+  }
+  return sha
+}
+
 function within(root: string, candidate: string): boolean {
   const rel = relative(root, candidate)
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))

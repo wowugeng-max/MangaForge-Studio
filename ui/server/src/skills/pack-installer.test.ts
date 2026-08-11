@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import {
   installGitHubSkillPack,
   installLocalSkillPack,
+  parseGitHubArchiveRedirect,
   parsePublicGitHubUrl,
   readPackRecord,
 } from './pack-installer'
@@ -42,6 +43,27 @@ describe('Skill Pack installer', () => {
       'https://github.com/acme/./demo',
       'https://github.com/acme/demo/',
     ]) expect(() => parsePublicGitHubUrl(value)).toThrow(expect.objectContaining({ code: 'SKILL_GITHUB_URL_INVALID' }))
+  })
+
+  test('accepts only an exact GitHub codeload redirect for the requested repository', () => {
+    const repo = parsePublicGitHubUrl('https://github.com/minimax-ai/minimax-h3')
+    const sha = 'fa6891ff7cdaaa03fa4497e89ac64ff169219acf'
+    expect(parseGitHubArchiveRedirect(`https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`, repo)).toBe(sha)
+
+    for (const value of [
+      `http://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://evil.example/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://user@codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com:444/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}?download=1`,
+      `https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/${sha}#archive`,
+      `https://codeload.github.com/other/MiniMax-H3/zip/${sha}`,
+      `https://codeload.github.com/MiniMax-AI/other/zip/${sha}`,
+      'https://codeload.github.com/MiniMax-AI/MiniMax-H3/zip/HEAD',
+      `https://codeload.github.com/MiniMax-AI/MiniMax-H3/tar/${sha}`,
+      `/MiniMax-AI/MiniMax-H3/zip/${sha}`,
+      'not a URL',
+    ]) expect(() => parseGitHubArchiveRedirect(value, repo)).toThrow(expect.objectContaining({ code: 'SKILL_PACK_DOWNLOAD_FAILED' }))
   })
 
   test('downloads HEAD, validates and atomically installs a GitHub pack revision', async () => {
