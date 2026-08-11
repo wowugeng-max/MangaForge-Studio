@@ -100,10 +100,11 @@ export function selectInstalledGenerateNodeSkill<T extends {
   revision: string
   targetMode: GenerateNodeSkillTargetMode
 }): T | undefined {
-  return filterGenerateNodeCompatibleSkills(
+  const compatibleMatches = filterGenerateNodeCompatibleSkills(
     input.skills.filter(skill => skill.packId === input.packId && skill.revision === input.revision),
     input.targetMode,
-  )[0]
+  )
+  return compatibleMatches.length === 1 ? compatibleMatches[0] : undefined
 }
 
 export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {

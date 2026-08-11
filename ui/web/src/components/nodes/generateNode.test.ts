@@ -2411,6 +2411,21 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(model.resolveGenerateNodeSkillFallbackTarget({ skill: { mediaModes: [] }, targetMode: 'image_to_image' })).toBe('image_to_image')
   })
 
+  test('does not auto-select when multiple installed Skills are compatible', async () => {
+    const model = await import('./generate-node-model')
+    const skills = [
+      { packId: 'pack', name: 'first', revision: 'r1', compatibility: 'prompt_ready', mediaModes: ['text_to_image'] },
+      { packId: 'pack', name: 'second', revision: 'r1', compatibility: 'prompt_ready', mediaModes: [] },
+    ]
+
+    expect(model.selectInstalledGenerateNodeSkill({
+      skills,
+      packId: 'pack',
+      revision: 'r1',
+      targetMode: 'text_to_image',
+    })).toBeUndefined()
+  })
+
   test('builds a Chat direct Skill result packet without losing audit, reference order, or lineage', async () => {
     const model = await import('./generate-node-model')
     const packet = model.buildGenerateNodeChatSkillResultPacket({
