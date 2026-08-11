@@ -60,6 +60,7 @@ export type PublicGitHubRepo = { owner: string; repo: string; id: string }
 const MAX_ARCHIVE_BYTES = 128 * 1024 * 1024
 const MAX_ENTRY_BYTES = 4 * 1024 * 1024
 const MAX_EXTRACTED_BYTES = 20 * 1024 * 1024
+const GITHUB_REDIRECT_STATUSES = new Set([301, 302, 307, 308])
 
 export function parsePublicGitHubUrl(source: string): PublicGitHubRepo {
   if (
@@ -115,6 +116,44 @@ export function parseGitHubArchiveRedirect(location: string, repo: PublicGitHubR
     throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback returned an untrusted redirect')
   }
   return sha
+}
+
+async function resolveGitHubRevision(repo: PublicGitHubRepo, fetchImpl: typeof fetch): Promise<string> {
+  const headUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}/commits/HEAD`
+  let headResponse: Response
+  try { headResponse = await fetchImpl(headUrl, { headers: { accept: 'application/vnd.github+json' } }) } catch (error) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `Unable to fetch ${headUrl}`, error)
+  }
+  if (headResponse.ok) {
+    try {
+      const head = await headResponse.json() as { sha?: unknown }
+      if (typeof head.sha !== 'string' || !/^[0-9a-f]{40}$/i.test(head.sha)) throw new Error('missing sha')
+      return head.sha
+    } catch (error) {
+      throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub HEAD response did not contain a valid commit SHA', error)
+    }
+  }
+  if (headResponse.status !== 403 && headResponse.status !== 429) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub HEAD request failed: ${headResponse.status}`)
+  }
+
+  let fallbackResponse: Response
+  try {
+    fallbackResponse = await fetchImpl(`https://github.com/${repo.owner}/${repo.repo}/archive/HEAD.zip`, {
+      method: 'HEAD',
+      redirect: 'manual',
+    })
+  } catch (error) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `Unable to resolve GitHub archive HEAD for ${repo.owner}/${repo.repo}`, error)
+  }
+  if (!GITHUB_REDIRECT_STATUSES.has(fallbackResponse.status)) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub archive fallback failed: ${fallbackResponse.status}`)
+  }
+  const location = fallbackResponse.headers.get('location')
+  if (!location) {
+    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub archive fallback did not return a redirect location')
+  }
+  return parseGitHubArchiveRedirect(location, repo)
 }
 
 function within(root: string, candidate: string): boolean {
@@ -351,18 +390,7 @@ export async function installGitHubSkillPack(
   const { workspace } = normalizedOptions
   const fetchImpl = normalizedOptions.fetchImpl ?? normalizedOptions.fetch ?? fetch
   const canonicalSource = `https://github.com/${repo.owner}/${repo.repo}`
-  const headUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}/commits/HEAD`
-  let headResponse: Response
-  try { headResponse = await fetchImpl(headUrl, { headers: { accept: 'application/vnd.github+json' } }) } catch (error) {
-    throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `Unable to fetch ${headUrl}`, error)
-  }
-  if (!headResponse.ok) throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', `GitHub HEAD request failed: ${headResponse.status}`)
-  let revision: string
-  try {
-    const head = await headResponse.json() as { sha?: unknown }
-    if (typeof head.sha !== 'string' || !/^[0-9a-f]{40}$/i.test(head.sha)) throw new Error('missing sha')
-    revision = head.sha
-  } catch (error) { throw new SkillPackInstallError('SKILL_PACK_DOWNLOAD_FAILED', 'GitHub HEAD response did not contain a valid commit SHA', error) }
+  const revision = await resolveGitHubRevision(repo, fetchImpl)
   const destinationRoot = await ensurePackRoot(workspace)
   const destination = join(destinationRoot, repo.id, revision)
   const existing = await readExisting(destination, { id: repo.id, sourceUrl: canonicalSource, revision, owner: repo.owner, repo: repo.repo })

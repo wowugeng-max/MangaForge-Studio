@@ -105,6 +105,101 @@ describe('Skill Pack installer', () => {
     expect(again.installedAt).toBe(installedAt)
   })
 
+  test.each([403, 429])('falls back to the GitHub archive redirect after REST status %d', async (status) => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const sha = '1234567890abcdef1234567890abcdef12345678'
+    const archive = await zipBytes([{ name: `demo-${sha}/skills/demo/SKILL.md`, content: '---\nname: demo\n---\ndemo' }])
+    const calls: Array<{ url: string; init?: RequestInit }> = []
+    const fetchImpl = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, init })
+      if (url.endsWith('/commits/HEAD')) return response({}, status)
+      if (url === 'https://github.com/acme/demo/archive/HEAD.zip') {
+        return new Response(null, { status: 302, headers: { location: `https://codeload.github.com/acme/demo/zip/${sha}` } })
+      }
+      if (url === `https://codeload.github.com/acme/demo/zip/${sha}`) return new Response(archive)
+      return response({}, 404)
+    }
+
+    const result = await installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })
+
+    expect(result.revision).toBe(sha)
+    expect(await readFile(join(result.path, 'skills/demo/SKILL.md'), 'utf8')).toContain('name: demo')
+    expect(calls).toEqual([
+      { url: 'https://api.github.com/repos/acme/demo/commits/HEAD', init: { headers: { accept: 'application/vnd.github+json' } } },
+      { url: 'https://github.com/acme/demo/archive/HEAD.zip', init: { method: 'HEAD', redirect: 'manual' } },
+      { url: `https://codeload.github.com/acme/demo/zip/${sha}`, init: undefined },
+    ])
+  })
+
+  test.each([301, 307, 308])('accepts GitHub archive redirect status %d during rate-limit fallback', async (redirectStatus) => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const sha = '234567890abcdef1234567890abcdef123456789'
+    const archive = await zipBytes([{ name: `demo-${sha}/skills/demo/SKILL.md`, content: '---\nname: demo\n---\ndemo' }])
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('/commits/HEAD')) return response({}, 403)
+      if (url === 'https://github.com/acme/demo/archive/HEAD.zip') {
+        return new Response(null, { status: redirectStatus, headers: { location: `https://codeload.github.com/acme/demo/zip/${sha}` } })
+      }
+      return new Response(archive)
+    }
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).resolves.toMatchObject({ revision: sha })
+  })
+
+  test('does not fall back after a non-rate-limit REST failure', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const calls: string[] = []
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      calls.push(String(input))
+      return response({}, 404)
+    }
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
+      expect.objectContaining({ code: 'SKILL_PACK_DOWNLOAD_FAILED', message: 'GitHub HEAD request failed: 404' }),
+    )
+    expect(calls).toEqual(['https://api.github.com/repos/acme/demo/commits/HEAD'])
+  })
+
+  test('does not fall back after a REST network failure', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const calls: string[] = []
+    const failure = new Error('network unavailable')
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      calls.push(String(input))
+      throw failure
+    }
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
+      expect.objectContaining({ code: 'SKILL_PACK_DOWNLOAD_FAILED', message: 'Unable to fetch https://api.github.com/repos/acme/demo/commits/HEAD', cause: failure }),
+    )
+    expect(calls).toEqual(['https://api.github.com/repos/acme/demo/commits/HEAD'])
+  })
+
+  test.each([
+    ['a non-redirect response', new Response(null, { status: 200 }), 'GitHub archive fallback failed: 200'],
+    ['a redirect without Location', new Response(null, { status: 302 }), 'GitHub archive fallback did not return a redirect location'],
+    ['an untrusted redirect', new Response(null, { status: 302, headers: { location: 'https://evil.example/archive.zip' } }), 'GitHub archive fallback returned an untrusted redirect'],
+  ])('rejects rate-limit fallback with %s before archive download', async (_label, fallbackResponse, message) => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
+    const calls: string[] = []
+    const fetchImpl = async (input: RequestInfo | URL) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/commits/HEAD')) return response({}, 403)
+      return fallbackResponse
+    }
+
+    await expect(installGitHubSkillPack('https://github.com/acme/demo', { workspace, fetchImpl })).rejects.toThrow(
+      expect.objectContaining({ code: 'SKILL_PACK_DOWNLOAD_FAILED', message }),
+    )
+    expect(calls).toEqual([
+      'https://api.github.com/repos/acme/demo/commits/HEAD',
+      'https://github.com/acme/demo/archive/HEAD.zip',
+    ])
+  })
+
   test('accepts a repository-scale archive while extracting only the bounded skills payload', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mf-pack-'))
     const sha = '8989898989898989898989898989898989898989'
