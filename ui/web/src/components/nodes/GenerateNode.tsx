@@ -88,6 +88,7 @@ import {
   runGenerateNodeChatSkillCompilation,
   settleGenerateNodeChatSkillRun,
   settleGenerateNodeSkillReadyListRequest,
+  shouldFilterGenerateNodeCompilerImages,
   shouldInvalidateGenerateNodeInitialCompileAudit,
   updateGenerateNodeReferenceBindingRole,
 } from './generate-node-model'
@@ -211,6 +212,7 @@ function generateNodeReferenceValidationFromError(error: unknown): GenerateNodeR
     error_code: String(value?.code || 'REFERENCE_ASSET_INVALID') as GenerateNodeReferenceValidationState['error_code'],
     detail: String(value?.message || '参考素材校验失败'),
     ...(value?.reference_index === undefined ? {} : { reference_index: Number(value.reference_index) }),
+    ...(value?.reference_type === undefined ? {} : { reference_type: value.reference_type }),
   }
 }
 
@@ -468,9 +470,10 @@ function GenerateNodeImpl(props: NodeProps) {
     () => resolveGenerateNodeEffectiveCompilerReferenceBindings({
       nodeMode: mode,
       effectiveTargetMode: effectiveSkillCompileMode,
+      isChatSkillCompileOnly,
       bindings: referenceBindings,
     }),
-    [effectiveSkillCompileMode, mode, referenceBindings],
+    [effectiveSkillCompileMode, isChatSkillCompileOnly, mode, referenceBindings],
   )
   const referenceBindingsFingerprint = useMemo(
     () => buildGenerateNodeReferenceBindingsFingerprint(effectiveCompilerReferenceBindings),
@@ -484,8 +487,13 @@ function GenerateNodeImpl(props: NodeProps) {
       return generateNodeReferenceValidationFromError(error)
     }
   }, [referenceBindingsFingerprint])
+  const filteringCompilerImages = shouldFilterGenerateNodeCompilerImages({
+    nodeMode: mode,
+    effectiveTargetMode: effectiveSkillCompileMode,
+    isChatSkillCompileOnly,
+  })
   const effectiveReferenceValidationError = resolveGenerateNodeEffectiveReferenceValidationError({
-    filteredImages: effectiveCompilerReferenceBindings.length !== referenceBindings.length,
+    filteringImages: filteringCompilerImages,
     persistedError: referenceValidationError,
     effectiveError: referenceExecutionValidationError,
   })

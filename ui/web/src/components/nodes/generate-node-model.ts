@@ -385,6 +385,10 @@ export type GenerateNodeReferenceValidationState = {
   error_code: GenerateNodeReferenceErrorCode
   detail: string
   reference_index?: number
+  reference_type?: GenerateNodeReferenceType
+  source_edge_id?: string
+  source_node_id?: string
+  source_handle?: string
 }
 
 export type GenerateNodeExecutionCompatibilityError = {
@@ -395,12 +399,14 @@ export type GenerateNodeExecutionCompatibilityError = {
 export class GenerateNodeReferenceError extends Error {
   readonly code: GenerateNodeReferenceErrorCode
   readonly reference_index?: number
+  readonly reference_type?: GenerateNodeReferenceType
 
-  constructor(code: GenerateNodeReferenceErrorCode, message: string, referenceIndex?: number) {
+  constructor(code: GenerateNodeReferenceErrorCode, message: string, referenceIndex?: number, referenceType?: GenerateNodeReferenceType) {
     super(message)
     this.name = 'GenerateNodeReferenceError'
     this.code = code
     this.reference_index = referenceIndex
+    this.reference_type = referenceType
   }
 }
 
@@ -704,11 +710,15 @@ export function buildGenerateNodeIncomingContextSnapshot(input: {
     const sourceAssetIds = resolveGenerateNodeSourceAssetIds(sourceNode.data)
     const sourceAssetId = sourceAssetIds[0]
     if (isReferenceEdge && !sourceContent.trim()) {
-      if (!referenceValidationError) {
+      const shouldRecordSourceError = !referenceValidationError
+        || (referenceValidationError.reference_type === 'image' && referenceType === 'prompt')
+      if (shouldRecordSourceError) {
         referenceValidationError = {
           error_code: 'REFERENCE_ASSET_INVALID',
           detail: `Reference source ${edge.source} has no valid ${edge.targetHandle} content`,
           reference_index: referenceIndex,
+          reference_type: referenceType,
+          ...sourceIdentity,
         }
       }
       return
@@ -753,21 +763,27 @@ function generateNodeReferenceError(
   code: GenerateNodeReferenceErrorCode,
   messageText: string,
   referenceIndex?: number,
+  referenceType?: GenerateNodeReferenceType,
 ) {
-  return new GenerateNodeReferenceError(code, messageText, referenceIndex)
+  return new GenerateNodeReferenceError(code, messageText, referenceIndex, referenceType)
 }
 
 function isGenerateNodeReferenceRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
-function normalizeGenerateNodeReferenceLineage(asset: Record<string, unknown>, referenceIndex: number): number[] {
+function normalizeGenerateNodeReferenceLineage(
+  asset: Record<string, unknown>,
+  referenceIndex: number,
+  referenceType?: GenerateNodeReferenceType,
+): number[] {
   const rawLineage = asset.source_asset_ids ?? asset.sourceAssetIds
   if (rawLineage !== undefined && !Array.isArray(rawLineage)) {
     throw generateNodeReferenceError(
       'REFERENCE_LINEAGE_INVALID',
       `Reference ${referenceIndex} source_asset_ids must be an array`,
       referenceIndex,
+      referenceType,
     )
   }
   const candidates = [asset.id, ...(Array.isArray(rawLineage) ? rawLineage : [])]
@@ -785,18 +801,24 @@ function normalizeGenerateNodeReferenceLineage(asset: Record<string, unknown>, r
 }
 
 function enforceGenerateNodeReferenceConstraints(bindings: readonly GenerateNodeReferenceBinding[]) {
-  const imageCount = bindings.filter(binding => binding.type === 'image').length
-  if (imageCount > MAX_GENERATE_NODE_REFERENCE_IMAGES) {
+  const imageBindings = bindings.filter(binding => binding.type === 'image')
+  if (imageBindings.length > MAX_GENERATE_NODE_REFERENCE_IMAGES) {
     throw generateNodeReferenceError(
       'REFERENCE_LIMIT_EXCEEDED',
       `GenerateNode references may contain at most ${MAX_GENERATE_NODE_REFERENCE_IMAGES} images`,
+      imageBindings[MAX_GENERATE_NODE_REFERENCE_IMAGES]?.reference_index,
+      'image',
     )
   }
-  if (bindings.filter(binding => binding.reference_role === 'first_frame').length > 1) {
-    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one first_frame reference is allowed')
+  const firstFrameBindings = bindings.filter(binding => binding.reference_role === 'first_frame')
+  if (firstFrameBindings.length > 1) {
+    const duplicate = firstFrameBindings[1]
+    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one first_frame reference is allowed', duplicate.reference_index, duplicate.type)
   }
-  if (bindings.filter(binding => binding.reference_role === 'last_frame').length > 1) {
-    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one last_frame reference is allowed')
+  const lastFrameBindings = bindings.filter(binding => binding.reference_role === 'last_frame')
+  if (lastFrameBindings.length > 1) {
+    const duplicate = lastFrameBindings[1]
+    throw generateNodeReferenceError('REFERENCE_ROLE_INVALID', 'Only one last_frame reference is allowed', duplicate.reference_index, duplicate.type)
   }
 }
 
@@ -815,6 +837,7 @@ function toGenerateNodeReferenceValidationState(error: unknown): GenerateNodeRef
       error_code: error.code,
       detail: error.message,
       ...(error.reference_index === undefined ? {} : { reference_index: error.reference_index }),
+      ...(error.reference_type === undefined ? {} : { reference_type: error.reference_type }),
     }
   }
   return {
@@ -859,6 +882,7 @@ export function normalizeGenerateNodeReferenceBindings(
         'REFERENCE_ROLE_INVALID',
         `Reference ${referenceIndex} has an invalid reference role`,
         referenceIndex,
+        type,
       )
     }
     const referenceRole = rawRole as GenerateNodeReferenceRole
@@ -871,6 +895,7 @@ export function normalizeGenerateNodeReferenceBindings(
           'REFERENCE_ID_INVALID',
           `Reference ${referenceIndex} has an invalid reference id`,
           referenceIndex,
+          type,
         )
       }
       referenceId = rawReferenceId.trim()
@@ -880,6 +905,7 @@ export function normalizeGenerateNodeReferenceBindings(
         'REFERENCE_ID_INVALID',
         `Duplicate reference id: ${referenceId}`,
         referenceIndex,
+        type,
       )
     }
     referenceIds.add(referenceId)
@@ -897,6 +923,7 @@ export function normalizeGenerateNodeReferenceBindings(
           'REFERENCE_ASSET_INVALID',
           `Reference ${referenceIndex} prompt content must be a non-empty string`,
           referenceIndex,
+          type,
         )
       }
       binding.content = rawContent.trim()
@@ -907,12 +934,13 @@ export function normalizeGenerateNodeReferenceBindings(
           'REFERENCE_ASSET_INVALID',
           `Reference ${referenceIndex} media url must be a non-empty string`,
           referenceIndex,
+          type,
         )
       }
       binding.url = normalizeGenerateNodeImageUrl(rawUrl)
     }
 
-    const sourceAssetIds = normalizeGenerateNodeReferenceLineage(rawAsset, referenceIndex)
+    const sourceAssetIds = normalizeGenerateNodeReferenceLineage(rawAsset, referenceIndex, type)
     if (sourceAssetIds.length) binding.source_asset_ids = sourceAssetIds
     const sourceEdgeId = rawAsset.source_edge_id ?? rawAsset.sourceEdgeId
     const sourceNodeId = rawAsset.source_node_id ?? rawAsset.sourceNodeId
@@ -1314,26 +1342,36 @@ export function buildGenerateNodeReferenceBindingsFingerprint(
   })))
 }
 
+export function shouldFilterGenerateNodeCompilerImages(input: {
+  nodeMode: string
+  effectiveTargetMode: GenerateNodeSkillTargetMode | undefined
+  isChatSkillCompileOnly: boolean
+}) {
+  return input.isChatSkillCompileOnly
+    && input.nodeMode === 'chat'
+    && (input.effectiveTargetMode === 'text_to_image' || input.effectiveTargetMode === 'text_to_video')
+}
+
 export function resolveGenerateNodeEffectiveCompilerReferenceBindings<T extends { type: string }>(input: {
   nodeMode: string
   effectiveTargetMode: GenerateNodeSkillTargetMode | undefined
+  isChatSkillCompileOnly: boolean
   bindings: readonly T[]
 }): T[] {
-  const excludesImages = input.nodeMode === 'chat'
-    && (input.effectiveTargetMode === 'text_to_image' || input.effectiveTargetMode === 'text_to_video')
-  return excludesImages
+  return shouldFilterGenerateNodeCompilerImages(input)
     ? input.bindings.filter(binding => binding.type !== 'image')
     : [...input.bindings]
 }
 
-export function resolveGenerateNodeEffectiveReferenceValidationError<T>(input: {
-  filteredImages: boolean
+export function resolveGenerateNodeEffectiveReferenceValidationError<T extends { reference_type?: GenerateNodeReferenceType }>(input: {
+  filteringImages: boolean
   persistedError: T | null
   effectiveError: T | null
 }): T | null {
-  return input.filteredImages
-    ? input.effectiveError
-    : input.persistedError || input.effectiveError
+  if (input.persistedError && !(input.filteringImages && input.persistedError.reference_type === 'image')) {
+    return input.persistedError
+  }
+  return input.effectiveError
 }
 
 export function buildGenerateNodeReferenceBindingsLocalFingerprint(
@@ -1502,6 +1540,7 @@ export function validateGenerateNodeReferenceBindingsForExecution(
       'REFERENCE_MEDIA_UNSUPPORTED',
       `Reference media type ${unsupported.type} is not executable yet`,
       unsupported.reference_index,
+      unsupported.type,
     )
   }
   return normalized

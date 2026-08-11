@@ -780,6 +780,7 @@ describe('GenerateNode ordered reference bindings', () => {
     const snapshot = JSON.parse(JSON.stringify(tenImages))
     expect(() => normalizeBindings(undefined, tenImages)).toThrow(expect.objectContaining({
       code: 'REFERENCE_LIMIT_EXCEEDED',
+      reference_type: 'image',
     }))
     expect(tenImages).toEqual(snapshot)
   })
@@ -793,14 +794,14 @@ describe('GenerateNode ordered reference bindings', () => {
     expect(() => normalizeBindings([
       { type: 'image', url: '/first-a.png', reference_role: 'first_frame' },
       { type: 'image', url: '/first-b.png', referenceRole: 'first_frame' },
-    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID', reference_type: 'image' }))
     expect(() => normalizeBindings([
       { type: 'image', url: '/last-a.png', reference_role: 'last_frame' },
       { type: 'image', url: '/last-b.png', role: 'last_frame' },
-    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID', reference_type: 'image' }))
     expect(() => normalizeBindings([
       { type: 'image', url: '/bad-role.png', reference_role: 'background_only' },
-    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID' }))
+    ], [])).toThrow(expect.objectContaining({ code: 'REFERENCE_ROLE_INVALID', reference_type: 'image' }))
   })
 
   test('rejects duplicate ids, malformed lineage, and missing type-specific content', async () => {
@@ -2414,6 +2415,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
     const textTarget = model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
       nodeMode: 'chat',
       effectiveTargetMode: 'text_to_video',
+      isChatSkillCompileOnly: true,
       bindings: persistent,
     })
     expect(textTarget.map(binding => binding.reference_id)).toEqual(['prompt-1'])
@@ -2423,6 +2425,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
     const imageTarget = model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
       nodeMode: 'chat',
       effectiveTargetMode: 'image_to_video',
+      isChatSkillCompileOnly: true,
       bindings: persistent,
     })
     expect(imageTarget.map(binding => binding.reference_id)).toEqual(['image-1', 'prompt-1'])
@@ -2437,13 +2440,50 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
       nodeMode: 'chat',
       effectiveTargetMode: 'image_to_image',
+      isChatSkillCompileOnly: true,
       bindings: nineImages,
     })).toHaveLength(9)
     expect(model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
       nodeMode: 'image_to_video',
       effectiveTargetMode: 'image_to_video',
+      isChatSkillCompileOnly: false,
       bindings: persistent,
     })).toEqual(persistent)
+  })
+
+  test('preserves legacy Chat image inputs when no Skill compile-only run is active', async () => {
+    const model = await import('./generate-node-model')
+    const persistent = [{
+      reference_index: 1,
+      reference_id: 'legacy-image',
+      reference_role: 'general',
+      type: 'image',
+      url: '/legacy.png',
+    }] as const
+    const effective = model.resolveGenerateNodeEffectiveCompilerReferenceBindings({
+      nodeMode: 'chat',
+      effectiveTargetMode: 'text_to_image',
+      isChatSkillCompileOnly: false,
+      bindings: persistent,
+    })
+    const payload = model.buildGenerateNodeRequestPayload({
+      id: 'legacy-chat', prompt: 'describe', selectedKey: 1, provider: 'provider', selectedModel: 'chat-model',
+      mode: 'chat', routingStrategy: 'balanced', params: {}, temperature: 0.7, ratioSize: '1024*1024',
+      selectedRolePrompt: 'assistant', referenceBindings: effective,
+    })
+
+    expect(effective).toEqual(persistent)
+    expect(model.buildGenerateNodeReferenceBindingsFingerprint(effective)).toBe(
+      model.buildGenerateNodeReferenceBindingsFingerprint(persistent),
+    )
+    expect(payload.params.incoming_assets).toMatchObject([{ reference_id: 'legacy-image', type: 'image' }])
+
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const effectiveCollectionSource = source.slice(
+      source.indexOf('resolveGenerateNodeEffectiveCompilerReferenceBindings({'),
+      source.indexOf('bindings: referenceBindings,') + 'bindings: referenceBindings,'.length,
+    )
+    expect(effectiveCollectionSource).toContain('isChatSkillCompileOnly,')
   })
 
   test('uses only the effective compiler reference fingerprint in component compile inputs', () => {
@@ -2457,26 +2497,72 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(fingerprintSource).not.toContain('buildGenerateNodeReferenceBindingsFingerprint(referenceBindings)')
   })
 
-  test('ignores persisted validation only when Chat text targets filtered images and revalidates retained references', async () => {
+  test('suppresses only proven hidden-image validation while prompt and unknown errors fail closed', async () => {
     const model = await import('./generate-node-model')
-    const imageError = { error_code: 'REFERENCE_LIMIT_EXCEEDED', detail: 'too many hidden images', reference_index: 10 }
-    const promptError = { error_code: 'REFERENCE_ROLE_INVALID', detail: 'bad retained prompt role', reference_index: 2 }
+    const imageSnapshot = model.buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges: [{ id: 'edge-image', source: 'empty-image', target: 'target', targetHandle: 'image' }],
+      nodes: [{ id: 'empty-image', data: { result: { content: ' ' } } }],
+    })
+    const promptSnapshot = model.buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges: [{ id: 'edge-prompt', source: 'empty-prompt', target: 'target', targetHandle: 'text' }],
+      nodes: [{ id: 'empty-prompt', data: { result: { content: ' ' } } }],
+    })
+    const mixedSnapshot = model.buildGenerateNodeIncomingContextSnapshot({
+      nodeId: 'target',
+      edges: [
+        { id: 'edge-image', source: 'empty-image', target: 'target', targetHandle: 'image' },
+        { id: 'edge-prompt', source: 'empty-prompt', target: 'target', targetHandle: 'text' },
+      ],
+      nodes: [
+        { id: 'empty-image', data: { result: { content: ' ' } } },
+        { id: 'empty-prompt', data: { result: { content: ' ' } } },
+      ],
+    })
+    const imageError = imageSnapshot.referenceValidationError
+    const promptError = promptSnapshot.referenceValidationError
+    const unknownError = { error_code: 'REFERENCE_ASSET_INVALID', detail: 'unknown source' }
+
+    expect(imageError).toMatchObject({ reference_type: 'image', source_edge_id: 'edge-image' })
+    expect(promptError).toMatchObject({ reference_type: 'prompt', source_edge_id: 'edge-prompt' })
+    expect(mixedSnapshot.referenceValidationError).toMatchObject({
+      reference_type: 'prompt',
+      source_edge_id: 'edge-prompt',
+    })
 
     expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
-      filteredImages: true,
+      filteringImages: true,
       persistedError: imageError,
       effectiveError: null,
     })).toBeNull()
     expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
-      filteredImages: true,
-      persistedError: imageError,
-      effectiveError: promptError,
+      filteringImages: true,
+      persistedError: promptError,
+      effectiveError: null,
     })).toBe(promptError)
     expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
-      filteredImages: false,
+      filteringImages: true,
+      persistedError: mixedSnapshot.referenceValidationError,
+      effectiveError: null,
+    })).toBe(mixedSnapshot.referenceValidationError)
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteringImages: false,
       persistedError: imageError,
       effectiveError: null,
     })).toBe(imageError)
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteringImages: true,
+      persistedError: unknownError,
+      effectiveError: null,
+    })).toBe(unknownError)
+
+    const retainedPromptError = { ...promptError, detail: 'effective prompt validation' }
+    expect(model.resolveGenerateNodeEffectiveReferenceValidationError({
+      filteringImages: true,
+      persistedError: imageError,
+      effectiveError: retainedPromptError,
+    })).toBe(retainedPromptError)
   })
 
   test('runs one direct Chat Skill compile and returns its positive prompt packet without a Provider fallback', async () => {
