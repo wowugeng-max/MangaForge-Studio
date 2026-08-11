@@ -1213,7 +1213,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skill: effectiveSkill,
     })
     setSkillTargetMode(transition.targetMode)
-    if (transition.clearSkill) selectPromptSkill('')
+    if (transition.clearSkill && !parsedSkillCommand) selectPromptSkill('')
   }
 
   const workspaceCompilerModel = compilerModels.find(model => Number(model.id) === Number(skillSettings?.skill_compiler_model_id))

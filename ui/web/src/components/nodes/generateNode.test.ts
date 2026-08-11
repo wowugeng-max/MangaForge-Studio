@@ -2638,6 +2638,15 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(transitionEffect).not.toContain('setPrompt(')
   })
 
+  test('keeps saved dropdown identity when an active command conflicts with a user target change', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const workspaceCompilerModel ='))
+
+    expect(targetHandler).toContain("if (transition.clearSkill && !parsedSkillCommand) selectPromptSkill('')")
+    expect(targetHandler).not.toContain("if (transition.clearSkill) selectPromptSkill('')")
+    expect(targetHandler).not.toContain('setPrompt(')
+  })
+
   test('does not auto-select when multiple installed Skills are compatible', async () => {
     const model = await import('./generate-node-model')
     const skills = [
