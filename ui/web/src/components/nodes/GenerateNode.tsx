@@ -45,6 +45,7 @@ import {
   buildGenerateNodeRequestPayload,
   buildGenerateNodeResultWithFission,
   buildGenerateNodeSkillCompileAssets,
+  buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
@@ -55,6 +56,7 @@ import {
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
   normalizeGenerateNodeImageUrl,
+  normalizeGenerateNodeSkillCompileAudit,
   parseGenerateNodeExecutionCompatibilityError,
   parseCanvasSkillCommand,
   normalizeSelectOptions,
@@ -78,6 +80,7 @@ import type {
   GenerateNodeReferenceRole,
   GenerateNodeReferenceValidationState,
   GenerateNodeRunToken,
+  GenerateNodeSkillTargetMode,
 } from './generate-node-model'
 
 export {
@@ -106,6 +109,7 @@ export {
   buildGenerateNodeReferenceBindingsLocalFingerprint,
   buildGenerateNodeReferencePersistencePayload,
   buildGenerateNodeSkillCompileAssets,
+  buildGenerateNodeSkillCompileRequest,
   buildGenerateNodeSkillIdentity,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
@@ -114,6 +118,7 @@ export {
   areGenerateNodeIncomingContextSnapshotsEqual,
   normalizeGenerateNodeCommandSkillArgumentsByCommand,
   normalizeGenerateNodeCompilerModelId,
+  normalizeGenerateNodeSkillCompileAudit,
   normalizeGenerateNodeReferenceBindings,
   parseGenerateNodeExecutionCompatibilityError,
   reconcileGenerateNodeReferenceBindings,
@@ -708,33 +713,35 @@ function GenerateNodeImpl(props: NodeProps) {
     setSkillPreviewLoading(true)
     setSkillPreviewError(null)
     try {
-      const res = await compileSkillPreview({
-        skill_name: effectiveSkillName,
-        ...(effectiveSkillPackId ? { pack_id: effectiveSkillPackId } : {}),
-        ...(effectiveSkillRevision ? { skill_revision: effectiveSkillRevision } : {}),
-        raw_prompt: prompt,
-        mode: mode as CanvasSkillMediaMode,
-        incoming_assets: previewAssets,
-        node_params: skillNodeParams(),
-        ...(effectiveSkillArguments ? { arguments: effectiveSkillArguments } : {}),
-        compiler_model_id: effectiveCompilerModelId,
-      })
+      const res = await compileSkillPreview(buildGenerateNodeSkillCompileRequest({
+        skillName: effectiveSkillName,
+        packId: effectiveSkillPackId,
+        revision: effectiveSkillRevision,
+        prompt,
+        mode: mode as GenerateNodeSkillTargetMode,
+        references: previewAssets,
+        nodeParams: skillNodeParams(),
+        arguments: effectiveSkillArguments,
+        compilerModelId: effectiveCompilerModelId,
+      }))
       if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
-      const preview = res.data.result
-      const previewReferenceAudit = Array.isArray(preview.reference_bindings)
-        ? reconcileGenerateNodeReferenceBindings(undefined, preview.reference_bindings)
-        : null
-      setCompiledPrompt(preview.prompt)
-      setCompiledNegativePrompt(preview.negative_prompt || '')
-      setCompiledReferences(Array.isArray(preview.references_used) ? preview.references_used : [])
-      setCompiledReferenceBindings(previewReferenceAudit && !previewReferenceAudit.validationError ? previewReferenceAudit.bindings : previewAssets)
-      setReferenceModeHint(String(preview.reference_mode_hint || ''))
-      setCompiledInputHash(res.data.cache_key)
-      setCompileWarnings(Array.isArray(preview.warnings) ? preview.warnings : [])
-      setSkillPackSource(effectiveSkill?.sourceUrl || '')
-      setCompilerModelId(effectiveCompilerModelId)
-      setSkillPreviewResult(preview)
-      setSkillPreviewCached(Boolean(res.data.cached))
+      const audit = normalizeGenerateNodeSkillCompileAudit({
+        response: res.data,
+        executionReferences: previewAssets,
+        packSource: effectiveSkill?.sourceUrl,
+        compilerModelId: effectiveCompilerModelId,
+      })
+      setCompiledPrompt(audit.compiledPrompt)
+      setCompiledNegativePrompt(audit.compiledNegativePrompt)
+      setCompiledReferences(audit.compiledReferences)
+      setCompiledReferenceBindings(audit.compiledReferenceBindings)
+      setReferenceModeHint(audit.referenceModeHint)
+      setCompiledInputHash(audit.compiledInputHash)
+      setCompileWarnings(audit.compileWarnings)
+      setSkillPackSource(audit.skillPackSource)
+      setCompilerModelId(audit.compilerModelId)
+      setSkillPreviewResult(audit.skillPreviewResult)
+      setSkillPreviewCached(audit.skillPreviewCached)
       setSkillCompileEnabled(true)
       message.success(res.data.cached ? '已复用 Skill 编译缓存' : 'Skill 提示词编译完成')
     } catch (error: any) {

@@ -15,6 +15,7 @@ import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectR
 import { BaseNode } from './BaseNode'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
+import type { CanvasSkillCompileInput, CanvasSkillCompileResponse } from '../../api/skills'
 
 const { TextArea } = Input
 const { Text } = Typography
@@ -1182,6 +1183,68 @@ export function buildGenerateNodeSkillCompileAssets(
   bindings: readonly GenerateNodeReferenceBinding[],
 ) {
   return buildGenerateNodeCanonicalReferenceBindings(validateGenerateNodeReferenceBindingsForExecution(bindings))
+}
+
+export function buildGenerateNodeSkillCompileRequest(input: {
+  skillName: string
+  packId?: string
+  revision?: string
+  prompt: string
+  mode: GenerateNodeSkillTargetMode
+  compilerModelId: number
+  references: readonly GenerateNodeReferenceBinding[]
+  nodeParams?: Record<string, unknown>
+  arguments?: Record<string, string>
+}): CanvasSkillCompileInput {
+  const references = buildGenerateNodeSkillCompileAssets(
+    [...input.references].sort((left, right) => left.reference_index - right.reference_index),
+  )
+  const nodeParams = input.nodeParams && Object.keys(input.nodeParams).length ? { ...input.nodeParams } : undefined
+  const skillArguments = input.arguments && Object.keys(input.arguments).length ? { ...input.arguments } : undefined
+  return {
+    skill_name: input.skillName,
+    ...(input.packId ? { pack_id: input.packId } : {}),
+    ...(input.revision ? { skill_revision: input.revision } : {}),
+    raw_prompt: input.prompt,
+    mode: input.mode,
+    ...(references.length ? { incoming_assets: references } : {}),
+    ...(nodeParams ? { node_params: nodeParams } : {}),
+    ...(skillArguments ? { arguments: skillArguments } : {}),
+    compiler_model_id: input.compilerModelId,
+  }
+}
+
+export function normalizeGenerateNodeSkillCompileAudit(input: {
+  response: CanvasSkillCompileResponse
+  executionReferences: readonly GenerateNodeReferenceBinding[]
+  packSource?: string
+  compilerModelId: number
+}) {
+  const preview = input.response.result
+  const compilerReferenceAudit = Array.isArray(preview.reference_bindings)
+    ? reconcileGenerateNodeReferenceBindings(
+      undefined,
+      [...preview.reference_bindings].sort((left, right) => Number(left.reference_index) - Number(right.reference_index)),
+    )
+    : null
+  const compiledReferenceBindings = compilerReferenceAudit && !compilerReferenceAudit.validationError
+    ? buildGenerateNodeCanonicalReferenceBindings(compilerReferenceAudit.bindings)
+    : buildGenerateNodeCanonicalReferenceBindings(
+      [...input.executionReferences].sort((left, right) => left.reference_index - right.reference_index),
+    )
+  return {
+    compiledPrompt: String(preview.prompt || ''),
+    compiledNegativePrompt: String(preview.negative_prompt || ''),
+    compiledReferences: Array.isArray(preview.references_used) ? [...preview.references_used] : [],
+    compiledReferenceBindings,
+    referenceModeHint: String(preview.reference_mode_hint || ''),
+    compiledInputHash: String(input.response.cache_key || ''),
+    compileWarnings: Array.isArray(preview.warnings) ? [...preview.warnings] : [],
+    compilerModelId: input.compilerModelId,
+    skillPreviewResult: preview,
+    skillPreviewCached: Boolean(input.response.cached),
+    skillPackSource: String(input.packSource || ''),
+  }
 }
 
 export function parseGenerateNodeExecutionCompatibilityError(

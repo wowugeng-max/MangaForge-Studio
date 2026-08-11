@@ -2104,8 +2104,8 @@ describe('GenerateNode Skill review regressions', () => {
 
     const previewSource = source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))
     expect(previewSource).toContain('if (effectiveSkillSelectionError)')
-    expect(previewSource.indexOf('if (effectiveSkillSelectionError)')).toBeLessThan(previewSource.indexOf('compileSkillPreview({'))
-    expect(previewSource).toContain('skill_revision: effectiveSkillRevision')
+    expect(previewSource.indexOf('if (effectiveSkillSelectionError)')).toBeLessThan(previewSource.indexOf('compileSkillPreview(buildGenerateNodeSkillCompileRequest({'))
+    expect(previewSource).toContain('revision: effectiveSkillRevision')
 
     const runSource = source.slice(source.indexOf('const handleRun = async () => {'), source.indexOf('useEffect(() => {', source.indexOf('const handleRun = async () => {')))
     expect(runSource).toContain('if (effectiveSkillSelectionError)')
@@ -2134,7 +2134,7 @@ describe('GenerateNode Skill review regressions', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     expect(source).toContain('skillPreviewRequestTrackerRef.current.isCurrent')
     expect(source).toContain('compileInputFingerprintRef.current')
-    expect(source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))).toContain('skill_revision: effectiveSkillRevision')
+    expect(source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))).toContain('revision: effectiveSkillRevision')
   })
 
   test('subscribes to a semantic incoming-context snapshot for Skill audit invalidation', async () => {
@@ -2380,6 +2380,110 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Chat Skill model helpers', () => {
+  test('builds a canonical locked Skill compile request and omits empty optional fields', async () => {
+    const model = await import('./GenerateNode')
+    const references = [
+      { reference_index: 2, reference_id: 'style', reference_role: 'style', type: 'image', url: 'https://cdn/style.png' },
+      { reference_index: 1, reference_id: 'hero', reference_role: 'character', type: 'image', url: 'https://cdn/hero.png' },
+    ] as const
+
+    const request = model.buildGenerateNodeSkillCompileRequest({
+      skillName: 'portrait-skill',
+      packId: 'portrait-pack',
+      revision: 'rev-7',
+      prompt: 'paint the hero',
+      mode: 'text_to_image',
+      compilerModelId: 9,
+      references,
+      nodeParams: {},
+      arguments: {},
+    })
+
+    expect(request).toEqual({
+      skill_name: 'portrait-skill',
+      pack_id: 'portrait-pack',
+      skill_revision: 'rev-7',
+      raw_prompt: 'paint the hero',
+      mode: 'text_to_image',
+      compiler_model_id: 9,
+      incoming_assets: [
+        { reference_index: 1, reference_id: 'hero', reference_role: 'character', type: 'image', url: 'https://cdn/hero.png' },
+        { reference_index: 2, reference_id: 'style', reference_role: 'style', type: 'image', url: 'https://cdn/style.png' },
+      ],
+    })
+    expect(references[0].reference_index).toBe(2)
+
+    expect(model.buildGenerateNodeSkillCompileRequest({
+      skillName: 'portrait-skill', prompt: '', mode: 'text_to_image', compilerModelId: 9, references: [],
+    })).toEqual({
+      skill_name: 'portrait-skill', raw_prompt: '', mode: 'text_to_image', compiler_model_id: 9,
+    })
+  })
+
+  test('normalizes compiler-owned Skill compile audit bindings and cache fields without mutating inputs', async () => {
+    const model = await import('./GenerateNode')
+    const response = {
+      result: {
+        skill_name: 'portrait-skill', skill_version: 'rev-7', mode: 'text_to_image' as const,
+        prompt: 'positive', negative_prompt: 'negative', parameters: {}, references_used: ['hero', 'style'],
+        warnings: ['trimmed'], reference_mode_hint: 'Ref2VA' as const,
+        reference_bindings: [
+          { reference_index: 2, reference_id: 'style', reference_role: 'style' as const, type: 'image' as const, url: 'https://cdn/style.png' },
+          { reference_index: 1, reference_id: 'hero', reference_role: 'character' as const, type: 'image' as const, url: 'https://cdn/hero.png' },
+        ],
+      },
+      cache_key: 'sha256:compile', cached: true,
+    }
+    const fallback = [
+      { reference_index: 1, reference_id: 'fallback', reference_role: 'general' as const, type: 'image' as const, url: 'https://cdn/fallback.png' },
+    ]
+    const snapshot = structuredClone({ response, fallback })
+
+    expect(model.normalizeGenerateNodeSkillCompileAudit({
+      response, executionReferences: fallback, packSource: 'https://skills/portrait', compilerModelId: 9,
+    })).toEqual({
+      compiledPrompt: 'positive',
+      compiledNegativePrompt: 'negative',
+      compiledReferences: ['hero', 'style'],
+      compiledReferenceBindings: [
+        { reference_index: 1, reference_id: 'hero', reference_role: 'character', type: 'image', url: 'https://cdn/hero.png' },
+        { reference_index: 2, reference_id: 'style', reference_role: 'style', type: 'image', url: 'https://cdn/style.png' },
+      ],
+      referenceModeHint: 'Ref2VA',
+      compiledInputHash: 'sha256:compile',
+      compileWarnings: ['trimmed'],
+      compilerModelId: 9,
+      skillPreviewResult: response.result,
+      skillPreviewCached: true,
+      skillPackSource: 'https://skills/portrait',
+    })
+    expect({ response, fallback }).toEqual(snapshot)
+  })
+
+  test('falls back to canonical execution references when compiler bindings are invalid', async () => {
+    const model = await import('./GenerateNode')
+    const fallback = [
+      { reference_index: 2, reference_id: 'style', reference_role: 'style' as const, type: 'image' as const, url: 'https://cdn/style.png' },
+      { reference_index: 1, reference_id: 'hero', reference_role: 'character' as const, type: 'image' as const, url: 'https://cdn/hero.png' },
+    ]
+    const result = {
+      skill_name: 'portrait-skill', skill_version: 'rev-7', mode: 'text_to_image' as const,
+      prompt: 'positive', negative_prompt: '', parameters: {}, references_used: [], warnings: [],
+      reference_bindings: [{ reference_index: 1, reference_id: '', reference_role: 'character' as const, type: 'image' as const, url: '' }],
+    }
+
+    const audit = model.normalizeGenerateNodeSkillCompileAudit({
+      response: { result, cache_key: '', cached: false },
+      executionReferences: fallback,
+      packSource: '',
+      compilerModelId: 12,
+    })
+    expect(audit.compiledReferenceBindings.map((binding: any) => binding.reference_id)).toEqual(['hero', 'style'])
+    expect(audit.compiledInputHash).toBe('')
+    expect(audit.skillPreviewCached).toBe(false)
+    expect(audit.compilerModelId).toBe(12)
+  })
+
   test('normalizes persisted Chat prompt target aliases and invalid values', async () => {
     const model = await import('./generate-node-model')
     expect(model.normalizeGenerateNodeSkillTargetMode('image_to_video')).toBe('image_to_video')
