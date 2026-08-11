@@ -167,7 +167,7 @@ const SKILL_AUDIT_KEYS = [
   'skill_pack_id', 'skill_pack_source', 'skill_name', 'skill_revision',
   'compiled_prompt', 'compiled_negative_prompt', 'compiled_references',
   'compiled_input_hash', 'warnings', 'compiler_model_id', 'raw_prompt',
-  'reference_mode_hint',
+  'reference_mode_hint', 'skill_preview_cached',
 ]
 
 function withoutSkillAudit(value: any) {
@@ -300,6 +300,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const previousCompileInputFingerprintRef = useRef<string | null>(null)
   const compileInputFingerprintRef = useRef('')
   const appliedSkillTargetResolutionRef = useRef('')
+  const pendingSkillTargetUserResolutionRef = useRef(false)
   const skillPreviewRequestTrackerRef = useRef(createGenerateNodePreviewRequestTracker())
   const nodeRef = useRef<HTMLDivElement>(null)
 
@@ -417,6 +418,9 @@ function GenerateNodeImpl(props: NodeProps) {
     selectedKey,
     selectedModel,
     mode,
+    executionKind: mode === 'chat' && hasEffectiveSkill ? 'skill_compile_only' : 'provider',
+    effectiveTarget: effectiveSkillCompileMode,
+    effectiveSkillIdentity,
     referenceBindings: referenceBindingsFingerprint,
   })
   const executionCompatibilityContextFingerprintRef = useRef(executionCompatibilityContextFingerprint)
@@ -435,9 +439,10 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => {
     if (mode !== 'chat' || !effectiveSkill) {
       appliedSkillTargetResolutionRef.current = ''
+      if (mode !== 'chat') pendingSkillTargetUserResolutionRef.current = false
       return
     }
-    const origin: GenerateNodeSkillTargetTransitionOrigin = parsedSkillCommand ? 'command' : 'hydration'
+    const origin: GenerateNodeSkillTargetTransitionOrigin = pendingSkillTargetUserResolutionRef.current ? 'user' : parsedSkillCommand ? 'command' : 'hydration'
     const resolutionKey = `${origin}:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
     if (appliedSkillTargetResolutionRef.current === resolutionKey) return
     appliedSkillTargetResolutionRef.current = resolutionKey
@@ -446,7 +451,18 @@ function GenerateNodeImpl(props: NodeProps) {
       requestedTargetMode: skillTargetMode,
       skill: effectiveSkill,
     })
+    if (origin === 'user' && parsedSkillCommand) {
+      appliedSkillTargetResolutionRef.current = `command:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
+    }
+    pendingSkillTargetUserResolutionRef.current = false
     if (transition.targetMode !== skillTargetMode) setSkillTargetMode(transition.targetMode)
+    if (transition.clearSkill && !parsedSkillCommand) {
+      setSkillPackId('')
+      setSkillName('')
+      setSkillRevision('')
+      setSkillArguments({})
+      setSkillCompileEnabled(false)
+    }
   }, [effectiveSkill, mode, parsedSkillCommand, skillTargetMode])
 
   useEffect(() => {
@@ -1168,6 +1184,7 @@ function GenerateNodeImpl(props: NodeProps) {
       : `${skillPackId ? `${skillPackId}: ` : ''}${skillName} · revision 未锁定（请选择）`,
   } : null
   const selectPromptSkill = (value: string) => {
+    pendingSkillTargetUserResolutionRef.current = false
     if (!value) {
       setSkillPackId('')
       setSkillName('')
@@ -1186,10 +1203,14 @@ function GenerateNodeImpl(props: NodeProps) {
   }
 
   const selectSkillTargetMode = (requestedTargetMode: GenerateNodeSkillTargetMode) => {
+    if (effectiveSkillName && !effectiveSkill) pendingSkillTargetUserResolutionRef.current = true
+    if (parsedSkillCommand && effectiveSkill) {
+      appliedSkillTargetResolutionRef.current = `command:${effectiveSkill.packId}:${effectiveSkill.name}:${effectiveSkill.revision}`
+    }
     const transition = resolveGenerateNodeSkillTargetTransition({
       origin: 'user',
       requestedTargetMode,
-      skill: selectedSkill,
+      skill: effectiveSkill,
     })
     setSkillTargetMode(transition.targetMode)
     if (transition.clearSkill) selectPromptSkill('')
@@ -1524,6 +1545,7 @@ function GenerateNodeImpl(props: NodeProps) {
                     <Text type="secondary" style={{ display: 'block', fontSize: 11, marginBottom: 3 }}>目标提示词类型</Text>
                     <Select
                       size="small"
+                      aria-label="目标提示词类型"
                       value={skillTargetMode}
                       options={GENERATE_NODE_SKILL_TARGET_MODE_OPTIONS}
                       onChange={value => selectSkillTargetMode(value)}

@@ -2551,6 +2551,22 @@ describe('GenerateNode Chat Skill model helpers', () => {
     })).toEqual({ targetMode: 'image_to_video', clearSkill: false })
   })
 
+  test('preserves user target intent while Skill metadata is unresolved, then clears an incompatible dropdown', async () => {
+    const model = await import('./GenerateNode')
+    const requestedTargetMode = 'text_to_image' as const
+
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode,
+      skill: undefined,
+    })).toEqual({ targetMode: requestedTargetMode, clearSkill: false })
+    expect(model.resolveGenerateNodeSkillTargetTransition({
+      origin: 'user',
+      requestedTargetMode,
+      skill: { mediaModes: ['image_to_video'] },
+    })).toEqual({ targetMode: requestedTargetMode, clearSkill: true })
+  })
+
   test('Chat target wiring persists aliases, compiles with ordered references, and retains H3 video targets', async () => {
     const model = await import('./GenerateNode')
     const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
@@ -2587,6 +2603,12 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(source).toContain("mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'")
     expect(source).toContain("if (mode !== 'chat' || !effectiveSkill) {")
     expect(source).toContain("appliedSkillTargetResolutionRef.current = ''")
+    expect(source).toContain('pendingSkillTargetUserResolutionRef')
+    expect(source).toContain("executionKind: mode === 'chat' && hasEffectiveSkill ? 'skill_compile_only' : 'provider'")
+    expect(source).toContain('effectiveTarget: effectiveSkillCompileMode')
+    expect(source).toContain('effectiveSkillIdentity')
+    expect(source).toContain("'skill_preview_cached'")
+    expect(source).toContain('aria-label="目标提示词类型"')
   })
 
   test('resets target-resolution dedupe when Chat Skill resolution disappears', () => {
@@ -2598,6 +2620,22 @@ describe('GenerateNode Chat Skill model helpers', () => {
 
     expect(transitionEffect).toContain("appliedSkillTargetResolutionRef.current = ''")
     expect(transitionEffect.indexOf("appliedSkillTargetResolutionRef.current = ''")).toBeLessThan(transitionEffect.indexOf('return'))
+  })
+
+  test('carries pending user target origin through Skill metadata loading without rewriting commands', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const skillHandler = source.slice(source.indexOf('const selectPromptSkill ='), source.indexOf('const selectSkillTargetMode ='))
+    const targetHandler = source.slice(source.indexOf('const selectSkillTargetMode ='), source.indexOf('const workspaceCompilerModel ='))
+    const transitionEffect = source.slice(source.indexOf("if (mode !== 'chat' || !effectiveSkill)"), source.indexOf('useEffect(() => {\n    if (reconciledIncomingFingerprintRef'))
+
+    expect(targetHandler).toContain('pendingSkillTargetUserResolutionRef.current = true')
+    expect(targetHandler).toContain('!effectiveSkill')
+    expect(skillHandler).toContain('pendingSkillTargetUserResolutionRef.current = false')
+    expect(transitionEffect).toContain("pendingSkillTargetUserResolutionRef.current ? 'user'")
+    expect(transitionEffect).toContain('if (transition.clearSkill && !parsedSkillCommand)')
+    expect(transitionEffect).toContain("if (origin === 'user' && parsedSkillCommand)")
+    expect(targetHandler).toContain("appliedSkillTargetResolutionRef.current = `command:")
+    expect(transitionEffect).not.toContain('setPrompt(')
   })
 
   test('does not auto-select when multiple installed Skills are compatible', async () => {

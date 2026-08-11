@@ -223,6 +223,11 @@ describe('ComfyForge canvas feature migration', () => {
     expect(generateNode).toContain("mode === 'chat' && hasEffectiveSkill ? '生成提示词' : '运行'")
     expect(generateNode).toContain("if (mode !== 'chat' || !effectiveSkill) {")
     expect(generateNode).toContain("appliedSkillTargetResolutionRef.current = ''")
+    expect(generateNode).toContain('pendingSkillTargetUserResolutionRef')
+    expect(generateNode).toContain("executionKind: mode === 'chat' && hasEffectiveSkill ? 'skill_compile_only' : 'provider'")
+    expect(generateNode).toContain('effectiveTarget: effectiveSkillCompileMode')
+    expect(generateNode).toContain("'skill_preview_cached'")
+    expect(generateNode).toContain('aria-label="目标提示词类型"')
     expect(generateNode).toContain('提示词 Skill')
     expect(generateNode).not.toMatch(/triggerWords[\s\S]{0,200}(?:setSkillName|selectSkill)/)
 
