@@ -34,7 +34,7 @@ export type PromptCompilerDeps = {
 
 type RegistryLike = SkillRegistry | { resolve: (query: any) => Promise<SkillManifest> }
 
-const PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
+const PARAM_KEYS = new Set(['size', 'aspect_ratio', 'duration', 'cameraParams', 'customMovements'])
 const INTERNAL_NAMES = /\b(?:activeWorkspace|compilerModelId|skillCompilerModelId|request|incomingAssets|nodeParams|source_asset_ids|api[_-]?key|authorization|bearer)\b/gi
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }
 

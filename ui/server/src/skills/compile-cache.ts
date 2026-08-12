@@ -15,7 +15,7 @@ export type CompileCacheInput = {
 
 export type CompileCacheRecord = { key: string; result: PromptCompileResult; createdAt: number; compilerModelId?: number }
 
-const NODE_PARAM_KEYS = ['size', 'aspect_ratio', 'cameraParams', 'customMovements'] as const
+const NODE_PARAM_KEYS = ['size', 'aspect_ratio', 'duration', 'cameraParams', 'customMovements'] as const
 
 function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)

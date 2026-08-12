@@ -874,6 +874,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const skillNodeParams = () => Object.fromEntries(Object.entries({
     size: params.size || ratioSize,
     aspect_ratio: aspectRatio,
+    duration: params.duration,
     cameraParams,
     customMovements,
   }).filter(([, value]) => value !== undefined && value !== null && value !== ''))

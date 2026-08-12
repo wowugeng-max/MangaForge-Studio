@@ -130,6 +130,31 @@ describe('GenerateNode migration behavior', () => {
     expect(finishSource).toContain('source_mode: executionMode')
   })
 
+  test('passes the selected video duration into Skill fingerprints, previews, and Chat compilation', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const nodeParamsSource = source.slice(
+      source.indexOf('const skillNodeParams ='),
+      source.indexOf('const compileInputFingerprint ='),
+    )
+    const fingerprintSource = source.slice(
+      source.indexOf('const compileInputFingerprint ='),
+      source.indexOf('compileInputFingerprintRef.current ='),
+    )
+    const previewSource = source.slice(
+      source.indexOf('const handleSkillPreview ='),
+      source.indexOf('const buildPayload ='),
+    )
+    const chatCompileSource = source.slice(
+      source.indexOf('runGenerateNodeChatSkillCompilation({'),
+      source.indexOf("if (outcome.status === 'stale')", source.indexOf('runGenerateNodeChatSkillCompilation({')),
+    )
+
+    expect(nodeParamsSource).toContain('duration: params.duration')
+    expect(fingerprintSource).toContain('nodeParams: skillNodeParams()')
+    expect(previewSource).toContain('nodeParams: skillNodeParams()')
+    expect(chatCompileSource).toContain('nodeParams: skillNodeParams()')
+  })
+
   test('surfaces materialization failures and never falls back to Base64 request payloads', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const formatterSource = source.slice(source.indexOf('function formatGenerateNodeReferenceMediaError'), source.indexOf('export function subscribeToGenerateNodeExternalError'))

@@ -288,6 +288,32 @@ describe('prompt compiler', () => {
     expect(secondModel.inputHash).not.toBe(first.inputHash)
   })
 
+  test('keys cached video prompt compiles by the requested duration', async () => {
+    const root = await compilerRoot()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => h3PromptSkill(root) } as any,
+      cache: createCompileCache(),
+      readModels: async () => [{ id: 10, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        return { content: compilerResult('text_to_video') }
+      },
+    })
+    const base = {
+      skillName: 'h3-prompt-writing', rawPrompt: 'animate this shot', mode: 'text_to_video' as const,
+      incomingAssets: [], activeWorkspace: root, compilerModelId: 10,
+    }
+
+    const fiveSeconds = await compiler({ ...base, nodeParams: { duration: 5 } })
+    const tenSeconds = await compiler({ ...base, nodeParams: { duration: 10 } })
+
+    expect(fiveSeconds.inputHash).not.toBe(tenSeconds.inputHash)
+    expect(fiveSeconds.cached).toBe(false)
+    expect(tenSeconds.cached).toBe(false)
+    expect(executions).toBe(2)
+  })
+
   test('preserves structured positive and negative prompts when the compiler model lacks negative-prompt capability', async () => {
     const root = await compilerRoot()
     const cache = createCompileCache()
@@ -776,6 +802,39 @@ describe('prompt compiler', () => {
     expect(calls).toHaveLength(1)
     expect(JSON.stringify(calls[0])).toContain('BASE_GUIDE')
     expect(JSON.stringify(calls[0])).not.toContain('secret')
+  })
+
+  test('accepts only scalar duration parameters returned by video prompt Skills', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-duration-'))
+    await mkdir(join(root, 'references'))
+    await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
+    let duration: unknown = 10
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 33, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => ({
+        content: JSON.stringify({
+          skill_name: 'h3', skill_version: 'a'.repeat(40), mode: 'text_to_video', prompt: 'PROMPT',
+          negative_prompt: '', parameters: { duration }, references_used: ['references/base.txt'], warnings: [],
+        }),
+      }),
+    })
+
+    const output = await compiler({
+      skillName: 'h3', rawPrompt: 'Make a 10 second video', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 33,
+    })
+
+    expect(output.result.parameters).toEqual({ duration: 10 })
+
+    duration = { seconds: 10 }
+    await expect(compiler({
+      skillName: 'h3', rawPrompt: 'Make a structured duration video', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 33,
+    })).rejects.toThrow(expect.objectContaining({
+      code: 'SKILL_RESULT_INVALID',
+      message: 'Unsupported or non-scalar parameter: duration',
+    }))
   })
 
   test('rejects combined compiler-bound Skill material over 512 KiB before model or cache access', async () => {

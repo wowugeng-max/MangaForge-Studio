@@ -92,7 +92,7 @@ function compiledSkillResult(overrides: Record<string, any> = {}) {
       mode: overrides.mode || 'text_to_image',
       prompt: overrides.prompt || 'compiled prompt',
       negative_prompt: overrides.negativePrompt || '',
-      parameters: {},
+      parameters: overrides.parameters || {},
       references_used: overrides.references || [],
       warnings: overrides.warnings || [],
       ...(overrides.referenceBindings ? { reference_bindings: overrides.referenceBindings } : {}),
@@ -1155,6 +1155,7 @@ describe('canvas generate route', () => {
           skillName: 'h3-prompt-writing',
           mode: 'image_to_video',
           prompt: 'compiled multi-reference prompt',
+          parameters: { duration: 99 },
           references: ['references/video.md'],
           referenceBindings: input.incomingAssets,
           referenceModeHint: 'FL2VA',
@@ -1192,7 +1193,7 @@ describe('canvas generate route', () => {
         type: 'image_to_video',
         prompt: 'animate both frames',
         skill_name: 'h3-prompt-writing',
-        params: { incoming_assets: incomingAssets },
+        params: { duration: 10, incoming_assets: incomingAssets },
         reference_images: incomingAssets.map(item => ({ ...item, type: undefined })),
       },
     })
@@ -1215,6 +1216,8 @@ describe('canvas generate route', () => {
         source_asset_ids: [42, 402],
       },
     ])
+    expect(compileInput.nodeParams).toMatchObject({ duration: 10 })
+    expect(executeRequest.duration).toBe(10)
     expect(executeRequest.image_url).toBe('/ref-a.png')
     expect(executeRequest.reference_images).toEqual([
       {

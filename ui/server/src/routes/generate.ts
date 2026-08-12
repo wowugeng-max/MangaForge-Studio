@@ -77,7 +77,7 @@ type SkillCompileAudit = {
 const SKILL_MEDIA_MODES = new Set<CanvasMediaMode>([
   'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video',
 ])
-const SKILL_NODE_PARAM_KEYS = new Set(['size', 'aspect_ratio', 'cameraParams', 'customMovements'])
+const SKILL_NODE_PARAM_KEYS = new Set(['size', 'aspect_ratio', 'duration', 'cameraParams', 'customMovements'])
 
 function errorBody(message: unknown, extra: Record<string, any> = {}) {
   const error = String(message)
