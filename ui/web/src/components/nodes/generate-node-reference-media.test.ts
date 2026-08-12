@@ -8,11 +8,11 @@ const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAw
 
 describe('GenerateNode reference media materializer', () => {
   test('materializes nine ordered image references without changing identity, roles, or lineage', async () => {
-    const uploads: string[] = []
+    const uploads: Array<{ content: string; filename: string }> = []
     const materializer = createGenerateNodeReferenceMediaMaterializer({
       fetchBlob: async url => new Blob([url], { type: 'image/png' }),
-      uploadImage: async (_blob, filename) => {
-        uploads.push(filename)
+      uploadImage: async (blob, filename) => {
+        uploads.push({ content: await blob.text(), filename })
         return `/api/assets/media/${filename}`
       },
     })
@@ -33,7 +33,10 @@ describe('GenerateNode reference media materializer', () => {
     const result = await materializer.materializeBindings(references)
 
     expect(result).toHaveLength(9)
-    expect(uploads).toHaveLength(9)
+    expect(uploads).toEqual(originalReferences.map((reference, index) => ({
+      content: reference.url,
+      filename: `reference-${index + 1}.png`,
+    })))
     expect(result).toEqual(originalReferences.map((reference, index) => ({
       ...reference,
       url: `/api/assets/media/reference-${index + 1}.png`,
@@ -76,25 +79,44 @@ describe('GenerateNode reference media materializer', () => {
         return '/api/assets/media/shared.png'
       },
     })
-    const binding = {
-      type: 'image' as const,
-      url: PIXEL,
-      reference_index: 1,
-      reference_id: 'same',
-      reference_role: 'general' as const,
-    }
+    const bindings = [
+      {
+        type: 'image' as const,
+        url: PIXEL,
+        reference_index: 1,
+        reference_id: 'first-binding',
+        reference_role: 'first_frame' as const,
+        source_asset_ids: [11],
+      },
+      {
+        type: 'image' as const,
+        url: PIXEL,
+        reference_index: 2,
+        reference_id: 'second-binding',
+        reference_role: 'character' as const,
+        source_asset_ids: [22],
+      },
+      {
+        type: 'image' as const,
+        url: PIXEL,
+        reference_index: 3,
+        reference_id: 'third-binding',
+        reference_role: 'last_frame' as const,
+        source_asset_ids: [33],
+      },
+    ]
 
     const [first, second] = await Promise.all([
-      materializer.materializeBindings([binding]),
-      materializer.materializeBindings([binding]),
+      materializer.materializeBindings([bindings[0]]),
+      materializer.materializeBindings([bindings[1]]),
     ])
-    const third = await materializer.materializeBindings([binding])
+    const third = await materializer.materializeBindings([bindings[2]])
 
     expect(fetches).toBe(1)
     expect(uploads).toBe(1)
-    expect(first[0].url).toBe('/api/assets/media/shared.png')
-    expect(second).toEqual(first)
-    expect(third).toEqual(first)
+    expect(first).toEqual([{ ...bindings[0], url: '/api/assets/media/shared.png' }])
+    expect(second).toEqual([{ ...bindings[1], url: '/api/assets/media/shared.png' }])
+    expect(third).toEqual([{ ...bindings[2], url: '/api/assets/media/shared.png' }])
   })
 
   test('materializes a Blob URL through the same image upload path', async () => {
