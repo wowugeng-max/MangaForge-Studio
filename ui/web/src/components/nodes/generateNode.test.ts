@@ -18,6 +18,7 @@ import {
   resolveGenerateNodeSourceAssetIds,
   resolveGenerateNodeSourceContent,
 } from './GenerateNode'
+import { collectGenerateNodeActiveKeys } from './generate-node-model'
 import { useCanvasStore } from '../../stores/canvasStore'
 
 async function loadGenerateNodeReferenceApi() {
@@ -2409,13 +2410,54 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Skill compiler source selector', () => {
+  test('collects a supplying active Key beyond an inactive full page without mutating pages', async () => {
+    const pages = [
+      Array.from({ length: 100 }, (_, index) => ({ id: index + 1, is_active: false })),
+      [{ id: 101, is_active: true }],
+    ]
+    const before = JSON.stringify(pages)
+    const calls: Array<{ skip: number; limit: number }> = []
+
+    const result = await collectGenerateNodeActiveKeys({
+      pageSize: 100,
+      fetchPage: async (skip: number, limit: number) => {
+        calls.push({ skip, limit })
+        return pages[skip === 0 ? 0 : 1]
+      },
+    })
+
+    expect(calls).toEqual([{ skip: 0, limit: 100 }, { skip: 100, limit: 100 }])
+    expect(result).toEqual([{ id: 101, is_active: true }])
+    expect(JSON.stringify(pages)).toBe(before)
+  })
+
+  test('collects more than one full active Key page in stable order', async () => {
+    const pages = [
+      Array.from({ length: 100 }, (_, index) => ({ id: index + 1, is_active: true })),
+      [{ id: 101, is_active: true }, { id: 102, is_active: true }],
+    ]
+    const calls: Array<{ skip: number; limit: number }> = []
+
+    const result = await collectGenerateNodeActiveKeys({
+      pageSize: 100,
+      fetchPage: async (skip: number, limit: number) => {
+        calls.push({ skip, limit })
+        return pages[skip === 0 ? 0 : 1]
+      },
+    })
+
+    expect(calls).toEqual([{ skip: 0, limit: 100 }, { skip: 100, limit: 100 }])
+    expect(result.map((key: { id: number }) => key.id)).toEqual(Array.from({ length: 102 }, (_, index) => index + 1))
+  })
+
   test('waits for settled Key sources before enabling linked Skill compiler selectors', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const keyStateStart = source.indexOf('const [keys, setKeys]')
     const keyStateEnd = source.indexOf('const [allModels, setAllModels]', keyStateStart)
     const keyStateRegion = source.slice(keyStateStart, keyStateEnd)
-    const keyRequestStart = source.indexOf("apiClient.get('/keys/')")
-    const keyRequestEnd = source.indexOf('  }, [])', keyRequestStart)
+    const keyRequestAnchor = source.indexOf("apiClient.get('/keys/'")
+    const keyRequestStart = source.lastIndexOf('useEffect(() => {', keyRequestAnchor)
+    const keyRequestEnd = source.indexOf('  }, [])', keyRequestAnchor)
     const keyRequestRegion = source.slice(keyRequestStart, keyRequestEnd)
     const compilerSelectorStart = source.indexOf('const compilerSelector = useMemo')
     const compilerSelectorEnd = source.indexOf('const renderParams =', compilerSelectorStart)
@@ -2424,9 +2466,16 @@ describe('GenerateNode Skill compiler source selector', () => {
     expect(keyStateStart).toBeGreaterThanOrEqual(0)
     expect(keyStateEnd).toBeGreaterThan(keyStateStart)
     expect(keyStateRegion).toContain('const [compilerKeysLoaded, setCompilerKeysLoaded] = useState(false)')
+    expect(keyRequestAnchor).toBeGreaterThanOrEqual(0)
     expect(keyRequestStart).toBeGreaterThanOrEqual(0)
     expect(keyRequestEnd).toBeGreaterThan(keyRequestStart)
+    expect(keyRequestRegion).toContain('collectGenerateNodeActiveKeys({')
+    expect(keyRequestRegion).toContain("apiClient.get('/keys/', {")
+    expect(keyRequestRegion).toContain('params: { is_active: true, skip, limit },')
     expect(keyRequestRegion).toContain(".catch(() => setKeys([]))\n      .finally(() => setCompilerKeysLoaded(true))")
+    const keysSettledIndex = keyRequestRegion.indexOf('.finally(() => setCompilerKeysLoaded(true))')
+    expect(keysSettledIndex).toBeGreaterThan(keyRequestRegion.indexOf('.catch(() => setKeys([]))'))
+    expect(keyRequestRegion.slice(0, keysSettledIndex)).not.toContain('setCompilerKeysLoaded(true)')
     expect(compilerSelectorStart).toBeGreaterThanOrEqual(0)
     expect(compilerSelectorEnd).toBeGreaterThan(compilerSelectorStart)
     expect(compilerSelectorRegion).toContain(
@@ -2442,18 +2491,31 @@ describe('GenerateNode Skill compiler source selector', () => {
       compilerControlStart,
     )
     const compilerControlRegion = source.slice(compilerControlStart, compilerControlEnd)
+    const sourceSelectStart = compilerControlRegion.indexOf('<Select')
+    const sourceSelectClose = compilerControlRegion.indexOf('/>', sourceSelectStart)
+    const sourceSelectRegion = compilerControlRegion.slice(sourceSelectStart, sourceSelectClose + 2)
+    const modelSelectStart = compilerControlRegion.indexOf('<Select', sourceSelectClose)
+    const modelSelectClose = compilerControlRegion.indexOf('/>', modelSelectStart)
+    const modelSelectRegion = compilerControlRegion.slice(modelSelectStart, modelSelectClose + 2)
 
     expect(compilerControlStart).toBeGreaterThanOrEqual(0)
     expect(compilerControlEnd).toBeGreaterThan(compilerControlStart)
     expect(compilerControlRegion).toContain('<Space.Compact block>')
-    expect(compilerControlRegion).toContain('aria-label="Skill 编译模型来源"')
-    expect(compilerControlRegion).toContain('value={compilerSelector.sourceValue}')
-    expect(compilerControlRegion).toContain('options={compilerSelector.sourceOptions}')
-    expect(compilerControlRegion).toContain('onChange={value => setSkillCompilerModelId(resolveGenerateNodeCompilerModelIdForSource({')
-    expect(compilerControlRegion).toContain('aria-label="Skill 编译模型"')
-    expect(compilerControlRegion).toContain('value={compilerSelector.modelValue}')
-    expect(compilerControlRegion).toContain('options={compilerSelector.modelOptions}')
-    expect(compilerControlRegion).toContain('disabled={compilerSelectorLoading || compilerSelector.modelDisabled}')
+    expect(sourceSelectStart).toBeGreaterThanOrEqual(0)
+    expect(sourceSelectClose).toBeGreaterThan(sourceSelectStart)
+    expect(sourceSelectRegion).toContain('aria-label="Skill 编译模型来源"')
+    expect(sourceSelectRegion).toContain('value={compilerSelector.sourceValue}')
+    expect(sourceSelectRegion).toContain('options={compilerSelector.sourceOptions}')
+    expect(sourceSelectRegion).toContain('loading={compilerSelectorLoading}')
+    expect(sourceSelectRegion).toContain('disabled={compilerSelectorLoading}')
+    expect(sourceSelectRegion).toContain('onChange={value => setSkillCompilerModelId(resolveGenerateNodeCompilerModelIdForSource({')
+    expect(modelSelectStart).toBeGreaterThan(sourceSelectClose)
+    expect(modelSelectClose).toBeGreaterThan(modelSelectStart)
+    expect(modelSelectRegion).toContain('aria-label="Skill 编译模型"')
+    expect(modelSelectRegion).toContain('value={compilerSelector.modelValue}')
+    expect(modelSelectRegion).toContain('options={compilerSelector.modelOptions}')
+    expect(modelSelectRegion).toContain('disabled={compilerSelectorLoading || compilerSelector.modelDisabled}')
+    expect(modelSelectRegion).toContain('onChange={value => setSkillCompilerModelId(Number(value))}')
     expect(source).not.toContain('const compilerModelOptions =')
 
     const ordinarySelectorStart = source.indexOf('placeholder="选择 Key"')

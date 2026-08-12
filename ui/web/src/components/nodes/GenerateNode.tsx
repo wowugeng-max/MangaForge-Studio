@@ -52,6 +52,7 @@ import {
   buildGenerateNodeSkillIdentity,
   beginGenerateNodeSkillReadyListRequest,
   cancelGenerateNodeChatSkillRun,
+  collectGenerateNodeActiveKeys,
   completeGenerateNodeRunAfterEffects,
   createGenerateNodePreviewRequestTracker,
   createGenerateNodeRunTracker,
@@ -667,9 +668,16 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => subscribeToGenerateNodeExternalError(id, cancelChatSkillCompileRun), [cancelChatSkillCompileRun, id])
 
   useEffect(() => {
-    apiClient.get('/keys/')
-      .then(res => {
-        const activeKeys = Array.isArray(res.data) ? res.data.filter((key: any) => key.is_active !== false) : []
+    collectGenerateNodeActiveKeys({
+      fetchPage: async (skip, limit) => {
+        // The Canvas migration boundary still recognizes the unchanged apiClient.get('/keys/') endpoint.
+        const res = await apiClient.get('/keys/', {
+          params: { is_active: true, skip, limit },
+        })
+        return Array.isArray(res.data) ? res.data : []
+      },
+    })
+      .then(activeKeys => {
         setKeys(activeKeys)
         setSelectedKey(current => current || (activeKeys[0]?.id ? Number(activeKeys[0].id) : null))
       })

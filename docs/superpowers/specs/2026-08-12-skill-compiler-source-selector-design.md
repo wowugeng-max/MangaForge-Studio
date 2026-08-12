@@ -119,7 +119,9 @@ source replaces the stale override normally.
 
 GenerateNode already loads the required collections:
 
-- `/keys/` supplies active Key records;
+- `/keys/` is queried with `is_active: true`, `skip`, and `limit`; active Key
+  pages are collected to completion with the server maximum page size (`1000`)
+  before source derivation becomes interactive;
 - `/models/` supplies all active model records;
 - `/skills/settings` supplies `skill_compiler_model_id`.
 
@@ -143,8 +145,10 @@ The existing `Skill 编译模型` label remains. Directly below it:
 - the source select uses a fixed compact width sufficient for a Key description;
 - the model select occupies the remaining width and truncates long labels;
 - both controls use the existing `small` size;
-- loading and disabled behavior continue to follow Skill settings/model loading;
-- the existing missing-compiler validation message remains below the control.
+- both controls remain loading/disabled until the complete Key collection,
+  Skill settings, and compiler models have all settled;
+- the existing missing-compiler validation message remains below the control,
+  but it is not the Key-pagination loading indicator.
 
 The design intentionally does not add a favorite button. Favorites influence
 the automatic choice after a source change but do not hide non-favorite
@@ -165,8 +169,15 @@ new selector, state, API call, or runtime dependency.
 
 ## Error and Loading Behavior
 
-- While Keys/models/settings are loading, the existing loading message remains
-  and the compiler controls do not manufacture a valid selection.
+- While Keys/models/settings are loading, both compiler controls expose their
+  loading state and remain disabled, so a transient incomplete Key collection
+  cannot become interactive.
+- The existing missing-compiler validation text remains governed by its current
+  Skill settings/model conditions; it must not be presented as a Keys-loading
+  message.
+- If Key loading fails, the request still settles the control gate. The empty
+  Key collection then deliberately falls back to legacy Provider/unbound source
+  grouping instead of leaving the controls disabled forever.
 - If a source has no eligible models, it is omitted from source options.
 - If the workspace default is missing or unavailable, Skill preview/run remains
   blocked by the existing `missingEffectiveCompilerModel` logic.
@@ -182,6 +193,8 @@ Implementation follows RED/GREEN TDD cycles.
 
 Pure GenerateNode model tests cover:
 
+- paginated active-Key collection beyond the first page, stable ordering, and
+  input immutability;
 - source labels from Key description, Provider fallback, and Key ID fallback;
 - filtering/grouping eligible models by `api_key_id`;
 - legacy Provider and unbound source groups;
@@ -199,6 +212,8 @@ GenerateNode source/integration tests cover:
 - the old flat `compilerModelOptions` selector is removed;
 - source change updates the model override deterministically;
 - model change updates the existing compiler model ID only;
+- source/model controls wait for complete Keys plus settings/models, while Key
+  failure settles into the documented legacy fallback;
 - the normal execution model selector remains unchanged;
 - no novel-workspace path is modified.
 

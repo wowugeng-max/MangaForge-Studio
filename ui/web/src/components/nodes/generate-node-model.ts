@@ -497,6 +497,21 @@ export function normalizeGenerateNodeCompilerModelId(value: unknown): number | n
   return Number.isSafeInteger(normalized) && normalized >= 0 ? normalized : null
 }
 
+export async function collectGenerateNodeActiveKeys<T extends { is_active?: unknown }>(input: {
+  fetchPage: (skip: number, limit: number) => Promise<readonly T[]>
+  pageSize?: number
+}): Promise<T[]> {
+  const pageSize = input.pageSize ?? 1000
+  const activeKeys: T[] = []
+  let skip = 0
+  while (true) {
+    const page = await input.fetchPage(skip, pageSize)
+    activeKeys.push(...page.filter(key => key?.is_active !== false))
+    if (page.length < pageSize) return activeKeys
+    skip += page.length
+  }
+}
+
 export type GenerateNodeCompilerKey = {
   id: number | string
   description?: string | null

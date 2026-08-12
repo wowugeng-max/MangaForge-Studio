@@ -4,7 +4,7 @@
 
 **Goal:** Replace the Canvas GenerateNode's flat Skill compiler model dropdown with linked source and model selectors that expose the supplying API Key or Provider without changing the persisted compiler-model contract.
 
-**Architecture:** Add a pure selector view-model boundary to `generate-node-model.ts` that normalizes eligible compiler models, groups them by active Key or legacy Provider source, and derives workspace-default, explicit override, and unavailable display states. Keep `GenerateNode.tsx` responsible only for loading existing Key/model/settings data, rendering two Ant Design selects, and translating a source change immediately into the existing `skillCompilerModelId`; no source field is stored or sent to the server.
+**Architecture:** Add a pure selector view-model boundary to `generate-node-model.ts` that normalizes eligible compiler models, groups them by active Key or legacy Provider source, and derives workspace-default, explicit override, and unavailable display states. Keep `GenerateNode.tsx` responsible for collecting every server-filtered active Key page, loading model/settings data, waiting for all three dependencies to settle, rendering two Ant Design selects, and translating a source change immediately into the existing `skillCompilerModelId`; no source field is stored or sent to the server.
 
 **Tech Stack:** React 18, TypeScript, Ant Design 5 `Space.Compact`/`Select`, Bun test, existing Canvas Skill settings and model APIs.
 
@@ -348,6 +348,7 @@ git commit -m "feat: model Skill compiler sources"
 ### Task 2: Wire the linked source and model controls into GenerateNode
 
 **Files:**
+- Modify: `ui/web/src/components/nodes/generate-node-model.ts` near the compiler selector helpers
 - Modify: `ui/web/src/components/nodes/GenerateNode.tsx:700-705`
 - Modify: `ui/web/src/components/nodes/GenerateNode.tsx:1532-1545`
 - Modify: `ui/web/src/components/nodes/GenerateNode.tsx:1932-1941`
@@ -388,7 +389,36 @@ Run: `cd ui/web && bun test src/components/nodes/generateNode.test.ts -t "render
 
 Expected: FAIL because the component still renders one flat `compilerModelOptions` select.
 
-- [ ] **Step 3: Reuse the eligibility helper at the existing model API boundary**
+- [ ] **Step 3: Load complete active Key sources and reuse the eligibility helper**
+
+Add a reusable `collectGenerateNodeActiveKeys` helper in `generate-node-model.ts`.
+It requests pages in order, preserves record order and input immutability, uses
+`1000` as the production default page size, filters inactive defensive input,
+and stops after the first short page.
+
+Replace the single-page Key request with complete server-filtered pagination:
+
+```ts
+collectGenerateNodeActiveKeys({
+  fetchPage: async (skip, limit) => {
+    const res = await apiClient.get('/keys/', {
+      params: { is_active: true, skip, limit },
+    })
+    return Array.isArray(res.data) ? res.data : []
+  },
+})
+  .then(activeKeys => {
+    setKeys(activeKeys)
+    setSelectedKey(current => current || (activeKeys[0]?.id ? Number(activeKeys[0].id) : null))
+  })
+  .catch(() => setKeys([]))
+  .finally(() => setCompilerKeysLoaded(true))
+```
+
+The `.finally` is required: success and failure both settle the compiler-source
+gate. On failure, an empty Key list intentionally yields Provider/unbound legacy
+groups rather than a permanently disabled control. Preserve the ordinary
+default-selected-Key behavior and catch fallback exactly as shown.
 
 In the `/models/` load effect, replace the inline predicate only; keep the request and error/loading behavior unchanged:
 
@@ -407,6 +437,7 @@ Add these values to the existing named import from `./generate-node-model` at th
 
 ```ts
 buildGenerateNodeCompilerSelectorModel,
+collectGenerateNodeActiveKeys,
 isGenerateNodeCompilerModelEligible,
 resolveGenerateNodeCompilerModelIdForSource,
 ```
@@ -424,10 +455,10 @@ const compilerSelector = useMemo(() => buildGenerateNodeCompilerSelectorModel({
   overrideModelId: skillCompilerModelId,
   workspaceDefaultModelId: skillSettings?.skill_compiler_model_id ?? null,
 }), [compilerModels, keys, skillCompilerModelId, skillSettings?.skill_compiler_model_id])
-const compilerSelectorLoading = !skillSettingsLoaded || !compilerModelsLoaded
+const compilerSelectorLoading = !compilerKeysLoaded || !skillSettingsLoaded || !compilerModelsLoaded
 ```
 
-Do not add source state. `compilerSelector.sourceValue` remains derived from the numeric override and the current Key/model data.
+Do not add source state. `compilerSelector.sourceValue` remains derived from the numeric override and the current Key/model data. Both selects stay loading/disabled until complete Keys, Skill settings, and compiler models have settled.
 
 - [ ] **Step 5: Render the compact selectors and map both changes to the existing model ID state**
 
@@ -464,7 +495,7 @@ Replace the existing single `Select` under `Skill 编译模型` with:
 
 Selecting `workspace-default` therefore writes `null`; selecting a concrete source writes its favorite-first model ID; selecting a model continues writing only the numeric `skillCompilerModelId` already persisted and sent by existing code.
 
-- [ ] **Step 6: Run the focused suite and build, then commit the component wiring**
+- [ ] **Step 6: Run the focused suite and build, then commit the final Task 2 correction**
 
 Run:
 
@@ -476,11 +507,15 @@ bun run build
 
 Expected: both commands exit 0. The source integration test sees two linked selects; all existing Skill compile request/persistence tests still pass.
 
-Commit only the component and its test:
+Commit only the five existing feature files:
 
 ```bash
-git add ui/web/src/components/nodes/GenerateNode.tsx ui/web/src/components/nodes/generateNode.test.ts
-git commit -m "feat: link Skill compiler source selector"
+git add docs/superpowers/specs/2026-08-12-skill-compiler-source-selector-design.md \
+  docs/superpowers/plans/2026-08-12-skill-compiler-source-selector.md \
+  ui/web/src/components/nodes/GenerateNode.tsx \
+  ui/web/src/components/nodes/generate-node-model.ts \
+  ui/web/src/components/nodes/generateNode.test.ts
+git commit -m "fix: load all Skill compiler sources"
 ```
 
 ### Task 3: Verify the Canvas-only compatibility boundary
@@ -523,12 +558,12 @@ Run:
 
 ```bash
 git status --short
-git diff --check
+git diff --check origin/main...HEAD
 git diff --stat origin/main...HEAD
 git diff --name-only origin/main...HEAD
 ```
 
-Expected: `git diff --check` exits 0; implementation changes are limited to the two GenerateNode source files, their test, this plan, and the approved design spec. `workspace/assets.json` remains modified but unstaged, and `workspace/.mangaforge/` remains untracked.
+Expected: the range diff check exits 0; implementation changes are limited to the two GenerateNode source files, their test, this plan, and the approved design spec. `workspace/assets.json` remains modified but unstaged, and `workspace/.mangaforge/` remains untracked.
 
 - [ ] **Step 4: Review the acceptance boundary before integration**
 
@@ -537,6 +572,8 @@ Confirm from tests and diff that:
 ```text
 source label precedence = Key description -> Key provider -> Key ID
 eligible compiler model = active && health_status !== disabled && capabilities.chat === true
+active Keys = server-filtered and paginated to completion before selectors are interactive
+Key load failure = settled gate with Provider/unbound legacy fallback
 workspace default = null override + read-only actual model display
 concrete source change = first favorite in server order, otherwise first model
 legacy source = provider group or unbound group
@@ -550,8 +587,24 @@ Expected: every line is satisfied with no new backend endpoint, schema, favorite
 
 ---
 
+## Execution Evidence
+
+- Pure selector model cycle: focused RED `0/9`, focused GREEN `9/9`, then the
+  GenerateNode suite passed `130/130` at that stage.
+- Linked UI cycle: focused RED `0/1`, focused GREEN `1/1`, then the GenerateNode
+  suite passed `131/131`.
+- Keys settled-gate cycle: focused RED `0/1`, focused GREEN `1/1`, then the
+  GenerateNode suite passed `132/132`.
+- Complete-Key pagination cycle: the four-test focused RED run passed `1/4` and
+  failed `3/4` with 130 tests filtered and 33 assertions; focused GREEN passed
+  `4/4` with 130 tests filtered and 46 assertions.
+- Web production builds passed with only the repository's existing dynamic
+  import and chunk-size warnings.
+
+---
+
 ## Plan Self-Review
 
 - Spec coverage: Tasks 1–2 cover source-label precedence, eligible-model filtering, Key/Provider/unbound grouping, Vision labels, workspace inheritance states, stale overrides, deterministic favorite-first selection, compact linked controls, and the unchanged numeric persistence contract. Task 3 covers Canvas-only scope, normal-selector preservation, build/regression checks, and protected local files.
 - Placeholder scan: the plan contains no deferred implementation steps; every RED/GREEN change includes exact tests, implementation, commands, and expected outcomes.
-- Type consistency: `GenerateNodeCompilerSourceValue`, `GenerateNodeCompilerSelectorModel`, `buildGenerateNodeCompilerSelectorModel`, `isGenerateNodeCompilerModelEligible`, and `resolveGenerateNodeCompilerModelIdForSource` use the same names and value shapes in tests, implementation, and component wiring.
+- Type consistency: `collectGenerateNodeActiveKeys`, `GenerateNodeCompilerSourceValue`, `GenerateNodeCompilerSelectorModel`, `buildGenerateNodeCompilerSelectorModel`, `isGenerateNodeCompilerModelEligible`, and `resolveGenerateNodeCompilerModelIdForSource` use the same names and value shapes in tests, implementation, and component wiring.
