@@ -2409,6 +2409,31 @@ describe('GenerateNode Skill review regressions', () => {
 })
 
 describe('GenerateNode Skill compiler source selector', () => {
+  test('waits for settled Key sources before enabling linked Skill compiler selectors', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const keyStateStart = source.indexOf('const [keys, setKeys]')
+    const keyStateEnd = source.indexOf('const [allModels, setAllModels]', keyStateStart)
+    const keyStateRegion = source.slice(keyStateStart, keyStateEnd)
+    const keyRequestStart = source.indexOf("apiClient.get('/keys/')")
+    const keyRequestEnd = source.indexOf('  }, [])', keyRequestStart)
+    const keyRequestRegion = source.slice(keyRequestStart, keyRequestEnd)
+    const compilerSelectorStart = source.indexOf('const compilerSelector = useMemo')
+    const compilerSelectorEnd = source.indexOf('const renderParams =', compilerSelectorStart)
+    const compilerSelectorRegion = source.slice(compilerSelectorStart, compilerSelectorEnd)
+
+    expect(keyStateStart).toBeGreaterThanOrEqual(0)
+    expect(keyStateEnd).toBeGreaterThan(keyStateStart)
+    expect(keyStateRegion).toContain('const [compilerKeysLoaded, setCompilerKeysLoaded] = useState(false)')
+    expect(keyRequestStart).toBeGreaterThanOrEqual(0)
+    expect(keyRequestEnd).toBeGreaterThan(keyRequestStart)
+    expect(keyRequestRegion).toContain(".catch(() => setKeys([]))\n      .finally(() => setCompilerKeysLoaded(true))")
+    expect(compilerSelectorStart).toBeGreaterThanOrEqual(0)
+    expect(compilerSelectorEnd).toBeGreaterThan(compilerSelectorStart)
+    expect(compilerSelectorRegion).toContain(
+      'const compilerSelectorLoading = !compilerKeysLoaded || !skillSettingsLoaded || !compilerModelsLoaded',
+    )
+  })
+
   test('renders linked Skill compiler source and model selectors without changing the ordinary model selector', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const compilerControlStart = source.indexOf('Skill 编译模型</Text>')

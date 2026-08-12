@@ -251,6 +251,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const assets = useAssetLibraryStore(s => s.assets)
   const fetchAssets = useAssetLibraryStore(s => s.fetchAssets)
   const [keys, setKeys] = useState<any[]>([])
+  const [compilerKeysLoaded, setCompilerKeysLoaded] = useState(false)
   const [allModels, setAllModels] = useState<any[]>([])
   const [modelLoading, setModelLoading] = useState(false)
   const [mode, setMode] = useState(data?.mode || 'chat')
@@ -673,6 +674,7 @@ function GenerateNodeImpl(props: NodeProps) {
         setSelectedKey(current => current || (activeKeys[0]?.id ? Number(activeKeys[0].id) : null))
       })
       .catch(() => setKeys([]))
+      .finally(() => setCompilerKeysLoaded(true))
   }, [])
 
   useEffect(() => {
@@ -1538,7 +1540,7 @@ function GenerateNodeImpl(props: NodeProps) {
     overrideModelId: skillCompilerModelId,
     workspaceDefaultModelId: skillSettings?.skill_compiler_model_id ?? null,
   }), [compilerModels, keys, skillCompilerModelId, skillSettings?.skill_compiler_model_id])
-  const compilerSelectorLoading = !skillSettingsLoaded || !compilerModelsLoaded
+  const compilerSelectorLoading = !compilerKeysLoaded || !skillSettingsLoaded || !compilerModelsLoaded
 
   const renderParams = () => {
     const uiParams = selectedModelRecord?.context_ui_params?.[mode]
