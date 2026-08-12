@@ -179,8 +179,14 @@ describe('ComfyForge canvas feature migration', () => {
 
   test('generate node migrates upstream model configuration experience', () => {
     const generateNode = [source('../components/nodes/generate-node-model.ts'), source('../components/nodes/GenerateNode.tsx')].join('\n')
+    const keysRequestStart = generateNode.indexOf("apiClient.get('/keys/', {")
+    const keysRequestEnd = generateNode.indexOf('return Array.isArray(res.data) ? res.data : []', keysRequestStart)
+    const keysRequest = generateNode.slice(keysRequestStart, keysRequestEnd)
 
-    expect(generateNode).toContain("apiClient.get('/keys/')")
+    expect(keysRequestStart).toBeGreaterThanOrEqual(0)
+    expect(keysRequestEnd).toBeGreaterThan(keysRequestStart)
+    expect(keysRequest).toContain("apiClient.get('/keys/', {")
+    expect(keysRequest).toContain('params: { is_active: true, skip, limit },')
     expect(generateNode).toContain('apiClient.get(`/models/?key_id=${selectedKey}&mode=${mode}`)')
     expect(generateNode).toContain('showOnlyFavorites')
     expect(generateNode).toContain('context_ui_params?.[mode]')

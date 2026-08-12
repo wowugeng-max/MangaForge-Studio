@@ -524,6 +524,7 @@ git commit -m "fix: load all Skill compiler sources"
 - Verify: `ui/web/src/components/nodes/generate-node-model.ts`
 - Verify: `ui/web/src/components/nodes/GenerateNode.tsx`
 - Verify: `ui/web/src/components/nodes/generateNode.test.ts`
+- Modify: `ui/web/src/pages/canvasPageMigration.test.ts` for the paginated Key request contract
 - Do not modify: `ui/web/src/pages/novel-workspace/**`
 - Preserve unstaged: `workspace/assets.json`
 - Preserve untracked: `workspace/.mangaforge/`
@@ -563,7 +564,7 @@ git diff --stat origin/main...HEAD
 git diff --name-only origin/main...HEAD
 ```
 
-Expected: the range diff check exits 0; implementation changes are limited to the two GenerateNode source files, their test, this plan, and the approved design spec. `workspace/assets.json` remains modified but unstaged, and `workspace/.mangaforge/` remains untracked.
+Expected: the range diff check exits 0; implementation changes are limited to the two GenerateNode source files, their focused and Canvas migration tests, this plan, and the approved design spec. `workspace/assets.json` remains modified but unstaged, and `workspace/.mangaforge/` remains untracked.
 
 - [ ] **Step 4: Review the acceptance boundary before integration**
 

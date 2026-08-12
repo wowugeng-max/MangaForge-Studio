@@ -670,7 +670,6 @@ function GenerateNodeImpl(props: NodeProps) {
   useEffect(() => {
     collectGenerateNodeActiveKeys({
       fetchPage: async (skip, limit) => {
-        // The Canvas migration boundary still recognizes the unchanged apiClient.get('/keys/') endpoint.
         const res = await apiClient.get('/keys/', {
           params: { is_active: true, skip, limit },
         })
