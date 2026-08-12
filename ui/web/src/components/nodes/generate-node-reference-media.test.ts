@@ -28,18 +28,17 @@ describe('GenerateNode reference media materializer', () => {
           : 'character' as const,
       source_asset_ids: [index + 1, index + 101],
     }))
+    const originalReferences = structuredClone(references)
 
     const result = await materializer.materializeBindings(references)
 
     expect(result).toHaveLength(9)
     expect(uploads).toHaveLength(9)
-    expect(result.map(item => item.url)).toEqual(
-      Array.from({ length: 9 }, (_, index) => `/api/assets/media/reference-${index + 1}.png`),
-    )
-    expect(result.map(({ url: _url, ...item }) => item)).toEqual(
-      references.map(({ url: _url, ...item }) => item),
-    )
-    expect(references[0].url).toBe(`${PIXEL}#1`)
+    expect(result).toEqual(originalReferences.map((reference, index) => ({
+      ...reference,
+      url: `/api/assets/media/reference-${index + 1}.png`,
+    })))
+    expect(references).toEqual(originalReferences)
   })
 
   test('passes through HTTPS and local media URLs without fetching or uploading', async () => {
@@ -65,9 +64,13 @@ describe('GenerateNode reference media materializer', () => {
   })
 
   test('coalesces concurrent duplicate materializations and reuses the settled cache', async () => {
+    let fetches = 0
     let uploads = 0
     const materializer = createGenerateNodeReferenceMediaMaterializer({
-      fetchBlob: async () => new Blob(['pixel'], { type: 'image/png' }),
+      fetchBlob: async () => {
+        fetches += 1
+        return new Blob(['pixel'], { type: 'image/png' })
+      },
       uploadImage: async () => {
         uploads += 1
         return '/api/assets/media/shared.png'
@@ -87,6 +90,7 @@ describe('GenerateNode reference media materializer', () => {
     ])
     const third = await materializer.materializeBindings([binding])
 
+    expect(fetches).toBe(1)
     expect(uploads).toBe(1)
     expect(first[0].url).toBe('/api/assets/media/shared.png')
     expect(second).toEqual(first)
@@ -94,22 +98,33 @@ describe('GenerateNode reference media materializer', () => {
   })
 
   test('materializes a Blob URL through the same image upload path', async () => {
+    const fetchedBlob = new Blob(['pixel'], { type: 'image/webp' })
+    let uploadedBlob: Blob | undefined
     const materializer = createGenerateNodeReferenceMediaMaterializer({
       fetchBlob: async url => {
         expect(url).toBe('blob:https://mangaforge.local/reference')
-        return new Blob(['pixel'], { type: 'image/webp' })
+        return fetchedBlob
       },
-      uploadImage: async (_blob, filename) => `/api/assets/media/${filename}`,
+      uploadImage: async (blob, filename) => {
+        uploadedBlob = blob
+        return `/api/assets/media/${filename}`
+      },
     })
 
     expect(await materializer.materializeUrl('blob:https://mangaforge.local/reference', 4))
       .toBe('/api/assets/media/reference-4.webp')
+    expect(uploadedBlob).toBe(fetchedBlob)
+    expect(uploadedBlob?.type).toBe('image/webp')
   })
 
   test('fails closed with a typed error for a non-image fetched Blob', async () => {
+    let uploads = 0
     const materializer = createGenerateNodeReferenceMediaMaterializer({
       fetchBlob: async () => new Blob(['bad'], { type: 'text/plain' }),
-      uploadImage: async () => '/unexpected',
+      uploadImage: async () => {
+        uploads += 1
+        return '/unexpected'
+      },
     })
 
     const operation = materializer.materializeUrl(PIXEL, 1)
@@ -117,6 +132,7 @@ describe('GenerateNode reference media materializer', () => {
     await expect(operation).rejects.toMatchObject({
       code: 'REFERENCE_MEDIA_MATERIALIZATION_FAILED',
     })
+    expect(uploads).toBe(0)
   })
 
   test('propagates upload failure as a typed failure and never returns the original Data URL', async () => {
