@@ -22,11 +22,12 @@ export function isGenerateNodeMaterializableImageUrl(value: unknown): boolean {
 const WORKSPACE_MEDIA_PREFIX = '/api/assets/media/'
 
 function isWorkspaceMediaUrl(value: unknown): value is string {
-  if (typeof value !== 'string' || value.trim() !== value || !value.startsWith(WORKSPACE_MEDIA_PREFIX)) {
+  if (typeof value !== 'string' || /[\u0000-\u0020]/.test(value) || !value.startsWith(WORKSPACE_MEDIA_PREFIX)) {
     return false
   }
 
   try {
+    decodeURIComponent(value)
     const base = new URL('https://workspace.invalid')
     const parsed = new URL(value, base)
     return parsed.origin === base.origin

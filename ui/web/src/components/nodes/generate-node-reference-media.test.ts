@@ -180,6 +180,30 @@ describe('GenerateNode reference media materializer', () => {
     expect(binding.url).toBe(PIXEL)
   })
 
+  test.each([
+    ['ASCII control whitespace', '/api/assets/media/a\tb.png'],
+    ['invalid percent encoding', '/api/assets/media/%'],
+  ])('rejects a materialized URL with %s without caching it', async (_label, uploadedUrl) => {
+    let uploads = 0
+    const materializer = createGenerateNodeReferenceMediaMaterializer({
+      fetchBlob: async () => new Blob(['pixel'], { type: 'image/png' }),
+      uploadImage: async () => {
+        uploads += 1
+        return uploadedUrl
+      },
+    })
+
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const operation = materializer.materializeUrl(PIXEL, 6)
+      await expect(operation).rejects.toBeInstanceOf(GenerateNodeReferenceMediaError)
+      await expect(operation).rejects.toMatchObject({
+        code: 'REFERENCE_MEDIA_MATERIALIZATION_FAILED',
+        referenceIndex: 6,
+      })
+    }
+    expect(uploads).toBe(2)
+  })
+
   test('clears a failed pending operation so a later retry can upload', async () => {
     let attempts = 0
     const materializer = createGenerateNodeReferenceMediaMaterializer({
