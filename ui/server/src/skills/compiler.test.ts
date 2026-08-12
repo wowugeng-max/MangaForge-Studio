@@ -604,7 +604,7 @@ describe('prompt compiler', () => {
     ])
   })
 
-  test('does not treat H3 sub-mode aliases as generic Canvas media modes', async () => {
+  test('does not let model-authored mode control generic Canvas routing', async () => {
     const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
     await mkdir(join(root, 'references'))
     await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
@@ -623,10 +623,11 @@ describe('prompt compiler', () => {
       },
     })
 
-    await expect(compiler({
+    const output = await compiler({
       skillName: 'other-video-prompt', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
       activeWorkspace: root, compilerModelId: 22,
-    })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_MODE_INCOMPATIBLE' }))
+    })
+    expect(output.result.mode).toBe('text_to_video')
     expect(JSON.stringify(requests[0].messages[1].content)).not.toContain('REFERENCE MODE HINT')
   })
 
@@ -751,6 +752,10 @@ describe('prompt compiler', () => {
       mode: 'text_to_video',
       prompt: 'compiled prompt',
     })
+    const system = String(calls[0].messages[0].content)
+    expect(system).toContain('skill_name="h3"')
+    expect(system).toContain(`skill_version="${'a'.repeat(40)}"`)
+    expect(system).toContain('mode="text_to_video"')
   })
 
   test('builds bounded request and validates a structured result', async () => {
