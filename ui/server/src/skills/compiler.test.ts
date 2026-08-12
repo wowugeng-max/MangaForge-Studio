@@ -717,12 +717,40 @@ describe('prompt compiler', () => {
     expect(serialized).toContain('image_url')
   })
 
-  test('rejects a result version that is not the locked revision', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-'))
-    await mkdir(join(root, 'references'))
-    await writeFile(join(root, 'references/base.txt'), 'BASE_GUIDE')
-    const compiler = createPromptCompiler({ registry: { resolve: async () => skill(root) } as any, readModels: async () => [{ id: 11, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any], executeWithRuntimeModel: async () => ({ content: JSON.stringify({ skill_name: 'h3', skill_version: 'other', mode: 'text_to_video', prompt: 'ok', negative_prompt: '', parameters: {}, references_used: [], warnings: [] }) }) })
-    await expect(compiler({ skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {}, activeWorkspace: root, compilerModelId: 11 })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_RESULT_INVALID' }))
+  test('uses resolved Skill metadata when the model omits or invents provenance fields', async () => {
+    const root = await compilerRoot()
+    const calls: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 11, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        calls.push(request)
+        return {
+          content: JSON.stringify({
+            skill_version: 'model-invented-version',
+            mode: 'model-invented-mode',
+            prompt: 'compiled prompt',
+            negative_prompt: '',
+            parameters: {},
+            references_used: ['references/base.txt'],
+            warnings: [],
+          }),
+        }
+      },
+    })
+
+    const output = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 11,
+    })
+
+    expect(calls).toHaveLength(1)
+    expect(output.result).toMatchObject({
+      skill_name: 'h3',
+      skill_version: 'a'.repeat(40),
+      mode: 'text_to_video',
+      prompt: 'compiled prompt',
+    })
   })
 
   test('builds bounded request and validates a structured result', async () => {
