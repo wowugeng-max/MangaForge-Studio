@@ -33,10 +33,12 @@ describe('GenerateNode reference media materializer', () => {
     const result = await materializer.materializeBindings(references)
 
     expect(result).toHaveLength(9)
-    expect(uploads).toEqual(originalReferences.map((reference, index) => ({
-      content: reference.url,
-      filename: `reference-${index + 1}.png`,
-    })))
+    expect([...uploads].sort((left, right) => left.filename.localeCompare(right.filename))).toEqual(
+      originalReferences.map((reference, index) => ({
+        content: reference.url,
+        filename: `reference-${index + 1}.png`,
+      })),
+    )
     expect(result).toEqual(originalReferences.map((reference, index) => ({
       ...reference,
       url: `/api/assets/media/reference-${index + 1}.png`,
