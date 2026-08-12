@@ -30,6 +30,7 @@ import { pickMediaResultContent } from '../../utils/mediaResult'
 import {
   createGenerateNodeReferenceMediaMaterializer,
   GenerateNodeReferenceMediaError,
+  normalizeGenerateNodeUploadedMediaPath,
 } from './generate-node-reference-media'
 
 import {
@@ -383,7 +384,7 @@ function GenerateNodeImpl(props: NodeProps) {
         const response = await apiClient.post('/assets/upload/image', formData)
         const filePath = response.data?.file_path
         if (!filePath) throw new Error('Reference media upload response is missing file_path')
-        return normalizeGenerateNodeImageUrl(String(filePath))
+        return normalizeGenerateNodeUploadedMediaPath(filePath)
       },
     })
   }

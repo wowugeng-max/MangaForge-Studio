@@ -1,12 +1,37 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtemp, rm } from 'fs/promises'
+import { tmpdir } from 'os'
+import { join } from 'path'
 import {
   createGenerateNodeReferenceMediaMaterializer,
   GenerateNodeReferenceMediaError,
+  normalizeGenerateNodeUploadedMediaPath,
 } from './generate-node-reference-media'
+import { uploadAssetBuffer } from '../../../../server/src/asset-upload'
+import { readAssetMediaFile } from '../../../../server/src/asset-media'
+import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
 const PIXEL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII='
 
 describe('GenerateNode reference media materializer', () => {
+  test('keeps uploaded absolute paths readable through a proxy-safe media route', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-reference-media-'))
+    try {
+      const uploadedFilePath = await uploadAssetBuffer(workspace, 'materialized.png', Buffer.from('image-bytes'))
+      const persistedPath = normalizeGenerateNodeUploadedMediaPath(uploadedFilePath)
+      expect(persistedPath).toBe(`/api/assets/media/${encodeURIComponent(uploadedFilePath)}`)
+      expect(buildAssetMediaUrl(persistedPath, 'https://studio.example/proxy/api')).toBe(
+        `https://studio.example/proxy/api/assets/media/${encodeURIComponent(uploadedFilePath)}`,
+      )
+
+      const mediaPath = decodeURIComponent(persistedPath.slice('/api/assets/media/'.length))
+      const bytes = await readAssetMediaFile(mediaPath, workspace)
+      expect(Buffer.from(bytes).toString('utf8')).toBe('image-bytes')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+
   test('materializes nine ordered image references without changing identity, roles, or lineage', async () => {
     const uploads: Array<{ content: string; filename: string }> = []
     const materializer = createGenerateNodeReferenceMediaMaterializer({

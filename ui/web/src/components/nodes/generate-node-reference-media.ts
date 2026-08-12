@@ -21,6 +21,13 @@ export function isGenerateNodeMaterializableImageUrl(value: unknown): boolean {
 
 const WORKSPACE_MEDIA_PREFIX = '/api/assets/media/'
 
+export function normalizeGenerateNodeUploadedMediaPath(value: unknown): string {
+  const filePath = String(value || '').trim()
+  if (!filePath) return ''
+  if (filePath.startsWith(WORKSPACE_MEDIA_PREFIX)) return filePath
+  return `${WORKSPACE_MEDIA_PREFIX}${encodeURIComponent(filePath)}`
+}
+
 function isWorkspaceMediaUrl(value: unknown): value is string {
   if (typeof value !== 'string' || /[\u0000-\u0020]/.test(value) || !value.startsWith(WORKSPACE_MEDIA_PREFIX)) {
     return false
