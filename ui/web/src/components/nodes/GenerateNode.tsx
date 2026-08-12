@@ -28,6 +28,10 @@ import { NodeConfigToolbar } from './NodeConfigToolbar'
 import { expandFissionAndDistribute } from '../../pages/canvasFission'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
+import {
+  createGenerateNodeReferenceMediaMaterializer,
+  GenerateNodeReferenceMediaError,
+} from './generate-node-reference-media'
 
 import {
   DEFAULT_ROLE,
@@ -220,6 +224,26 @@ function generateNodeReferenceValidationFromError(error: unknown): GenerateNodeR
   }
 }
 
+function formatGenerateNodeReferenceMediaError(error: unknown): Pick<CanvasSkillApiError, 'error_code' | 'detail'> {
+  if (error instanceof GenerateNodeReferenceMediaError) {
+    const cause = error.cause as any
+    const causeDetail = String(
+      cause?.response?.data?.detail
+      || cause?.response?.data?.error
+      || cause?.message
+      || '',
+    )
+    return {
+      error_code: error.code,
+      detail: [error.message, causeDetail].filter(Boolean).join(': '),
+    }
+  }
+  return {
+    error_code: 'REFERENCE_MEDIA_MATERIALIZATION_FAILED',
+    detail: String((error as any)?.message || error || '参考图片固化失败'),
+  }
+}
+
 export function subscribeToGenerateNodeExternalError(nodeId: string, onExternalError: () => void) {
   return useCanvasStore.subscribe((state, previousState) => {
     if (
@@ -346,6 +370,37 @@ function GenerateNodeImpl(props: NodeProps) {
   ))
   const referenceBindingsRef = useRef(referenceBindings)
   referenceBindingsRef.current = referenceBindings
+  const referenceMediaMaterializerRef = useRef<ReturnType<typeof createGenerateNodeReferenceMediaMaterializer> | null>(null)
+  if (referenceMediaMaterializerRef.current === null) {
+    referenceMediaMaterializerRef.current = createGenerateNodeReferenceMediaMaterializer({
+      fetchBlob: async url => {
+        const response = await fetch(url)
+        if (!response.ok) throw new Error(`Reference media fetch failed with status ${response.status}`)
+        return response.blob()
+      },
+      uploadImage: async (blob, filename) => {
+        const formData = new FormData()
+        formData.append('file', blob, filename)
+        const response = await apiClient.post('/assets/upload/image', formData)
+        const filePath = response.data?.file_path
+        if (!filePath) throw new Error('Reference media upload response is missing file_path')
+        return normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))
+      },
+    })
+  }
+  const materializeExecutionReferenceBindings = async (
+    bindings: readonly GenerateNodeReferenceBinding[],
+  ): Promise<GenerateNodeReferenceBinding[]> => (
+    referenceMediaMaterializerRef.current!.materializeBindings(bindings)
+  )
+  const materializeGeneratedImageContent = async (content: string): Promise<string> => {
+    const generatedResultMode = String(result?.source_mode || mode)
+    if (/^data:image\//i.test(content)) return referenceMediaMaterializerRef.current!.materializeUrl(content)
+    if ((generatedResultMode === 'text_to_image' || generatedResultMode === 'image_to_image') && /^blob:/i.test(content)) {
+      return referenceMediaMaterializerRef.current!.materializeUrl(content)
+    }
+    return content
+  }
   const generateRunTrackerRef = useRef(createGenerateNodeRunTracker())
   const chatSkillCompileRunTokenRef = useRef<GenerateNodeRunToken | null>(null)
   const reconciledIncomingFingerprintRef = useRef(incomingContext.fingerprint)
@@ -690,6 +745,7 @@ function GenerateNodeImpl(props: NodeProps) {
       generateNodeMountedRef.current = false
       skillPackInstallRequestRef.current += 1
       skillListRequestCoordinatorRef.current.invalidate()
+      skillPreviewRequestTrackerRef.current.invalidate()
     }
   }, [])
 
@@ -835,6 +891,17 @@ function GenerateNodeImpl(props: NodeProps) {
     params,
   })
   compileInputFingerprintRef.current = compileInputFingerprint
+  const executionInputFingerprint = JSON.stringify({
+    compileInputFingerprint,
+    executionCompatibilityContextFingerprint,
+    routingStrategy,
+    selectedRolePrompt,
+    systemPromptOverride: data?._systemPromptOverride,
+    temperature,
+    ratioSize,
+  })
+  const executionInputFingerprintRef = useRef(executionInputFingerprint)
+  executionInputFingerprintRef.current = executionInputFingerprint
 
   useEffect(() => {
     const previous = previousCompileInputFingerprintRef.current
@@ -915,13 +982,15 @@ function GenerateNodeImpl(props: NodeProps) {
     setSkillPreviewLoading(true)
     setSkillPreviewError(null)
     try {
+      const materializedPreviewAssets = await materializeExecutionReferenceBindings(previewAssets)
+      if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
       const res = await compileSkillPreview(buildGenerateNodeSkillCompileRequest({
         skillName: effectiveSkillName,
         packId: effectiveSkillPackId,
         revision: effectiveSkillRevision,
         prompt,
         mode: effectiveSkillCompileMode as GenerateNodeSkillTargetMode,
-        references: previewAssets,
+        references: materializedPreviewAssets,
         nodeParams: skillNodeParams(),
         arguments: effectiveSkillArguments,
         compilerModelId: effectiveCompilerModelId,
@@ -929,7 +998,7 @@ function GenerateNodeImpl(props: NodeProps) {
       if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
       const audit = normalizeGenerateNodeSkillCompileAudit({
         response: res.data,
-        executionReferences: previewAssets,
+        executionReferences: materializedPreviewAssets,
         packSource: effectiveSkill?.sourceUrl,
         compilerModelId: effectiveCompilerModelId,
       })
@@ -948,6 +1017,12 @@ function GenerateNodeImpl(props: NodeProps) {
       message.success(res.data.cached ? '已复用 Skill 编译缓存' : 'Skill 提示词编译完成')
     } catch (error: any) {
       if (!skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)) return
+      if (error instanceof GenerateNodeReferenceMediaError) {
+        const materializationError = formatGenerateNodeReferenceMediaError(error)
+        setSkillPreviewError(materializationError)
+        message.error(`${materializationError.error_code}: ${materializationError.detail}`)
+        return
+      }
       const body = (error?.response?.data || {}) as Partial<CanvasSkillApiError>
       setSkillPreviewError({
         error_code: String(body.error_code || 'SKILL_COMPILE_FAILED'),
@@ -1005,7 +1080,7 @@ function GenerateNodeImpl(props: NodeProps) {
     packet?.data?.result?.content != null
   )
 
-  const finishGeneration = (packet: any, runToken: GenerateNodeRunToken) => {
+  const finishGeneration = (packet: any, runToken: GenerateNodeRunToken, executionMode: string) => {
     if (!generateRunTrackerRef.current.isCurrent(runToken)) return
     const currentNodeData = useCanvasStore.getState().nodes.find(node => node.id === id)?.data || data
     const expectedCountRaw = currentNodeData?._fissionExpectedCount
@@ -1023,7 +1098,10 @@ function GenerateNodeImpl(props: NodeProps) {
     const frozenReferenceBindings = resultReferenceAudit && !resultReferenceAudit.validationError
       ? resultReferenceAudit.bindings
       : activeRunReferenceBindings
-    const finalResult = freezeGenerateNodeExecutionReferences(packetResult, frozenReferenceBindings)
+    const finalResult = freezeGenerateNodeExecutionReferences({
+      ...packetResult,
+      source_mode: executionMode,
+    }, frozenReferenceBindings)
     const compilerOwnedBindings = finalResult.reference_bindings
     const finalSkillPreviewCached = resolveGenerateNodeChatSkillPreviewCached({
       isChatSkillCompileOnly,
@@ -1135,7 +1213,7 @@ function GenerateNodeImpl(props: NodeProps) {
     sseClientRef.current = null
   }
 
-  const handleSSEMessage = (msg: SSEMessage, runToken: GenerateNodeRunToken) => {
+  const handleSSEMessage = (msg: SSEMessage, runToken: GenerateNodeRunToken, executionMode: string) => {
     if (!generateRunTrackerRef.current.isCurrent(runToken)) return
     if (msg.type === 'status') {
       setProgressMsg(String(msg.message || msg.progress || '云端正在生成...'))
@@ -1143,7 +1221,7 @@ function GenerateNodeImpl(props: NodeProps) {
     }
     if (msg.type === 'result') {
       try {
-        finishGeneration(msg.data ?? msg.result ?? msg, runToken)
+        finishGeneration(msg.data ?? msg.result ?? msg, runToken, executionMode)
       } catch (error) {
         failGeneration(error, runToken)
       }
@@ -1182,7 +1260,19 @@ function GenerateNodeImpl(props: NodeProps) {
     if (isChatSkillCompileOnly) {
       const executableReferenceBindings = prepareReferenceBindingsForExecution()
       if (executableReferenceBindings === null) return
-      const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(executableReferenceBindings)
+      const runInputFingerprint = executionInputFingerprint
+      let materializedReferenceBindings: GenerateNodeReferenceBinding[]
+      try {
+        materializedReferenceBindings = await materializeExecutionReferenceBindings(executableReferenceBindings)
+      } catch (error) {
+        if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return
+        const materializationError = formatGenerateNodeReferenceMediaError(error)
+        setNodeStatus(id, 'error')
+        message.error(`${materializationError.error_code}: ${materializationError.detail}`)
+        return
+      }
+      if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return
+      const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(materializedReferenceBindings)
       const runToken = generateRunTrackerRef.current.start(executionReferenceBindings)
       if (!runToken) return message.info('当前节点已有生成任务运行中')
       const runCompileFingerprint = compileInputFingerprint
@@ -1229,7 +1319,7 @@ function GenerateNodeImpl(props: NodeProps) {
           }
           return
         }
-        finishGeneration(outcome.packet, runToken)
+        finishGeneration(outcome.packet, runToken, mode)
       } catch (error: any) {
         failGeneration(error, runToken)
       }
@@ -1241,7 +1331,19 @@ function GenerateNodeImpl(props: NodeProps) {
     }
     const executableReferenceBindings = prepareReferenceBindingsForExecution()
     if (executableReferenceBindings === null) return
-    const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(executableReferenceBindings)
+    const runInputFingerprint = executionInputFingerprint
+    let materializedReferenceBindings: GenerateNodeReferenceBinding[]
+    try {
+      materializedReferenceBindings = await materializeExecutionReferenceBindings(executableReferenceBindings)
+    } catch (error) {
+      if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return
+      const materializationError = formatGenerateNodeReferenceMediaError(error)
+      setNodeStatus(id, 'error')
+      message.error(`${materializationError.error_code}: ${materializationError.detail}`)
+      return
+    }
+    if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return
+    const executionReferenceBindings = buildGenerateNodeCanonicalReferenceBindings(materializedReferenceBindings)
     const runToken = generateRunTrackerRef.current.start(executionReferenceBindings)
     if (!runToken) return message.info('当前节点已有生成任务运行中')
     setGenerating(true)
@@ -1251,7 +1353,7 @@ function GenerateNodeImpl(props: NodeProps) {
 
     try {
       sseClientRef.current?.disconnect()
-      const sseClient = createSSEClient(id, msg => handleSSEMessage(msg, runToken))
+      const sseClient = createSSEClient(id, msg => handleSSEMessage(msg, runToken, mode))
       sseClientRef.current = sseClient
       await sseClient.connect()
       if (!generateRunTrackerRef.current.isCurrent(runToken)) return
@@ -1266,7 +1368,7 @@ function GenerateNodeImpl(props: NodeProps) {
         return
       }
 
-      finishGeneration(res.data, runToken)
+      finishGeneration(res.data, runToken, mode)
     } catch (error: any) {
       failGeneration(error, runToken)
     }
@@ -1290,10 +1392,12 @@ function GenerateNodeImpl(props: NodeProps) {
   const handleSaveToAsset = async () => {
     if (!result?.content) return
     const savedReferenceBindings = resolveGenerateNodeResultReferenceBindings(result)
+    const generatedResultMode = String(result?.source_mode || mode)
     try {
+      const persistedResultContent = await materializeGeneratedImageContent(String(result.content))
       await apiClient.post('/assets/', buildGenerateNodeAssetPayload({
-        resultContent: String(result.content),
-        mode,
+        resultContent: persistedResultContent,
+        mode: generatedResultMode,
         prompt: String(result?.raw_prompt || data?._finalSourcePrompt || prompt),
         selectedModel,
         provider: resolveProvider(),
@@ -1323,8 +1427,14 @@ function GenerateNodeImpl(props: NodeProps) {
       }))
       message.success('已携带溯源信息固化到资产库！')
       if (projectId) await fetchAssets(projectId)
-    } catch {
-      message.error('入库失败')
+    } catch (error) {
+      const detail = error instanceof GenerateNodeReferenceMediaError
+        ? (() => {
+            const materializationError = formatGenerateNodeReferenceMediaError(error)
+            return `${materializationError.error_code}: ${materializationError.detail}`
+          })()
+        : String((error as any)?.response?.data?.detail || (error as any)?.response?.data?.error || (error as any)?.message || error || '未知错误')
+      message.error(`入库失败: ${detail}`)
     }
   }
 

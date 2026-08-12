@@ -32,6 +32,163 @@ async function loadGenerateNodeCompilerSelectorApi() {
 }
 
 describe('GenerateNode migration behavior', () => {
+  test('wires one stable reference-media materializer through every request and save boundary', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const imports = source.slice(0, source.indexOf('const { TextArea }'))
+    const componentSetup = source.slice(source.indexOf('function GenerateNodeImpl'), source.indexOf('const cancelChatSkillCompileRun'))
+    const previewSource = source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))
+    const handleRunSource = source.slice(source.indexOf('const handleRun = async () => {'), source.indexOf('useEffect(() => {', source.indexOf('const handleRun = async () => {')))
+    const chatStart = handleRunSource.indexOf('if (isChatSkillCompileOnly) {')
+    const formalStart = handleRunSource.indexOf('if (!selectedKey || !selectedModel)')
+    const chatSource = handleRunSource.slice(chatStart, formalStart)
+    const formalSource = handleRunSource.slice(formalStart)
+    const saveSource = source.slice(source.indexOf('const handleSaveToAsset ='), source.indexOf('const commitReferenceBindings =', source.indexOf('const handleSaveToAsset =')))
+    const mountLifecycleStart = source.indexOf('useEffect(() => {\n    generateNodeMountedRef.current = true')
+    const mountLifecycleSource = source.slice(mountLifecycleStart, source.indexOf('useEffect(() => {', mountLifecycleStart + 1))
+
+    expect(imports).toContain('createGenerateNodeReferenceMediaMaterializer')
+    expect(imports).toContain('GenerateNodeReferenceMediaError')
+    expect(imports).toContain("from './generate-node-reference-media'")
+    expect(componentSetup).toContain('const referenceMediaMaterializerRef = useRef')
+    expect(componentSetup).toContain('if (referenceMediaMaterializerRef.current === null)')
+    expect(componentSetup).toContain('referenceMediaMaterializerRef.current = createGenerateNodeReferenceMediaMaterializer({')
+    expect(componentSetup).toContain('const response = await fetch(url)')
+    expect(componentSetup).toContain('if (!response.ok) throw new Error(`Reference media fetch failed with status ${response.status}`)')
+    expect(componentSetup).toContain('return response.blob()')
+    expect(componentSetup).toContain("formData.append('file', blob, filename)")
+    expect(componentSetup).toContain("apiClient.post('/assets/upload/image', formData)")
+    expect(componentSetup).toContain('response.data?.file_path')
+    expect(componentSetup).toContain('normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))')
+    expect(componentSetup).not.toContain("'Content-Type': 'multipart/form-data'")
+    expect(componentSetup).toContain('const materializeExecutionReferenceBindings = async')
+    expect(componentSetup).toContain('const materializeGeneratedImageContent = async')
+    expect(componentSetup).toContain("if (/^data:image\\//i.test(content)) return referenceMediaMaterializerRef.current!.materializeUrl(content)")
+    expect(componentSetup).toContain("if ((generatedResultMode === 'text_to_image' || generatedResultMode === 'image_to_image') && /^blob:/i.test(content))")
+    expect(componentSetup).toContain('return content')
+
+    const previewPrepare = previewSource.indexOf('const previewAssets = prepareReferenceBindingsForExecution()')
+    const previewStart = previewSource.indexOf('skillPreviewRequestTrackerRef.current.start(compileInputFingerprint)')
+    const previewMaterialize = previewSource.indexOf('await materializeExecutionReferenceBindings(previewAssets)')
+    const previewCurrentAfterMaterialize = previewSource.indexOf('skillPreviewRequestTrackerRef.current.isCurrent(previewRequest, compileInputFingerprintRef.current)', previewMaterialize)
+    const previewCompile = previewSource.indexOf('compileSkillPreview(buildGenerateNodeSkillCompileRequest({')
+    expect(previewPrepare).toBeGreaterThan(-1)
+    expect(previewPrepare).toBeLessThan(previewStart)
+    expect(previewStart).toBeLessThan(previewMaterialize)
+    expect(previewMaterialize).toBeLessThan(previewCurrentAfterMaterialize)
+    expect(previewCurrentAfterMaterialize).toBeLessThan(previewCompile)
+    expect(previewSource).toContain('references: materializedPreviewAssets')
+    expect(previewSource).toContain('executionReferences: materializedPreviewAssets')
+    expect(mountLifecycleSource).toContain('skillPreviewRequestTrackerRef.current.invalidate()')
+
+    const chatPrepare = chatSource.indexOf('const executableReferenceBindings = prepareReferenceBindingsForExecution()')
+    const chatMaterialize = chatSource.indexOf('await materializeExecutionReferenceBindings(executableReferenceBindings)')
+    const chatCanonicalize = chatSource.indexOf('buildGenerateNodeCanonicalReferenceBindings(materializedReferenceBindings)')
+    const chatCurrentAfterMaterialize = chatSource.indexOf('if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return', chatMaterialize)
+    const chatRunStart = chatSource.indexOf('generateRunTrackerRef.current.start(executionReferenceBindings)')
+    const chatCompiler = chatSource.indexOf('runGenerateNodeChatSkillCompilation({')
+    expect(chatPrepare).toBeGreaterThan(-1)
+    expect(chatPrepare).toBeLessThan(chatMaterialize)
+    expect(chatMaterialize).toBeLessThan(chatCanonicalize)
+    expect(chatCanonicalize).toBeLessThan(chatRunStart)
+    expect(chatRunStart).toBeLessThan(chatCompiler)
+    expect(chatSource).toContain('const runInputFingerprint = executionInputFingerprint')
+    expect(chatCurrentAfterMaterialize).toBeGreaterThan(chatMaterialize)
+    expect(chatCurrentAfterMaterialize).toBeLessThan(chatCanonicalize)
+    expect(chatSource).toContain('references: executionReferenceBindings')
+    expect(chatSource).toContain('executionReferences: executionReferenceBindings')
+
+    const formalPrepare = formalSource.indexOf('const executableReferenceBindings = prepareReferenceBindingsForExecution()')
+    const formalMaterialize = formalSource.indexOf('await materializeExecutionReferenceBindings(executableReferenceBindings)')
+    const formalCanonicalize = formalSource.indexOf('buildGenerateNodeCanonicalReferenceBindings(materializedReferenceBindings)')
+    const formalCurrentAfterMaterialize = formalSource.indexOf('if (!generateNodeMountedRef.current || executionInputFingerprintRef.current !== runInputFingerprint) return', formalMaterialize)
+    const formalRunStart = formalSource.indexOf('generateRunTrackerRef.current.start(executionReferenceBindings)')
+    const formalSse = formalSource.indexOf('createSSEClient')
+    const formalPayload = formalSource.indexOf('buildPayload(executionReferenceBindings)')
+    const formalTransport = formalSource.indexOf("url: '/generate'")
+    expect(formalPrepare).toBeGreaterThan(-1)
+    expect(formalPrepare).toBeLessThan(formalMaterialize)
+    expect(formalMaterialize).toBeLessThan(formalCanonicalize)
+    expect(formalCanonicalize).toBeLessThan(formalRunStart)
+    expect(formalRunStart).toBeLessThan(formalSse)
+    expect(formalMaterialize).toBeLessThan(formalTransport)
+    expect(formalPayload).toBeGreaterThan(formalSse)
+    expect(formalPayload).toBeLessThan(formalTransport)
+    expect(formalSource).toContain('const runInputFingerprint = executionInputFingerprint')
+    expect(formalCurrentAfterMaterialize).toBeGreaterThan(formalMaterialize)
+    expect(formalCurrentAfterMaterialize).toBeLessThan(formalCanonicalize)
+
+    const saveMaterialize = saveSource.indexOf('await materializeGeneratedImageContent(String(result.content))')
+    const savePost = saveSource.indexOf("apiClient.post('/assets/'")
+    expect(saveMaterialize).toBeGreaterThan(-1)
+    expect(saveMaterialize).toBeLessThan(savePost)
+    expect(saveSource).toContain('resultContent: persistedResultContent')
+    expect(saveSource).toContain('const generatedResultMode = String(result?.source_mode || mode)')
+    expect(saveSource).toContain('mode: generatedResultMode')
+
+    const finishSource = source.slice(source.indexOf('const finishGeneration ='), source.indexOf('const failGeneration ='))
+    expect(finishSource).toContain('source_mode: executionMode')
+  })
+
+  test('surfaces materialization failures and never falls back to Base64 request payloads', () => {
+    const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
+    const formatterSource = source.slice(source.indexOf('function formatGenerateNodeReferenceMediaError'), source.indexOf('export function subscribeToGenerateNodeExternalError'))
+    const previewSource = source.slice(source.indexOf('const handleSkillPreview ='), source.indexOf('const buildPayload ='))
+    const handleRunSource = source.slice(source.indexOf('const handleRun = async () => {'), source.indexOf('useEffect(() => {', source.indexOf('const handleRun = async () => {')))
+    const chatStart = handleRunSource.indexOf('if (isChatSkillCompileOnly) {')
+    const formalStart = handleRunSource.indexOf('if (!selectedKey || !selectedModel)')
+    const chatSource = handleRunSource.slice(chatStart, formalStart)
+    const formalSource = handleRunSource.slice(formalStart)
+    const saveSource = source.slice(source.indexOf('const handleSaveToAsset ='), source.indexOf('const commitReferenceBindings =', source.indexOf('const handleSaveToAsset =')))
+
+    expect(formatterSource).toContain('error instanceof GenerateNodeReferenceMediaError')
+    expect(formatterSource).toContain("REFERENCE_MEDIA_MATERIALIZATION_FAILED")
+    expect(previewSource).toContain('setSkillPreviewError(materializationError)')
+    expect(previewSource).toContain('message.error(`${materializationError.error_code}: ${materializationError.detail}`)')
+    expect(previewSource.slice(previewSource.indexOf('await materializeExecutionReferenceBindings(previewAssets)'), previewSource.indexOf('compileSkillPreview(buildGenerateNodeSkillCompileRequest({'))).not.toContain('data:image/')
+
+    for (const requestSource of [chatSource, formalSource]) {
+      const materialize = requestSource.indexOf('await materializeExecutionReferenceBindings(executableReferenceBindings)')
+      const errorStatus = requestSource.indexOf("setNodeStatus(id, 'error')", materialize)
+      const errorMessage = requestSource.indexOf('message.error(`${materializationError.error_code}: ${materializationError.detail}`)', materialize)
+      const earlyReturn = requestSource.indexOf('return', errorMessage)
+      const transport = requestSource.indexOf(requestSource === chatSource ? 'runGenerateNodeChatSkillCompilation({' : 'createSSEClient')
+      expect(materialize).toBeGreaterThan(-1)
+      expect(errorStatus).toBeGreaterThan(materialize)
+      expect(errorMessage).toBeGreaterThan(errorStatus)
+      expect(earlyReturn).toBeGreaterThan(errorMessage)
+      expect(earlyReturn).toBeLessThan(transport)
+      expect(requestSource.slice(materialize, transport)).not.toContain('data:image/')
+    }
+
+    expect(saveSource).toContain('error instanceof GenerateNodeReferenceMediaError')
+    expect(saveSource).toContain('materializationError.error_code')
+    expect(saveSource).toContain('materializationError.detail')
+    expect(saveSource).toContain("message.error(`入库失败: ${detail}`)")
+  })
+
+  test('keeps every saved image asset media field on the short persisted workspace path', () => {
+    const persistedContent = '/api/assets/media/materialized.png'
+    const payload = buildGenerateNodeAssetPayload({
+      resultContent: persistedContent,
+      mode: 'text_to_image',
+      prompt: 'materialized output',
+      selectedModel: 'image-model',
+      provider: 'provider-a',
+      selectedRolePrompt: 'director',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '1:1',
+      ratioSize: '1024*1024',
+    })
+
+    expect(payload.file_path).toBe(persistedContent)
+    expect(payload.data.content).toBe(persistedContent)
+    expect(payload.data.file_path).toBe(persistedContent)
+    expect(payload.data.url).toBe(persistedContent)
+    expect(payload.thumbnail).toBe(persistedContent)
+    expect(JSON.stringify(payload)).not.toContain('data:image')
+  })
+
   test('refreshes React Flow handles after generation mode changes', () => {
     const source = [readFileSync(join(import.meta.dir, 'generate-node-model.ts'), 'utf8'), readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')].join('\n')
 
@@ -1739,8 +1896,8 @@ describe('GenerateNode ordered reference bindings', () => {
     const handleRunSource = source.slice(handleRunStart, runSignalEffectStart)
     expect(handleRunSource).toContain('generateRunTrackerRef.current.start(executionReferenceBindings)')
     expect(handleRunSource).toContain('if (!runToken) return')
-    expect(handleRunSource).toContain('msg => handleSSEMessage(msg, runToken)')
-    expect(handleRunSource).toContain('finishGeneration(res.data, runToken)')
+    expect(handleRunSource).toContain('msg => handleSSEMessage(msg, runToken, mode)')
+    expect(handleRunSource).toContain('finishGeneration(res.data, runToken, mode)')
     expect(handleRunSource).toContain('failGeneration(error, runToken)')
     const afterConnectSource = handleRunSource.slice(
       handleRunSource.indexOf('await sseClient.connect()'),
@@ -3319,7 +3476,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
     expect(directSource).toContain('runGenerateNodeChatSkillCompilation({')
     expect(directSource).toContain('compile: compileSkillPreview')
     expect(directSource).toContain('compileInputFingerprintRef.current === runCompileFingerprint')
-    expect(directSource).toContain('finishGeneration(outcome.packet, runToken)')
+    expect(directSource).toContain('finishGeneration(outcome.packet, runToken, mode)')
     expect(directSource).not.toContain('resolveProvider()')
     expect(directSource).not.toContain('createSSEClient')
     expect(directSource).not.toContain("url: '/generate'")
@@ -3395,7 +3552,7 @@ describe('GenerateNode Chat Skill model helpers', () => {
   test('restores idle only when the current stale Chat Skill run owns settlement', () => {
     const source = readFileSync(join(import.meta.dir, 'GenerateNode.tsx'), 'utf8')
     const staleStart = source.indexOf("if (outcome.status === 'stale') {")
-    const staleEnd = source.indexOf('finishGeneration(outcome.packet, runToken)', staleStart)
+    const staleEnd = source.indexOf('finishGeneration(outcome.packet, runToken, mode)', staleStart)
     const staleBranch = source.slice(staleStart, staleEnd)
     const settledStart = staleBranch.indexOf('if (settleGenerateNodeChatSkillRun({')
     const settledEnd = staleBranch.indexOf('\n          }\n          return', settledStart) + '\n          }'.length
