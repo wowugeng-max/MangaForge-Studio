@@ -27,7 +27,6 @@ import { TypedHandle } from './TypedHandle'
 import { NodeConfigToolbar } from './NodeConfigToolbar'
 import { expandFissionAndDistribute } from '../../pages/canvasFission'
 import { pickMediaResultContent } from '../../utils/mediaResult'
-import { buildAssetMediaUrl } from '../../utils/assetMedia'
 import {
   createGenerateNodeReferenceMediaMaterializer,
   GenerateNodeReferenceMediaError,
@@ -384,7 +383,7 @@ function GenerateNodeImpl(props: NodeProps) {
         const response = await apiClient.post('/assets/upload/image', formData)
         const filePath = response.data?.file_path
         if (!filePath) throw new Error('Reference media upload response is missing file_path')
-        return normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))
+        return normalizeGenerateNodeImageUrl(String(filePath))
       },
     })
   }

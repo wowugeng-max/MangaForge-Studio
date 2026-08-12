@@ -20,6 +20,7 @@ import {
 } from './GenerateNode'
 import { collectGenerateNodeActiveKeys } from './generate-node-model'
 import { useCanvasStore } from '../../stores/canvasStore'
+import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
 async function loadGenerateNodeReferenceApi() {
   const module = await import('./GenerateNode')
@@ -58,7 +59,8 @@ describe('GenerateNode migration behavior', () => {
     expect(componentSetup).toContain("formData.append('file', blob, filename)")
     expect(componentSetup).toContain("apiClient.post('/assets/upload/image', formData)")
     expect(componentSetup).toContain('response.data?.file_path')
-    expect(componentSetup).toContain('normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))')
+    expect(componentSetup).toContain('normalizeGenerateNodeImageUrl(String(filePath))')
+    expect(componentSetup).not.toContain('normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))')
     expect(componentSetup).not.toContain("'Content-Type': 'multipart/form-data'")
     expect(componentSetup).toContain('const materializeExecutionReferenceBindings = async')
     expect(componentSetup).toContain('const materializeGeneratedImageContent = async')
@@ -187,6 +189,16 @@ describe('GenerateNode migration behavior', () => {
     expect(payload.data.url).toBe(persistedContent)
     expect(payload.thumbnail).toBe(persistedContent)
     expect(JSON.stringify(payload)).not.toContain('data:image')
+  })
+
+  test('keeps uploaded workspace paths short while resolving previews through a proxy API base', () => {
+    const uploadedFilePath = '/Users/studio/MangaForge/uploads/materialized.png'
+    const persistedPath = normalizeGenerateNodeImageUrl(uploadedFilePath)
+
+    expect(persistedPath).toBe('/api/assets/media/Users%2Fstudio%2FMangaForge%2Fuploads%2Fmaterialized.png')
+    expect(buildAssetMediaUrl(persistedPath, 'https://studio.example/proxy/api')).toBe(
+      'https://studio.example/proxy/api/assets/media/Users%2Fstudio%2FMangaForge%2Fuploads%2Fmaterialized.png',
+    )
   })
 
   test('refreshes React Flow handles after generation mode changes', () => {
