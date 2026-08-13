@@ -474,7 +474,35 @@ function validateMaterialRepair(content: string) {
   return value
 }
 
+// 与 normalizeSceneCardsPayload 的可识别载荷保持一致（scene_cards / sceneCards / scenes / chapter_outlines）。
+const SCENE_CARDS_COLLECTION_FIELDS = [
+  'scene_cards',
+  'sceneCards',
+  'scenes',
+  'chapter_outlines',
+] as const
+
+function validateSceneCards(content: string) {
+  const value = parseJsonObject(content)
+  let entries = 0
+  let recognizedCollections = 0
+  for (const field of SCENE_CARDS_COLLECTION_FIELDS) {
+    const collection = ownDataValue(value, field)
+    if (collection === undefined) continue
+    recognizedCollections += 1
+    if (!Array.isArray(collection) || !collection.every(nonEmptyPlainObject)) {
+      throw new TypeError('scene cards collections must contain non-empty objects')
+    }
+    entries += collection.length
+  }
+  if (recognizedCollections === 0 || entries === 0) {
+    throw new TypeError('scene cards required')
+  }
+  return value
+}
+
 const validators = {
+  scene_cards_json: validateSceneCards,
   draft_prose: validateProse,
   word_target_prose: validateProse,
   editor_rewrite_prose: validateProse,

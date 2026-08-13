@@ -153,7 +153,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     updatePipelineStep: productionService.updatePipelineStep,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
     autoRepairChapterPreflightGaps: writingService.autoRepairChapterPreflightGaps,
-    generateSceneCardsForChapter: writingService.generateSceneCardsForChapter,
+    generateSceneCardsBySource: writingService.generateSceneCardsBySource,
     getReferenceMigrationPlanForChapter: referenceService.getReferenceMigrationPlanForChapter,
     buildParagraphProseContext: writingService.buildParagraphProseContext,
     getStageModelId: productionService.getStageModelId,

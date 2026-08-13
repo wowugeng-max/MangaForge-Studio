@@ -35,6 +35,7 @@ import { createProseHumanizePostprocessMethods } from './prose-humanize-postproc
 import { createProseSelfReviewMethods } from './prose-self-review-methods'
 import { createProseWordTargetMethods } from './prose-word-target-methods'
 import { createSceneCardsMethods } from './scene-cards-methods'
+import { createSceneCardsSourceDispatch } from './scene-cards-source-dispatch'
 import { createStoryStateMachineMethods } from './story-state-machine'
 import { createStructuredReviewFillMethods } from './structured-review-fill-methods'
 import { getStoredOrBuiltWritingBible as getStoredOrBuiltWritingBibleCore } from './writing-bible'
@@ -193,6 +194,13 @@ export function createNovelWritingService(ctx: {
     }),
   })
   const repairChapterMaterials = ctx.repairChapterMaterials || materialRepairService.repairChapterMaterials
+  // 场景卡按生成源分发：MCP 项目全程走 MCP 章节任务，不再触达本地 LLM API。
+  const sceneCardsSourceDispatch = createSceneCardsSourceDispatch({
+    beginChapterTask,
+    buildSceneCardsPrompt,
+    generateSceneCardsForChapter,
+  })
+  const generateSceneCardsBySource = sceneCardsSourceDispatch.generateSceneCardsBySource
   const storeChapterProseMemory = ctx.runtime?.storeChapterProseMemory || defaultStoreNovelChapterProseMemory
   const mergeChapterRawPayload = ctx.runtime?.mergeChapterRawPayload || mergeNovelChapterRawPayload
   const buildParagraphProseContext = buildParagraphProseContextFromModule
@@ -241,7 +249,7 @@ export function createNovelWritingService(ctx: {
     buildChapterContextPackage,
     repairChapterMaterials,
     autoRepairChapterPreflightGaps,
-    generateSceneCardsForChapter,
+    generateSceneCardsBySource,
     ensureProseMeetsWordTarget,
     runCommercialEditorRewrite,
     runMemePolish,
@@ -259,6 +267,7 @@ export function createNovelWritingService(ctx: {
     buildChapterContextPackage,
     autoRepairChapterPreflightGaps,
     generateSceneCardsForChapter,
+    generateSceneCardsBySource,
     prepareStoryStateUpdate,
     updateStoryStateMachine,
     getStoredOrBuiltWritingBible,

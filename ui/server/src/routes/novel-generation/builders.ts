@@ -873,7 +873,7 @@ export type GenerationRoutesContext = {
     outlines: any[],
     reviews: any[],
   ) => Promise<any>
-  generateSceneCardsForChapter: (workspace: string, project: any, contextPackage: any, modelId?: number) => Promise<any>
+  generateSceneCardsBySource: (workspace: string, project: any, chapter: any, contextPackage: any, modelId?: number, options?: Record<string, any>) => Promise<any>
   ensureChapterPlanningForRange?: (workspace: string, project: any, options: any) => Promise<any>
 }
 

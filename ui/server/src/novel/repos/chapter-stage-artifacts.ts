@@ -25,6 +25,7 @@ const FINGERPRINT = /^sha256:[0-9a-f]{64}$/
 const ERROR_CODE = /^[A-Za-z][A-Za-z0-9_.:-]*$/
 const PROVENANCE_ID_MAX_CHARS = 160
 const STAGES = {
+  scene_cards: true,
   draft: true,
   word_target_repair: true,
   commercial_editor_rewrite: true,
@@ -43,6 +44,7 @@ const STAGES = {
   material_repair: true,
 } satisfies Record<ChapterTaskStage, true>
 const RESPONSE_CONTRACTS = {
+  scene_cards_json: true,
   draft_prose: true,
   word_target_prose: true,
   editor_rewrite_prose: true,

@@ -89,7 +89,7 @@ export function registerNovelGenerationChapterPipelineRoutes(app: Express, ctx: 
       })
       let updatedChapter = chapter
       if (req.body?.generate_scene_cards === true) {
-        const sceneResult = await ctx.generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
+        const sceneResult = await ctx.generateSceneCardsBySource(activeWorkspace, project, chapter, contextPackage, modelId)
         if (sceneResult.sceneCards.length > 0) {
           updatedChapter = await updateNovelChapter(activeWorkspace, chapter.id, {
             scene_breakdown: sceneResult.sceneCards,
@@ -162,7 +162,7 @@ export function registerNovelGenerationChapterPipelineRoutes(app: Express, ctx: 
       if (!contextPackage.preflight.ready && req.body?.allow_incomplete !== true) {
         return res.status(412).json({ error: '场景卡生成前置检查未通过', error_code: 'SCENE_PREFLIGHT_BLOCKED', preflight: contextPackage.preflight, context_package: contextPackage })
       }
-      const result = await ctx.generateSceneCardsForChapter(activeWorkspace, project, contextPackage, modelId)
+      const result = await ctx.generateSceneCardsBySource(activeWorkspace, project, chapter, contextPackage, modelId)
       if (!result.sceneCards.length) {
         const diagnostics = buildLLMResultDiagnostics(result.result)
         await appendNovelRun(activeWorkspace, {

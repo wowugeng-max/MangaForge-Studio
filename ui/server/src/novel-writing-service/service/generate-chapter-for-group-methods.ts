@@ -286,7 +286,7 @@ export function createGenerateChapterForGroupMethods(deps: GenerateChapterForGro
   const buildChapterContextPackage = deps.buildChapterContextPackage
   const repairChapterMaterials = deps.repairChapterMaterials
   const autoRepairChapterPreflightGaps = deps.autoRepairChapterPreflightGaps
-  const generateSceneCardsForChapter = deps.generateSceneCardsForChapter
+  const generateSceneCardsBySource = deps.generateSceneCardsBySource
   const ensureProseMeetsWordTarget = deps.ensureProseMeetsWordTarget
   const runCommercialEditorRewrite = deps.runCommercialEditorRewrite
   const runMemePolish = deps.runMemePolish
@@ -385,7 +385,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     buildChapterContextPackage,
     repairChapterMaterials,
     autoRepairChapterPreflightGaps,
-    generateSceneCardsForChapter,
+    generateSceneCardsBySource,
     approvalRequired,
     buildApprovalError,
     throwIfChapterGenerationAborted,

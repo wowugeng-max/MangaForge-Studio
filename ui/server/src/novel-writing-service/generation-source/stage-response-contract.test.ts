@@ -30,6 +30,7 @@ const jsonFixtures: Record<
   editor_report_json: { passed: true, issues: [], suggestions: [] },
   story_state_json: { state_delta: { current_time: '次日清晨' } },
   material_repair_json: { chapter_patch: { title: '雨夜旧码头' } },
+  scene_cards_json: { scene_cards: [{ scene_no: 1, title: '雨夜旧码头', beat: '李玄潜入仓门' }] },
 }
 
 function expectInvalid(
@@ -159,6 +160,32 @@ describe('MCP stage response contracts', () => {
         content,
       }).output).toEqual(payload)
     }
+  })
+
+  test('accepts every recognized scene cards collection alias', () => {
+    for (const payload of [
+      { scene_cards: [{ scene_no: 1, title: '进入灰塔' }] },
+      { sceneCards: [{ scene_no: 1, title: '进入灰塔' }] },
+      { scenes: [{ scene_no: 1, title: '进入灰塔' }] },
+      { chapter_outlines: [{ chapter_no: 1, title: '停摆前一分钟' }] },
+    ]) {
+      expect(validateMcpStageResponse('scene_cards', 'scene_cards_json', {
+        content: `\`\`\`json\n${JSON.stringify(payload)}\n\`\`\``,
+      }).output).toEqual(payload)
+    }
+  })
+
+  test('rejects scene cards payloads without meaningful card collections', () => {
+    for (const invalid of [
+      '不是 JSON 的正文。',
+      JSON.stringify({}),
+      JSON.stringify({ scene_cards: [] }),
+      JSON.stringify({ scene_cards: ['纯字符串条目'] }),
+      JSON.stringify({ scene_cards: [{}] }),
+      JSON.stringify({ scene_cards: '不是数组' }),
+      JSON.stringify({ unrelated: [{ scene_no: 1 }] }),
+      JSON.stringify([{ scene_no: 1 }]),
+    ]) expectInvalid('scene_cards_json', invalid, 'scene_cards')
   })
 
   test('does not recover a quality review payload missing its final root brace', () => {

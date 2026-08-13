@@ -15,6 +15,7 @@ export type GenerationSourceReceiptAuthority =
   | typeof CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY
 
 export type ChapterTaskStage =
+  | 'scene_cards'
   | 'draft'
   | 'word_target_repair'
   | 'commercial_editor_rewrite'
@@ -33,6 +34,7 @@ export type ChapterTaskStage =
   | 'material_repair'
 
 export type ChapterStageResponseContract =
+  | 'scene_cards_json'
   | 'draft_prose'
   | 'word_target_prose'
   | 'editor_rewrite_prose'

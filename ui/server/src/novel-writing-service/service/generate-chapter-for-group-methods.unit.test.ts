@@ -1146,7 +1146,7 @@ function createAutomaticRepairHarness(options: AutomaticRepairHarnessOptions = {
       modelRepairCalls.push(input)
       return modelRepairResult
     },
-    generateSceneCardsForChapter: async (...input: any[]) => {
+    generateSceneCardsBySource: async (...input: any[]) => {
       sceneCardCalls.push(input)
       return { sceneCards: generationChapter.scene_list }
     },
@@ -1342,6 +1342,24 @@ describe('automatic material repair source routing before prose task creation', 
     expect(proseBegins).toBe(0)
     expect(harness.repairCalls).toEqual([])
     expect(harness.modelRepairCalls).toEqual([])
+  })
+
+  test('routes forced scene cards through the source dispatch with chapter and authority fingerprint', async () => {
+    const harness = createAutomaticRepairHarness()
+    harness.args.options.force_scene_cards = true
+
+    await runGenerateChapterContextAndSceneCards(harness.args)
+
+    expect(harness.sceneCardCalls).toHaveLength(1)
+    const [workspace, project, chapter, contextPackage, modelId, dispatchOptions] = harness.sceneCardCalls[0]
+    expect(workspace).toBe('/tmp/automatic-material-repair-test')
+    expect(project).toBe(harness.project)
+    expect(chapter?.id).toBe(generationChapter.id)
+    expect(contextPackage?.chapter_target?.chapter_no).toBe(generationChapter.chapter_no)
+    expect(modelId).toBeUndefined()
+    expect(dispatchOptions).toMatchObject({
+      expectedAuthorityFingerprint: harness.args.expectedAuthorityFingerprint,
+    })
   })
 
   test('propagates a source change from the single material call without starting a fallback', async () => {

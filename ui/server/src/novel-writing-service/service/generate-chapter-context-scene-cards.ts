@@ -57,7 +57,7 @@ export async function runGenerateChapterContextAndSceneCards(args: {
   buildChapterContextPackage: (...a: any[]) => any
   repairChapterMaterials: (...a: any[]) => any
   autoRepairChapterPreflightGaps: (...a: any[]) => any
-  generateSceneCardsForChapter: (...a: any[]) => any
+  generateSceneCardsBySource: (...a: any[]) => any
   approvalRequired: (...a: any[]) => any
   buildApprovalError: (...a: any[]) => any
   throwIfChapterGenerationAborted: () => void
@@ -90,7 +90,7 @@ export async function runGenerateChapterContextAndSceneCards(args: {
     buildChapterContextPackage,
     repairChapterMaterials,
     autoRepairChapterPreflightGaps,
-    generateSceneCardsForChapter,
+    generateSceneCardsBySource,
     approvalRequired,
     buildApprovalError,
     throwIfChapterGenerationAborted,
@@ -326,7 +326,11 @@ throwIfChapterGenerationAborted()
 await onStage('scene_cards', { status: 'running' })
 let generatedSceneCardsThisRun = false
 if (!generationContract.chapter.scene_cards.length || options.force_scene_cards === true) {
-  const sceneResult = await generateSceneCardsForChapter(activeWorkspace, project, contextPackage, preferredModelId, llmControlOptions)
+  // 场景卡按项目生成源分发：MCP 项目走 MCP 章节任务，不触达本地 LLM API。
+  const sceneResult = await generateSceneCardsBySource(activeWorkspace, project, chapter, contextPackage, preferredModelId, {
+    ...llmControlOptions,
+    expectedAuthorityFingerprint,
+  })
   if (sceneResult.sceneCards.length > 0) {
     generatedSceneCardsThisRun = true
     // Re-align strong handoff onto newly generated scene cards before any persist/use.
