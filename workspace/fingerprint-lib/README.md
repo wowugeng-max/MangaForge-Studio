@@ -33,12 +33,17 @@
 ## 构建 / 扩库
 ```bash
 cd ui/server
-# 全题材扩库（默认每题材 10 本 × 3 免费章）
+# 全题材扩库：默认跳过已入库的书，按分类列表翻页补新书
+# 默认每题材再抓 10 本 × 3 免费章；不会覆盖已富化的 active-contract.json
 BOOKS_PER_GENRE=10 FREE_CHAPTERS_PER_BOOK=3 bun scripts/build-qidian-fingerprint-lib.ts
 
-# 只扩某几个题材
-ONLY_GENRES=urban,suspense,xianxia BOOKS_PER_GENRE=12 bun scripts/build-qidian-fingerprint-lib.ts
+# 只扩弱题材，并提高每题材新书数
+ONLY_GENRES=military,wuxia,multiverse,fantasy,scifi,game \
+  BOOKS_PER_GENRE=20 MAX_CATEGORY_PAGES=10 MAX_TOTAL_BOOKS=200 \
+  bun scripts/build-qidian-fingerprint-lib.ts
 ```
+
+扩库完成后，在「指纹合同」页用离线重拟合生成新合同集，不要直接改内置合同。
 
 ## 使用
 - 全局写作门禁用 `contracts/active-contract.json`
@@ -51,7 +56,7 @@ ONLY_GENRES=urban,suspense,xianxia BOOKS_PER_GENRE=12 bun scripts/build-qidian-f
 - 查看全部合同集，切换当前启用的一套，或强制锁定单份合同（绕过题材选择）。
 - 触发生成新合同集：
   - **离线重拟合（默认）**：只用 `human/` 下已存样本重新测量并拟合，不联网。散文字段（`prompt_directives` / `avoid` / `prefer` / `narrative_hard`）从内置合同逐条继承 —— 这些是历史富化内容，`buildHumanFingerprintContract` 只能产出精简版，整体重生成会永久丢失。
-  - **联网抓取**：需在服务端手动运行 `bun scripts/build-qidian-fingerprint-lib.ts`（会抓取站点并更新样本库），完成后再在页面上以离线模式生成一个新集留档。
+  - **联网抓取**：页面「开始生成」会在服务端跑 `build-qidian-fingerprint-lib.ts` 扩库（只抓免费章、跳过已入库的书、不覆盖内置合同），成功后再离线拟合一套新合同集留档。
 - 查看评分看板：章节入库时自动记录一条 `fingerprint_contract_score` 评审，按合同集聚合均分与 9 项统计指标各自的通过率。
 
 注意：`human/` 下的样本因版权未入库，所以**离线重拟合只能在有样本的机器上进行**；缺样本时页面会标记为不可用。题材合同（`by-genre/`）目前只做数据预留，写作流水线仍统一使用全局合同。

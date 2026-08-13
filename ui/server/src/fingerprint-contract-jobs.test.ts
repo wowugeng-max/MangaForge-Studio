@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
+import { existsSync } from 'fs'
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'fs/promises'
-import { join } from 'path'
+import { join, resolve } from 'path'
 import { tmpdir } from 'os'
 import {
   createFingerprintContractJob,
@@ -10,6 +11,8 @@ import {
   readSamplesStatus,
   resetFingerprintContractJobsForTest,
   runOfflineRefitJob,
+  runOnlineFetchJob,
+  spawnQidianFingerprintLibBuild,
 } from './fingerprint-contract-jobs'
 import { readContractSets } from './fingerprint-contract-store'
 
@@ -171,5 +174,53 @@ describe('fingerprint contract generation job', () => {
     resetFingerprintContractJobsForTest()
     expect(hasRunningFingerprintContractJob()).toBe(false)
     expect(getFingerprintContractJob(job.id)).toBe(null)
+  })
+
+  test('runOnlineFetchJob expands the library then writes a set marked online_fetch', async () => {
+    const lib = await tempLib(2)
+    const result = await runOnlineFetchJob({
+      libRoot: lib,
+      setId: 'set-online',
+      label: '联网集',
+      notes: 'from-test',
+      expandLibrary: async ({ libRoot, onProgress }) => {
+        onProgress?.('fetched 1 book')
+        await writeFile(join(libRoot, 'human', 'urban', 'human_qd_new.txt'), sampleText(99), 'utf8')
+      },
+    })
+    expect(result.set_id).toBe('set-online')
+    expect(result.sample_count).toBe(3)
+    const sets = await readContractSets(lib)
+    expect(sets.map((s) => s.id)).toEqual(['builtin', 'set-online'])
+    expect(sets[1].mode).toBe('online_fetch')
+    expect(sets[1].sample_count).toBe(3)
+    const meta = JSON.parse(await readFile(join(lib, 'contract-sets', 'set-online', 'meta.json'), 'utf8'))
+    expect(meta.mode).toBe('online_fetch')
+    const builtin = JSON.parse(builtinContractJson())
+    const written = JSON.parse(await readFile(join(lib, 'contract-sets', 'set-online', 'active-contract.json'), 'utf8'))
+    expect(written.avoid).toEqual(builtin.avoid)
+    expect(written.prompt_directives).toContain('禁止章末电影定格（空气凝固）。')
+  })
+
+  test('runOnlineFetchJob does not create a contract set when expand fails', async () => {
+    const lib = await tempLib(2)
+    await expect(runOnlineFetchJob({
+      libRoot: lib,
+      setId: 'set-fail',
+      label: '失败集',
+      notes: '',
+      expandLibrary: async () => {
+        throw new Error('qidian 403')
+      },
+    })).rejects.toThrow(/qidian 403/)
+    const sets = await readContractSets(lib)
+    expect(sets.map((s) => s.id)).toEqual(['builtin'])
+    await expect(readFile(join(lib, 'contract-sets', 'set-fail', 'active-contract.json'), 'utf8')).rejects.toThrow()
+  })
+
+  test('spawnQidianFingerprintLibBuild points at the existing qidian build script', () => {
+    const scriptPath = resolve(import.meta.dir, '../scripts/build-qidian-fingerprint-lib.ts')
+    expect(existsSync(scriptPath)).toBe(true)
+    expect(typeof spawnQidianFingerprintLibBuild).toBe('function')
   })
 })

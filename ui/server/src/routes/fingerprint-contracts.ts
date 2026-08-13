@@ -19,6 +19,7 @@ import {
   hasRunningFingerprintContractJob,
   readSamplesStatus,
   runOfflineRefitJob,
+  runOnlineFetchJob,
   updateFingerprintContractJob,
 } from '../fingerprint-contract-jobs'
 import { listNovelProjects, listNovelReviewsByType } from '../novel'
@@ -110,17 +111,9 @@ export function registerFingerprintContractRoutes(app: Express, getWorkspace: ()
       const id = `set-${randomUUID()}`
       const label = String(body.label || id)
       const notes = String(body.notes || '')
-      if (mode === 'online_fetch') {
-        const job = createFingerprintContractJob('online_fetch', id)
-        updateFingerprintContractJob(job.id, {
-          status: 'failed',
-          progress: '联网抓取需在服务端手动运行 build 脚本',
-          error: '联网抓取需在服务端手动运行 build 脚本',
-        })
-        return res.json({ job: getFingerprintContractJob(job.id) })
-      }
-      const job = createFingerprintContractJob('offline_refit', id)
-      runOfflineRefitJob({
+      const job = createFingerprintContractJob(mode, id)
+      const run = mode === 'online_fetch' ? runOnlineFetchJob : runOfflineRefitJob
+      run({
         libRoot,
         setId: id,
         label,

@@ -20,8 +20,13 @@ import {
   type FingerprintSample,
 } from '../src/novel-writing/prose-fingerprint-lib'
 
-const WORKSPACE = resolve(import.meta.dir, '../../../workspace')
-const LIB = join(WORKSPACE, 'fingerprint-lib')
+export function resolveFingerprintLibPaths(env: NodeJS.ProcessEnv = process.env) {
+  const workspace = resolve(env.FINGERPRINT_WORKSPACE || join(import.meta.dir, '../../../workspace'))
+  const lib = resolve(env.FINGERPRINT_LIB_ROOT || join(workspace, 'fingerprint-lib'))
+  return { workspace, lib }
+}
+
+const { workspace: WORKSPACE, lib: LIB } = resolveFingerprintLibPaths()
 const UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1'
 
@@ -30,10 +35,67 @@ const BOOKS_PER_GENRE = Number(process.env.BOOKS_PER_GENRE || process.env.BOOK_L
 const FREE_CHAPTERS_PER_BOOK = Number(process.env.FREE_CHAPTERS_PER_BOOK || 3)
 const SLEEP_MS = Number(process.env.SLEEP_MS || 700)
 const MAX_TOTAL_BOOKS = Number(process.env.MAX_TOTAL_BOOKS || 120)
+const MAX_CATEGORY_PAGES = Number(process.env.MAX_CATEGORY_PAGES || 8)
+const SKIP_EXISTING_BOOKS = String(process.env.SKIP_EXISTING_BOOKS || '1') !== '0'
+const PRESERVE_ACTIVE_CONTRACT = String(process.env.PRESERVE_ACTIVE_CONTRACT || '1') !== '0'
 const ONLY_GENRES = String(process.env.ONLY_GENRES || '')
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean)
+
+const COOKIE_JAR = new Map<string, string>()
+
+export function extractCatIdFromCategoryUrl(url: string): string | null {
+  const text = String(url || '')
+  const catid = text.match(/catid(\d+)/i)
+  if (catid) return catid[1]
+  const path = text.match(/\/category\/(\d+)\b/i)
+  return path ? path[1] : null
+}
+
+export function recordsFromCategoryListPayload(payload: any): { records: any[]; isLast: boolean } {
+  const list = payload?.data?.records
+    ? payload.data
+    : payload?.data?.data?.records
+      ? payload.data.data
+      : payload?.records
+        ? payload
+        : {}
+  const records = Array.isArray(list?.records) ? list.records : []
+  return {
+    records,
+    isLast: Number(list?.isLast) === 1 || records.length === 0,
+  }
+}
+
+export function existingBookIdsFromCatalog(catalog: Record<string, any>): Set<string> {
+  const ids = new Set<string>()
+  for (const row of Object.values(catalog || {})) {
+    const bookId = String((row as any)?.book_id || '').trim()
+    if (bookId) ids.add(bookId)
+  }
+  return ids
+}
+
+function cookieHeader() {
+  return [...COOKIE_JAR.entries()].map(([key, value]) => `${key}=${value}`).join('; ')
+}
+
+function absorbSetCookie(res: Response) {
+  const fromGetter = typeof (res.headers as any).getSetCookie === 'function'
+    ? (res.headers as any).getSetCookie()
+    : []
+  const single = res.headers.get('set-cookie')
+  const lines: string[] = Array.isArray(fromGetter) && fromGetter.length
+    ? fromGetter
+    : (single ? [single] : [])
+  for (const line of lines) {
+    const pair = String(line || '').split(';')[0]
+    const eq = pair.indexOf('=')
+    if (eq <= 0) continue
+    COOKIE_JAR.set(pair.slice(0, eq).trim(), pair.slice(eq + 1).trim())
+  }
+}
 
 /** Canonical genre taxonomy for maintainable fingerprint contracts. */
 export const GENRE_TAXONOMY: Array<{
@@ -155,16 +217,62 @@ function normalizeGenre(raw?: string | null): { slug: string; name: string; raw:
 }
 
 async function fetchText(url: string, referer?: string) {
+  const cookies = cookieHeader()
   const res = await fetch(url, {
     headers: {
       'User-Agent': UA,
-      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.8,*/*;q=0.7',
       'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
       ...(referer ? { Referer: referer } : {}),
+      ...(cookies ? { Cookie: cookies } : {}),
     },
   })
+  absorbSetCookie(res)
   const buf = Buffer.from(await res.arrayBuffer())
   return { ok: res.ok, status: res.status, url: res.url, text: buf.toString('utf8') }
+}
+
+async function ensureQidianSession() {
+  if (COOKIE_JAR.get('_csrfToken')) return
+  await fetchText('https://m.qidian.com/category/catid6')
+}
+
+function bookSeedsFromRecords(records: any[], sourceUrl: string): BookSeed[] {
+  const books: BookSeed[] = []
+  const seen = new Set<string>()
+  for (const row of records || []) {
+    const book_id = String(row?.bid || row?.bookId || row?.id || '')
+    if (!book_id || seen.has(book_id)) continue
+    seen.add(book_id)
+    books.push({
+      book_id,
+      title: String(row.bName || row.bookName || row.title || book_id),
+      author: row.bAuth || row.author,
+      cat: row.cat || row.chanName || row.cateName,
+      sub_cat: row.subCateName || row.subCat,
+      rank: Number(row.rankNum || books.length + 1),
+      source_url: sourceUrl,
+    })
+  }
+  return books
+}
+
+async function fetchCategoryListPage(catId: string, pageNum: number): Promise<{ books: BookSeed[]; isLast: boolean }> {
+  const csrf = COOKIE_JAR.get('_csrfToken') || ''
+  const url = `https://m.qidian.com/webcommon/category/list?catId=${encodeURIComponent(catId)}&pageNum=${pageNum}&_csrfToken=${encodeURIComponent(csrf)}`
+  const page = await fetchText(url, `https://m.qidian.com/category/catid${catId}`)
+  if (!page.ok) throw new Error(`category list ${catId} page=${pageNum} status=${page.status}`)
+  let payload: any = null
+  try {
+    payload = JSON.parse(page.text)
+  } catch {
+    payload = null
+  }
+  const parsed = recordsFromCategoryListPayload(payload)
+  return {
+    books: bookSeedsFromRecords(parsed.records, `https://m.qidian.com/category/catid${catId}?page=${pageNum}`),
+    isLast: parsed.isLast,
+  }
 }
 
 function extractJsonObject(html: string, marker = '{"pageContext"') {
@@ -242,6 +350,17 @@ async function fetchBooksFromCategoryPage(url: string, limit: number): Promise<B
   if (!page.ok) throw new Error(`category ${url} status=${page.status}`)
   const books: BookSeed[] = []
   const seen = new Set<string>()
+
+  const ctx = extractJsonObject(page.text, '{"pageContext"')
+  const pageRecords = ctx?.pageContext?.pageProps?.pageData?.list?.records
+  if (Array.isArray(pageRecords) && pageRecords.length) {
+    for (const row of bookSeedsFromRecords(pageRecords, url)) {
+      if (seen.has(row.book_id)) continue
+      seen.add(row.book_id)
+      books.push(row)
+      if (books.length >= limit) return books
+    }
+  }
 
   // Prefer JSON records if present
   const m = page.text.match(/"records"\s*:\s*(\[[\s\S]*?\])\s*,\s*"page"/)
@@ -472,28 +591,71 @@ function parseIdsFromSampleId(id: string): { book_id?: string; chapter_id?: stri
   return { book_id: m[1], chapter_id: m[2] }
 }
 
+function addSeed(
+  byId: Map<string, BookSeed>,
+  existing: Set<string>,
+  row: BookSeed,
+  genre: { slug: string; name: string },
+) {
+  if (!row.book_id) return false
+  if (SKIP_EXISTING_BOOKS && existing.has(row.book_id)) return false
+  if (byId.has(row.book_id)) return false
+  byId.set(row.book_id, {
+    ...row,
+    intended_genre_slug: genre.slug,
+    cat: row.cat || genre.name,
+  })
+  return true
+}
+
 async function collectGenreBookSeeds(activeGenres: typeof GENRE_TAXONOMY) {
   const byId = new Map<string, BookSeed>()
+  const existing = existingBookIdsFromCatalog(loadCatalog())
+  await ensureQidianSession()
+  console.log(JSON.stringify({
+    phase: 'seed-session',
+    existing_books: existing.size,
+    skip_existing: SKIP_EXISTING_BOOKS,
+    max_category_pages: MAX_CATEGORY_PAGES,
+  }))
   for (const genre of activeGenres) {
     let collected = 0
     for (const url of genre.category_urls) {
       if (collected >= BOOKS_PER_GENRE) break
+      const catId = extractCatIdFromCategoryUrl(url)
+      if (catId) {
+        try {
+          for (let pageNum = 1; pageNum <= MAX_CATEGORY_PAGES && collected < BOOKS_PER_GENRE; pageNum += 1) {
+            await sleep(SLEEP_MS)
+            const page = await fetchCategoryListPage(catId, pageNum)
+            let added = 0
+            for (const row of page.books) {
+              if (collected >= BOOKS_PER_GENRE) break
+              if (addSeed(byId, existing, row, genre)) {
+                collected += 1
+                added += 1
+              }
+            }
+            console.log(`[genre-cat] ${genre.name} catId=${catId} page=${pageNum} listed=${page.books.length} added=${added} collected=${collected} last=${page.isLast}`)
+            if (page.isLast) break
+          }
+          continue
+        } catch (err: any) {
+          console.log(`[genre-cat-list-fail] ${genre.name} ${url}: ${err?.message || err}`)
+        }
+      }
       try {
         await sleep(SLEEP_MS)
-        const rows = await fetchBooksFromCategoryPage(url, BOOKS_PER_GENRE)
-        console.log(`[genre-cat] ${genre.name} ${url} -> ${rows.length}`)
+        const rows = await fetchBooksFromCategoryPage(url, Math.max(BOOKS_PER_GENRE * 2, 20))
+        let added = 0
         for (const row of rows) {
           if (collected >= BOOKS_PER_GENRE) break
-          const prev = byId.get(row.book_id)
-          const next = {
-            ...prev,
-            ...row,
-            intended_genre_slug: genre.slug,
-            cat: row.cat || prev?.cat || genre.name,
+          if (addSeed(byId, existing, row, genre)) {
+            collected += 1
+            added += 1
           }
-          byId.set(row.book_id, next)
-          collected += 1
         }
+        console.log(`[genre-cat] ${genre.name} ${url} -> listed=${rows.length} added=${added} collected=${collected}`)
       } catch (err: any) {
         console.log(`[genre-cat-fail] ${genre.name} ${url}: ${err?.message || err}`)
       }
@@ -507,9 +669,7 @@ async function collectGenreBookSeeds(activeGenres: typeof GENRE_TAXONOMY) {
           console.log(`[genre-rank-supp] ${genre.name} ${url} -> ${rows.length}`)
           for (const row of rows) {
             if (collected >= BOOKS_PER_GENRE) break
-            if (byId.has(row.book_id)) continue
-            byId.set(row.book_id, { ...row, intended_genre_slug: genre.slug })
-            collected += 1
+            if (addSeed(byId, existing, row, genre)) collected += 1
           }
         } catch (err: any) {
           console.log(`[genre-rank-fail] ${genre.name} ${url}: ${err?.message || err}`)
@@ -537,11 +697,34 @@ async function main() {
     free_chapters_per_book: FREE_CHAPTERS_PER_BOOK,
     genres: activeGenres.map((g) => g.slug),
     max_total_books: MAX_TOTAL_BOOKS,
+    max_category_pages: MAX_CATEGORY_PAGES,
+    skip_existing_books: SKIP_EXISTING_BOOKS,
+    preserve_active_contract: PRESERVE_ACTIVE_CONTRACT,
   }, null, 2))
 
   let samples = seedAiSamples()
   const catalog = loadCatalog()
-  const fetchLog: any[] = []
+  const previousFetchLog = (() => {
+    const logPath = join(LIB, 'meta', 'fetch-log.json')
+    if (!existsSync(logPath)) return []
+    try {
+      const raw = JSON.parse(readFileSync(logPath, 'utf8'))
+      return Array.isArray(raw) ? raw : []
+    } catch {
+      return []
+    }
+  })()
+  const previousBooks = (() => {
+    const catalogPath = join(LIB, 'meta', 'genre-catalog.json')
+    if (!existsSync(catalogPath)) return []
+    try {
+      const raw = JSON.parse(readFileSync(catalogPath, 'utf8'))
+      return Array.isArray(raw?.books) ? raw.books : []
+    } catch {
+      return []
+    }
+  })()
+  const fetchLog: any[] = [{ ok: true, phase: 'expand-run', at: new Date().toISOString() }]
   const booksMeta: any[] = []
 
   // 1) collect seeds by genre category pages
@@ -822,14 +1005,28 @@ async function main() {
     samples,
   }
 
+  const bookMap = new Map<string, any>()
+  for (const book of previousBooks) {
+    if (book?.book_id) bookMap.set(String(book.book_id), book)
+  }
+  for (const book of booksMeta) {
+    if (book?.book_id) bookMap.set(String(book.book_id), book)
+  }
+  const mergedBooks = [...bookMap.values()]
+  const mergedFetchLog = [...fetchLog, ...previousFetchLog].slice(0, 4000)
+
   writeFileSync(join(LIB, 'index.json'), JSON.stringify(index, null, 2))
-  writeFileSync(join(LIB, 'contracts', `${globalContract.name}.json`), JSON.stringify(globalContract, null, 2))
-  writeFileSync(join(LIB, 'contracts', 'active-contract.json'), JSON.stringify(globalContract, null, 2))
-  writeFileSync(join(LIB, 'meta', 'fetch-log.json'), JSON.stringify(fetchLog, null, 2))
+  if (!PRESERVE_ACTIVE_CONTRACT) {
+    writeFileSync(join(LIB, 'contracts', `${globalContract.name}.json`), JSON.stringify(globalContract, null, 2))
+    writeFileSync(join(LIB, 'contracts', 'active-contract.json'), JSON.stringify(globalContract, null, 2))
+  } else {
+    console.log('[preserve] skipped rewriting active-contract.json and qidian_free_rank_human.json')
+  }
+  writeFileSync(join(LIB, 'meta', 'fetch-log.json'), JSON.stringify(mergedFetchLog, null, 2))
   writeFileSync(join(LIB, 'meta', 'scoreboard.json'), JSON.stringify(scoreRows, null, 2))
   writeFileSync(join(LIB, 'meta', 'genre-catalog.json'), JSON.stringify({
     updated_at: new Date().toISOString(),
-    books: booksMeta,
+    books: mergedBooks,
     genre_counts: genreCounts,
     genre_contracts: Object.fromEntries(
       Object.entries(genreContracts).map(([k, v]) => [k, { name: v.name, sample_count: v.sample_count }]),
@@ -840,19 +1037,21 @@ async function main() {
     updated_at: new Date().toISOString(),
     by_id: catalog,
   }, null, 2))
-  writeFileSync(
-    join(LIB, 'meta', 'prompt-directives.txt'),
-    [
-      '# global',
-      ...formatFingerprintContractPrompt(globalContract),
-      '',
-      ...Object.entries(genreContracts).flatMap(([slug, v]) => [
-        `# genre:${slug}/${v.name}`,
-        ...formatFingerprintContractPrompt(v.contract).slice(0, 8),
+  if (!PRESERVE_ACTIVE_CONTRACT) {
+    writeFileSync(
+      join(LIB, 'meta', 'prompt-directives.txt'),
+      [
+        '# global',
+        ...formatFingerprintContractPrompt(globalContract),
         '',
-      ]),
-    ].join('\n'),
-  )
+        ...Object.entries(genreContracts).flatMap(([slug, v]) => [
+          `# genre:${slug}/${v.name}`,
+          ...formatFingerprintContractPrompt(v.contract).slice(0, 8),
+          '',
+        ]),
+      ].join('\n'),
+    )
+  }
 
   const mean = (rows: FingerprintSample[], key: keyof FingerprintSample['vector']) => {
     if (!rows.length) return null
@@ -893,42 +1092,7 @@ async function main() {
   }
   writeFileSync(join(LIB, 'meta', 'human-vs-ai.json'), JSON.stringify(comparison, null, 2))
 
-  // README refresh
-  writeFileSync(join(LIB, 'README.md'), `# 网文人工指纹库（Fingerprint Library）
-
-## 边界
-- **只采集起点免费章节**（分类榜/排行榜作品的免费正文），不抓 VIP/付费章。
-- AI 对照样本来自本项目朱雀战役 \`zhuque-inputs/\`。
-
-## 题材分层（v2）
-按 canonical 题材维护，便于扩库与分合同：
-
-| slug | 题材 |
-|------|------|
-${GENRE_TAXONOMY.map((g) => `| ${g.slug} | ${g.name} |`).join('\n')}
-
-目录：
-- \`human/<genre_slug>/*.txt\` 免费章样章
-- \`contracts/active-contract.json\` 全局合同
-- \`contracts/by-genre/<genre_slug>.json\` 分题材合同（样本≥3时生成）
-- \`meta/samples-catalog.json\` 样本元数据（书名/章节/题材/子类）
-- \`meta/genre-catalog.json\` 书籍题材目录与计数
-- \`index.json\` 全库索引（含向量 + by_genre 计数）
-
-## 构建 / 扩库
-\`\`\`bash
-cd ui/server
-# 全题材扩库（默认每题材 10 本 × 3 免费章）
-BOOKS_PER_GENRE=10 FREE_CHAPTERS_PER_BOOK=3 bun scripts/build-qidian-fingerprint-lib.ts
-
-# 只扩某几个题材
-ONLY_GENRES=urban,suspense,xianxia BOOKS_PER_GENRE=12 bun scripts/build-qidian-fingerprint-lib.ts
-\`\`\`
-
-## 使用
-- 全局写作门禁用 \`contracts/active-contract.json\`
-- 题材特化提示词可读 \`contracts/by-genre/<slug>.json\` 与 \`meta/prompt-directives.txt\`
-`)
+  // Keep README.md as the hand-maintained ops doc; do not clobber UI notes.
 
   console.log(JSON.stringify({
     phase: 'done',
@@ -943,7 +1107,9 @@ ONLY_GENRES=urban,suspense,xianxia BOOKS_PER_GENRE=12 bun scripts/build-qidian-f
   }, null, 2))
 }
 
-main().catch((err) => {
-  console.error(err)
-  process.exit(1)
-})
+if (import.meta.main) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}

@@ -1,6 +1,5051 @@
 [
   {
     "ok": true,
+    "phase": "expand-run",
+    "at": "2026-08-13T07:24:36.539Z"
+  },
+  {
+    "ok": true,
+    "book": "天才只是我的门槛！",
+    "chapter": "第1章 重生与天才",
+    "genre": "都市",
+    "chars": 3370
+  },
+  {
+    "ok": true,
+    "book": "天才只是我的门槛！",
+    "chapter": "第2章 激光器",
+    "genre": "都市",
+    "chars": 3195
+  },
+  {
+    "ok": true,
+    "book": "天才只是我的门槛！",
+    "chapter": "第3章 改进",
+    "genre": "都市",
+    "chars": 3622
+  },
+  {
+    "ok": true,
+    "book": "1997：罪案追凶",
+    "chapter": "第1章 芦苇荡里的断手！",
+    "genre": "都市",
+    "chars": 2173
+  },
+  {
+    "ok": true,
+    "book": "1997：罪案追凶",
+    "chapter": "第2章 被分割的尸体！",
+    "genre": "都市",
+    "chars": 2026
+  },
+  {
+    "ok": true,
+    "book": "1997：罪案追凶",
+    "chapter": "第3章 一个保卫科干事是怎么练成的？",
+    "genre": "都市",
+    "chars": 2133
+  },
+  {
+    "ok": true,
+    "book": "绝对之门",
+    "chapter": "第一章 一念开天门",
+    "genre": "都市",
+    "chars": 3912
+  },
+  {
+    "ok": true,
+    "book": "绝对之门",
+    "chapter": "第二章 撞邪了？",
+    "genre": "都市",
+    "chars": 4786
+  },
+  {
+    "ok": true,
+    "book": "绝对之门",
+    "chapter": "第三章 鬼焊门",
+    "genre": "都市",
+    "chars": 4562
+  },
+  {
+    "ok": true,
+    "book": "完美人生，从改变时间线开始",
+    "chapter": "第1章 老千",
+    "genre": "都市",
+    "chars": 2302
+  },
+  {
+    "ok": true,
+    "book": "完美人生，从改变时间线开始",
+    "chapter": "第2章 文体练习生",
+    "genre": "都市",
+    "chars": 2066
+  },
+  {
+    "ok": true,
+    "book": "完美人生，从改变时间线开始",
+    "chapter": "第3章 噫！我中了！",
+    "genre": "都市",
+    "chars": 2240
+  },
+  {
+    "ok": true,
+    "book": "华娱：重生了，还逼我做渣男啊",
+    "chapter": "第一章 陈诺",
+    "genre": "都市",
+    "chars": 3385
+  },
+  {
+    "ok": true,
+    "book": "华娱：重生了，还逼我做渣男啊",
+    "chapter": "第二章 不做富二代",
+    "genre": "都市",
+    "chars": 1797
+  },
+  {
+    "ok": true,
+    "book": "华娱：重生了，还逼我做渣男啊",
+    "chapter": "第三章 渣男的实力",
+    "genre": "都市",
+    "chars": 2536
+  },
+  {
+    "ok": true,
+    "book": "激情岁月：在北大荒渔猎的日子",
+    "chapter": "第1章 开往北大荒的支边专列",
+    "genre": "都市",
+    "chars": 2687
+  },
+  {
+    "ok": true,
+    "book": "激情岁月：在北大荒渔猎的日子",
+    "chapter": "第2章 铁锹上的美食",
+    "genre": "都市",
+    "chars": 2461
+  },
+  {
+    "ok": true,
+    "book": "激情岁月：在北大荒渔猎的日子",
+    "chapter": "第3章 另类的十九号车厢",
+    "genre": "都市",
+    "chars": 2329
+  },
+  {
+    "ok": true,
+    "book": "整座大山都是我的猎场",
+    "chapter": "第一章.重生1986 围猎野猪",
+    "genre": "都市",
+    "chars": 2942
+  },
+  {
+    "ok": true,
+    "book": "整座大山都是我的猎场",
+    "chapter": "第二章.重生1986 围猎野猪（2）",
+    "genre": "都市",
+    "chars": 2248
+  },
+  {
+    "ok": true,
+    "book": "整座大山都是我的猎场",
+    "chapter": "第三章.重生1986 围猎野猪（3）",
+    "genre": "都市",
+    "chars": 2361
+  },
+  {
+    "ok": true,
+    "book": "沸腾时代",
+    "chapter": "第一卷 东方欲晓 第二节 事起突然",
+    "genre": "都市",
+    "chars": 2561
+  },
+  {
+    "ok": true,
+    "book": "沸腾时代",
+    "chapter": "第一卷 东方欲晓 第三节 进入状态",
+    "genre": "都市",
+    "chars": 2405
+  },
+  {
+    "ok": true,
+    "book": "沸腾时代",
+    "chapter": "新书说说想法，老瑞书友请进。",
+    "genre": "都市",
+    "chars": 311
+  },
+  {
+    "ok": true,
+    "book": "你一美警，老想着回东方干啥玩意",
+    "chapter": "第一章：BOSS差点被野人队抢了",
+    "genre": "都市",
+    "chars": 2513
+  },
+  {
+    "ok": true,
+    "book": "你一美警，老想着回东方干啥玩意",
+    "chapter": "第四章：市政厅应该给我颁一朵小红花",
+    "genre": "都市",
+    "chars": 2798
+  },
+  {
+    "ok": true,
+    "book": "你一美警，老想着回东方干啥玩意",
+    "chapter": "第三章：传奇耐电王",
+    "genre": "都市",
+    "chars": 2602
+  },
+  {
+    "ok": true,
+    "book": "医学美利坚：我靠恶魔度过斩杀线",
+    "chapter": "第4章 医生，你也不想上科技的事被人知道吧？",
+    "genre": "都市",
+    "chars": 2980
+  },
+  {
+    "ok": true,
+    "book": "医学美利坚：我靠恶魔度过斩杀线",
+    "chapter": "第2章 领取奖励，欢迎来到美利坚",
+    "genre": "都市",
+    "chars": 2298
+  },
+  {
+    "ok": true,
+    "book": "医学美利坚：我靠恶魔度过斩杀线",
+    "chapter": "第1章 这就是美利坚，这就是纽约",
+    "genre": "都市",
+    "chars": 2993
+  },
+  {
+    "ok": true,
+    "book": "我在1984当祥子",
+    "chapter": "第1章 上吊的男人",
+    "genre": "都市",
+    "chars": 2056
+  },
+  {
+    "ok": true,
+    "book": "我在1984当祥子",
+    "chapter": "第2章 日里瓦，退钱",
+    "genre": "都市",
+    "chars": 2096
+  },
+  {
+    "ok": true,
+    "book": "我在1984当祥子",
+    "chapter": "第3章 催债的来了",
+    "genre": "都市",
+    "chars": 2109
+  },
+  {
+    "ok": true,
+    "book": "我的智商逐年递增",
+    "chapter": "第1章 笨小孩",
+    "genre": "都市",
+    "chars": 4016
+  },
+  {
+    "ok": true,
+    "book": "我的智商逐年递增",
+    "chapter": "第2章 绝对音准",
+    "genre": "都市",
+    "chars": 5113
+  },
+  {
+    "ok": true,
+    "book": "我的智商逐年递增",
+    "chapter": "第3章 笼中鸟与齿轮图",
+    "genre": "都市",
+    "chars": 7440
+  },
+  {
+    "ok": false,
+    "book": "我在北美当地主",
+    "chapter": "欢迎收藏",
+    "genre": "都市",
+    "error": "too short 1046597749/863639787"
+  },
+  {
+    "ok": true,
+    "book": "我在北美当地主",
+    "chapter": "第1章 荒野独居",
+    "genre": "都市",
+    "chars": 3106
+  },
+  {
+    "ok": true,
+    "book": "我在北美当地主",
+    "chapter": "第2章 冰面和三体船",
+    "genre": "都市",
+    "chars": 3179
+  },
+  {
+    "ok": true,
+    "book": "从满仓A股开始成为资本",
+    "chapter": "第一章 风起2009",
+    "genre": "都市",
+    "chars": 2132
+  },
+  {
+    "ok": true,
+    "book": "从满仓A股开始成为资本",
+    "chapter": "第二章 决定未来的小考",
+    "genre": "都市",
+    "chars": 2077
+  },
+  {
+    "ok": true,
+    "book": "从满仓A股开始成为资本",
+    "chapter": "第三章 从中谋利",
+    "genre": "都市",
+    "chars": 2277
+  },
+  {
+    "ok": true,
+    "book": "天理协议",
+    "chapter": "第1章 龙女",
+    "genre": "都市",
+    "chars": 4045
+  },
+  {
+    "ok": true,
+    "book": "天理协议",
+    "chapter": "第2章 两个世界",
+    "genre": "都市",
+    "chars": 4072
+  },
+  {
+    "ok": true,
+    "book": "天理协议",
+    "chapter": "第3章 阿赖耶识",
+    "genre": "都市",
+    "chars": 5116
+  },
+  {
+    "ok": true,
+    "book": "1996：从行政总厨开始",
+    "chapter": "第1章 要求有多高？",
+    "genre": "都市",
+    "chars": 2711
+  },
+  {
+    "ok": true,
+    "book": "1996：从行政总厨开始",
+    "chapter": "第2章 轻视",
+    "genre": "都市",
+    "chars": 2753
+  },
+  {
+    "ok": true,
+    "book": "1996：从行政总厨开始",
+    "chapter": "第4章 极致的服务理念",
+    "genre": "都市",
+    "chars": 2394
+  },
+  {
+    "ok": true,
+    "book": "快收了神通吧！",
+    "chapter": "第一章 【什嘛，我亲妈是白狐？】",
+    "genre": "都市",
+    "chars": 3461
+  },
+  {
+    "ok": true,
+    "book": "快收了神通吧！",
+    "chapter": "《稳住别浪》第六百五十二章大结局（完）",
+    "genre": "都市",
+    "chars": 4519
+  },
+  {
+    "ok": true,
+    "book": "快收了神通吧！",
+    "chapter": "第二章 【起猛了？】",
+    "genre": "都市",
+    "chars": 5140
+  },
+  {
+    "ok": true,
+    "book": "华娱：顶流没有假期",
+    "chapter": "第一章 小伙子，想演戏吗？",
+    "genre": "都市",
+    "chars": 2405
+  },
+  {
+    "ok": true,
+    "book": "华娱：顶流没有假期",
+    "chapter": "第二章 资源优先分配权",
+    "genre": "都市",
+    "chars": 3471
+  },
+  {
+    "ok": true,
+    "book": "华娱：顶流没有假期",
+    "chapter": "第三章 签下他！",
+    "genre": "都市",
+    "chars": 2329
+  },
+  {
+    "ok": true,
+    "book": "1985：开局大雪封门",
+    "chapter": "第1章 雪灾",
+    "genre": "都市",
+    "chars": 2515
+  },
+  {
+    "ok": true,
+    "book": "1985：开局大雪封门",
+    "chapter": "第2章 封窗",
+    "genre": "都市",
+    "chars": 2127
+  },
+  {
+    "ok": true,
+    "book": "1985：开局大雪封门",
+    "chapter": "第3章 得与失",
+    "genre": "都市",
+    "chars": 2310
+  },
+  {
+    "ok": true,
+    "book": "饮食男女",
+    "chapter": "第一章 前世今生",
+    "genre": "都市",
+    "chars": 2120
+  },
+  {
+    "ok": true,
+    "book": "饮食男女",
+    "chapter": "第二章 相约1965！",
+    "genre": "都市",
+    "chars": 2208
+  },
+  {
+    "ok": true,
+    "book": "饮食男女",
+    "chapter": "第三章 老爹撵人",
+    "genre": "都市",
+    "chars": 2088
+  },
+  {
+    "ok": true,
+    "book": "从水猴子开始成神",
+    "chapter": "第一章 难活，难活！",
+    "genre": "玄幻",
+    "chars": 2611
+  },
+  {
+    "ok": true,
+    "book": "从水猴子开始成神",
+    "chapter": "第二章 统御水泽！",
+    "genre": "玄幻",
+    "chars": 2628
+  },
+  {
+    "ok": true,
+    "book": "从水猴子开始成神",
+    "chapter": "第三章 收服猪婆龙",
+    "genre": "玄幻",
+    "chars": 2620
+  },
+  {
+    "ok": true,
+    "book": "腐朽世界",
+    "chapter": "001觉醒",
+    "genre": "玄幻",
+    "chars": 4960
+  },
+  {
+    "ok": true,
+    "book": "腐朽世界",
+    "chapter": "002决断",
+    "genre": "玄幻",
+    "chars": 4383
+  },
+  {
+    "ok": true,
+    "book": "腐朽世界",
+    "chapter": "003搬家 一",
+    "genre": "玄幻",
+    "chars": 3524
+  },
+  {
+    "ok": true,
+    "book": "龙藏",
+    "chapter": "第一章 寻龙",
+    "genre": "玄幻",
+    "chars": 4323
+  },
+  {
+    "ok": true,
+    "book": "龙藏",
+    "chapter": "第二章 天灾，人祸？",
+    "genre": "玄幻",
+    "chars": 7008
+  },
+  {
+    "ok": true,
+    "book": "龙藏",
+    "chapter": "第三章 和先生有缘",
+    "genre": "玄幻",
+    "chars": 3589
+  },
+  {
+    "ok": true,
+    "book": "太虚至尊",
+    "chapter": "第1章 姐姐替嫁",
+    "genre": "玄幻",
+    "chars": 2479
+  },
+  {
+    "ok": true,
+    "book": "太虚至尊",
+    "chapter": "第2章 神秘的种子",
+    "genre": "玄幻",
+    "chars": 2221
+  },
+  {
+    "ok": true,
+    "book": "太虚至尊",
+    "chapter": "第3章 涅槃归来",
+    "genre": "玄幻",
+    "chars": 2275
+  },
+  {
+    "ok": true,
+    "book": "天下无敌！",
+    "chapter": "第1章 李先",
+    "genre": "玄幻",
+    "chars": 3334
+  },
+  {
+    "ok": true,
+    "book": "天下无敌！",
+    "chapter": "第2章 对赌",
+    "genre": "玄幻",
+    "chars": 3158
+  },
+  {
+    "ok": true,
+    "book": "天下无敌！",
+    "chapter": "第3章 药膳",
+    "genre": "玄幻",
+    "chars": 3340
+  },
+  {
+    "ok": true,
+    "book": "天人图谱",
+    "chapter": "第一章 阳芝武毅",
+    "genre": "玄幻",
+    "chars": 3751
+  },
+  {
+    "ok": true,
+    "book": "天人图谱",
+    "chapter": "第二章 入考",
+    "genre": "玄幻",
+    "chars": 3895
+  },
+  {
+    "ok": true,
+    "book": "天人图谱",
+    "chapter": "第三章 前世今生皆为我",
+    "genre": "玄幻",
+    "chars": 4036
+  },
+  {
+    "ok": true,
+    "book": "从效法万妖开始成就真仙",
+    "chapter": "第一章 乱世假仙",
+    "genre": "玄幻",
+    "chars": 5560
+  },
+  {
+    "ok": true,
+    "book": "从效法万妖开始成就真仙",
+    "chapter": "第二章 月黑风高夜",
+    "genre": "玄幻",
+    "chars": 2148
+  },
+  {
+    "ok": true,
+    "book": "从效法万妖开始成就真仙",
+    "chapter": "第三章 林某报仇不隔夜（新书求收藏~求票票~）",
+    "genre": "玄幻",
+    "chars": 2674
+  },
+  {
+    "ok": true,
+    "book": "我能活化技能",
+    "chapter": "第1章 乐府，歌辞",
+    "genre": "玄幻",
+    "chars": 2144
+  },
+  {
+    "ok": true,
+    "book": "我能活化技能",
+    "chapter": "第2章 执念：丁守成",
+    "genre": "玄幻",
+    "chars": 2039
+  },
+  {
+    "ok": true,
+    "book": "我能活化技能",
+    "chapter": "第3章 技能活化",
+    "genre": "玄幻",
+    "chars": 2022
+  },
+  {
+    "ok": true,
+    "book": "我都成超人了，灵气才复苏？",
+    "chapter": "第一章 报名",
+    "genre": "玄幻",
+    "chars": 2205
+  },
+  {
+    "ok": true,
+    "book": "我都成超人了，灵气才复苏？",
+    "chapter": "第二章 词条",
+    "genre": "玄幻",
+    "chars": 2259
+  },
+  {
+    "ok": true,
+    "book": "我都成超人了，灵气才复苏？",
+    "chapter": "第三章 测试",
+    "genre": "玄幻",
+    "chars": 2275
+  },
+  {
+    "ok": true,
+    "book": "巫师：从合成宝石开始",
+    "chapter": "第1章 奥勒良学院与科孚大陆",
+    "genre": "玄幻",
+    "chars": 2679
+  },
+  {
+    "ok": true,
+    "book": "巫师：从合成宝石开始",
+    "chapter": "第2章 奥尔德教授",
+    "genre": "玄幻",
+    "chars": 2587
+  },
+  {
+    "ok": true,
+    "book": "巫师：从合成宝石开始",
+    "chapter": "第3章 语言课",
+    "genre": "玄幻",
+    "chars": 2685
+  },
+  {
+    "ok": true,
+    "book": "我的职业太有个性",
+    "chapter": "第一章 秘法学徒",
+    "genre": "玄幻",
+    "chars": 2238
+  },
+  {
+    "ok": true,
+    "book": "我的职业太有个性",
+    "chapter": "第二章 反转",
+    "genre": "玄幻",
+    "chars": 3145
+  },
+  {
+    "ok": true,
+    "book": "我的职业太有个性",
+    "chapter": "第三章 暴起",
+    "genre": "玄幻",
+    "chars": 2474
+  },
+  {
+    "ok": true,
+    "book": "亡灵法师，召唤055什么鬼？",
+    "chapter": "第1章 白大腿和茶妹妹",
+    "genre": "玄幻",
+    "chars": 2667
+  },
+  {
+    "ok": true,
+    "book": "亡灵法师，召唤055什么鬼？",
+    "chapter": "第2章 血脉祭祀，我要请家长",
+    "genre": "玄幻",
+    "chars": 2658
+  },
+  {
+    "ok": true,
+    "book": "亡灵法师，召唤055什么鬼？",
+    "chapter": "第4章 来自祖国母亲的支援",
+    "genre": "玄幻",
+    "chars": 2390
+  },
+  {
+    "ok": true,
+    "book": "你也不想秘密满朝皆知吧",
+    "chapter": "1、 无能的皇帝",
+    "genre": "玄幻",
+    "chars": 3358
+  },
+  {
+    "ok": true,
+    "book": "你也不想秘密满朝皆知吧",
+    "chapter": "2、 绝境",
+    "genre": "玄幻",
+    "chars": 3103
+  },
+  {
+    "ok": true,
+    "book": "你也不想秘密满朝皆知吧",
+    "chapter": "3、 蟹阁",
+    "genre": "玄幻",
+    "chars": 2970
+  },
+  {
+    "ok": true,
+    "book": "仙朝鹰犬",
+    "chapter": "第1章 学武不成就修仙",
+    "genre": "玄幻",
+    "chars": 3198
+  },
+  {
+    "ok": true,
+    "book": "仙朝鹰犬",
+    "chapter": "第2章 学医救不了大禹",
+    "genre": "玄幻",
+    "chars": 3442
+  },
+  {
+    "ok": true,
+    "book": "仙朝鹰犬",
+    "chapter": "第3章 青云之梯",
+    "genre": "玄幻",
+    "chars": 2550
+  },
+  {
+    "ok": true,
+    "book": "苟圣！",
+    "chapter": "第1章 武道",
+    "genre": "玄幻",
+    "chars": 2783
+  },
+  {
+    "ok": true,
+    "book": "苟圣！",
+    "chapter": "第2章 机会",
+    "genre": "玄幻",
+    "chars": 2532
+  },
+  {
+    "ok": true,
+    "book": "苟圣！",
+    "chapter": "第3章 峰回路转",
+    "genre": "玄幻",
+    "chars": 2338
+  },
+  {
+    "ok": true,
+    "book": "诸天领主",
+    "chapter": "第2章 伐木经验",
+    "genre": "玄幻",
+    "chars": 2086
+  },
+  {
+    "ok": true,
+    "book": "诸天领主",
+    "chapter": "第3章 土著？",
+    "genre": "玄幻",
+    "chars": 2159
+  },
+  {
+    "ok": true,
+    "book": "诸天领主",
+    "chapter": "第5章 建设经验",
+    "genre": "玄幻",
+    "chars": 2412
+  },
+  {
+    "ok": true,
+    "book": "大乾武圣",
+    "chapter": "001 陈平安",
+    "genre": "玄幻",
+    "chars": 2445
+  },
+  {
+    "ok": true,
+    "book": "大乾武圣",
+    "chapter": "002 小虎爷",
+    "genre": "玄幻",
+    "chars": 2608
+  },
+  {
+    "ok": true,
+    "book": "大乾武圣",
+    "chapter": "003 铁布衫（求票票~）",
+    "genre": "玄幻",
+    "chars": 2227
+  },
+  {
+    "ok": true,
+    "book": "武道！",
+    "chapter": "第1章 城寨，李修文（求追读）",
+    "genre": "玄幻",
+    "chars": 2080
+  },
+  {
+    "ok": true,
+    "book": "武道！",
+    "chapter": "第2章 过江龙（求追读）",
+    "genre": "玄幻",
+    "chars": 2106
+  },
+  {
+    "ok": true,
+    "book": "武道！",
+    "chapter": "第3章 龙津道十三太保（求追读）",
+    "genre": "玄幻",
+    "chars": 2069
+  },
+  {
+    "ok": true,
+    "book": "从黄包车夫到覆海大圣",
+    "chapter": "第1章 借贷拉车",
+    "genre": "玄幻",
+    "chars": 4709
+  },
+  {
+    "ok": true,
+    "book": "从黄包车夫到覆海大圣",
+    "chapter": "第2章 太极金刚功",
+    "genre": "玄幻",
+    "chars": 2429
+  },
+  {
+    "ok": true,
+    "book": "从黄包车夫到覆海大圣",
+    "chapter": "第3章 寄人篱下",
+    "genre": "玄幻",
+    "chars": 2879
+  },
+  {
+    "ok": true,
+    "book": "方寸道主",
+    "chapter": "第1章 吾日三省身",
+    "genre": "玄幻",
+    "chars": 3589
+  },
+  {
+    "ok": true,
+    "book": "方寸道主",
+    "chapter": "第2章 身怀方寸地",
+    "genre": "玄幻",
+    "chars": 2749
+  },
+  {
+    "ok": true,
+    "book": "方寸道主",
+    "chapter": "第3章 昔年升爵事",
+    "genre": "玄幻",
+    "chars": 3227
+  },
+  {
+    "ok": false,
+    "book": "公若不弃，愿拜为义父",
+    "chapter": "欢迎收藏",
+    "genre": "仙侠",
+    "error": "too short 1041120056/800747601"
+  },
+  {
+    "ok": true,
+    "book": "公若不弃，愿拜为义父",
+    "chapter": "第一章 叫你一声爹，敢答应吗？（新书，求收藏啊）",
+    "genre": "仙侠",
+    "chars": 4132
+  },
+  {
+    "ok": true,
+    "book": "公若不弃，愿拜为义父",
+    "chapter": "第二章 这个大秦，武德过分充沛了",
+    "genre": "仙侠",
+    "chars": 5107
+  },
+  {
+    "ok": true,
+    "book": "叩问仙道",
+    "chapter": "第一章 又一世少年",
+    "genre": "仙侠",
+    "chars": 2316
+  },
+  {
+    "ok": true,
+    "book": "叩问仙道",
+    "chapter": "第二章 飞剑",
+    "genre": "仙侠",
+    "chars": 2011
+  },
+  {
+    "ok": true,
+    "book": "叩问仙道",
+    "chapter": "第三章 大江行船",
+    "genre": "仙侠",
+    "chars": 1981
+  },
+  {
+    "ok": true,
+    "book": "长生：我的天赋无限叠加",
+    "chapter": "第1章 三十难立",
+    "genre": "仙侠",
+    "chars": 2148
+  },
+  {
+    "ok": true,
+    "book": "长生：我的天赋无限叠加",
+    "chapter": "第2章 本源宝种",
+    "genre": "仙侠",
+    "chars": 2187
+  },
+  {
+    "ok": true,
+    "book": "长生：我的天赋无限叠加",
+    "chapter": "第3章 灵根提升",
+    "genre": "仙侠",
+    "chars": 2271
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，与龟同行",
+    "chapter": "第1章 陈江河",
+    "genre": "仙侠",
+    "chars": 4075
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，与龟同行",
+    "chapter": "第2章 邀请",
+    "genre": "仙侠",
+    "chars": 2056
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，与龟同行",
+    "chapter": "第3章 收获",
+    "genre": "仙侠",
+    "chars": 2113
+  },
+  {
+    "ok": true,
+    "book": "方仙外道",
+    "chapter": "第一章 我自人间来",
+    "genre": "仙侠",
+    "chars": 2937
+  },
+  {
+    "ok": true,
+    "book": "方仙外道",
+    "chapter": "第二章 最毒乎人心",
+    "genre": "仙侠",
+    "chars": 3292
+  },
+  {
+    "ok": true,
+    "book": "方仙外道",
+    "chapter": "第三章 口腹秘剑、披毛换皮",
+    "genre": "仙侠",
+    "chars": 2829
+  },
+  {
+    "ok": true,
+    "book": "凡人修仙传",
+    "chapter": "第一章 山边小村",
+    "genre": "仙侠",
+    "chars": 2419
+  },
+  {
+    "ok": true,
+    "book": "凡人修仙传",
+    "chapter": "第二章 青牛镇",
+    "genre": "仙侠",
+    "chars": 1942
+  },
+  {
+    "ok": true,
+    "book": "凡人修仙传",
+    "chapter": "第三章 七玄门",
+    "genre": "仙侠",
+    "chars": 1649
+  },
+  {
+    "ok": true,
+    "book": "集群重炮轰杀修仙者",
+    "chapter": "第1章 榕城江定",
+    "genre": "仙侠",
+    "chars": 6454
+  },
+  {
+    "ok": true,
+    "book": "集群重炮轰杀修仙者",
+    "chapter": "第2章《雏鹰起飞决》",
+    "genre": "仙侠",
+    "chars": 5704
+  },
+  {
+    "ok": true,
+    "book": "集群重炮轰杀修仙者",
+    "chapter": "第3章导弹控制法器",
+    "genre": "仙侠",
+    "chars": 3605
+  },
+  {
+    "ok": true,
+    "book": "我有一个修仙模拟器",
+    "chapter": "第1章 周青",
+    "genre": "仙侠",
+    "chars": 2046
+  },
+  {
+    "ok": true,
+    "book": "我有一个修仙模拟器",
+    "chapter": "第2章 你没死啊？",
+    "genre": "仙侠",
+    "chars": 2532
+  },
+  {
+    "ok": true,
+    "book": "我有一个修仙模拟器",
+    "chapter": "第3章 十年练气",
+    "genre": "仙侠",
+    "chars": 2789
+  },
+  {
+    "ok": true,
+    "book": "西游：成了方寸山首席",
+    "chapter": "第001章 秦末汉初",
+    "genre": "仙侠",
+    "chars": 3714
+  },
+  {
+    "ok": true,
+    "book": "西游：成了方寸山首席",
+    "chapter": "第002章 我叔总城隍",
+    "genre": "仙侠",
+    "chars": 3311
+  },
+  {
+    "ok": true,
+    "book": "西游：成了方寸山首席",
+    "chapter": "第003章 天光玉锁图",
+    "genre": "仙侠",
+    "chars": 3671
+  },
+  {
+    "ok": true,
+    "book": "从武林门派到长生仙门",
+    "chapter": "第1章 天生剑痴",
+    "genre": "仙侠",
+    "chars": 3089
+  },
+  {
+    "ok": true,
+    "book": "从武林门派到长生仙门",
+    "chapter": "第2章 还真是修仙功法啊？",
+    "genre": "仙侠",
+    "chars": 3050
+  },
+  {
+    "ok": true,
+    "book": "从武林门派到长生仙门",
+    "chapter": "第3章 踏入仙路",
+    "genre": "仙侠",
+    "chars": 3156
+  },
+  {
+    "ok": true,
+    "book": "接管地府后，我成了诡异头子",
+    "chapter": "第一章：生死簿。",
+    "genre": "仙侠",
+    "chars": 2137
+  },
+  {
+    "ok": true,
+    "book": "接管地府后，我成了诡异头子",
+    "chapter": "第二章：夜半来客。",
+    "genre": "仙侠",
+    "chars": 2071
+  },
+  {
+    "ok": true,
+    "book": "接管地府后，我成了诡异头子",
+    "chapter": "第三章：【种生诀】。",
+    "genre": "仙侠",
+    "chars": 2121
+  },
+  {
+    "ok": true,
+    "book": "从赘婿开始建立长生家族",
+    "chapter": "第四章：三个老婆！",
+    "genre": "仙侠",
+    "chars": 2474
+  },
+  {
+    "ok": true,
+    "book": "从赘婿开始建立长生家族",
+    "chapter": "第一章：仙门考核，多子多福系统！",
+    "genre": "仙侠",
+    "chars": 2389
+  },
+  {
+    "ok": true,
+    "book": "从赘婿开始建立长生家族",
+    "chapter": "第二章：二十年生五十个？我选择当赘婿！",
+    "genre": "仙侠",
+    "chars": 2357
+  },
+  {
+    "ok": true,
+    "book": "长生从无限叠加天赋开始",
+    "chapter": "第2章 每日一卦",
+    "genre": "仙侠",
+    "chars": 2024
+  },
+  {
+    "ok": true,
+    "book": "长生从无限叠加天赋开始",
+    "chapter": "第4章 卖青玉梨",
+    "genre": "仙侠",
+    "chars": 2525
+  },
+  {
+    "ok": true,
+    "book": "长生从无限叠加天赋开始",
+    "chapter": "第6章 满月宴",
+    "genre": "仙侠",
+    "chars": 2106
+  },
+  {
+    "ok": true,
+    "book": "原来我才是妖魔啊",
+    "chapter": "第1章 妖魔！",
+    "genre": "仙侠",
+    "chars": 2168
+  },
+  {
+    "ok": true,
+    "book": "原来我才是妖魔啊",
+    "chapter": "第2章 斩魔！",
+    "genre": "仙侠",
+    "chars": 3276
+  },
+  {
+    "ok": true,
+    "book": "原来我才是妖魔啊",
+    "chapter": "第3章 一人一堂",
+    "genre": "仙侠",
+    "chars": 3382
+  },
+  {
+    "ok": true,
+    "book": "修仙界只有妖女了是吗",
+    "chapter": "1.落难仙子",
+    "genre": "仙侠",
+    "chars": 6319
+  },
+  {
+    "ok": true,
+    "book": "修仙界只有妖女了是吗",
+    "chapter": "2.识时务的仙子",
+    "genre": "仙侠",
+    "chars": 2999
+  },
+  {
+    "ok": true,
+    "book": "修仙界只有妖女了是吗",
+    "chapter": "3.仙子，你吃不吃面",
+    "genre": "仙侠",
+    "chars": 2205
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，从画符开始",
+    "chapter": "第1章 四十觉醒",
+    "genre": "仙侠",
+    "chars": 2021
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，从画符开始",
+    "chapter": "第2章 努力就会有回报",
+    "genre": "仙侠",
+    "chars": 2112
+  },
+  {
+    "ok": true,
+    "book": "长生修仙，从画符开始",
+    "chapter": "第3章 精品符箓",
+    "genre": "仙侠",
+    "chars": 2043
+  },
+  {
+    "ok": true,
+    "book": "药师门徒修仙笔记",
+    "chapter": "第1章 你说灵根长这样？",
+    "genre": "仙侠",
+    "chars": 3138
+  },
+  {
+    "ok": true,
+    "book": "药师门徒修仙笔记",
+    "chapter": "第2章 父母双亡只剩房",
+    "genre": "仙侠",
+    "chars": 3036
+  },
+  {
+    "ok": true,
+    "book": "药师门徒修仙笔记",
+    "chapter": "第3章 蝲蛄将军终落网",
+    "genre": "仙侠",
+    "chars": 3031
+  },
+  {
+    "ok": true,
+    "book": "邪修天王",
+    "chapter": "第一章 一旦无常万事休",
+    "genre": "仙侠",
+    "chars": 2200
+  },
+  {
+    "ok": true,
+    "book": "邪修天王",
+    "chapter": "第二章 先下手为强",
+    "genre": "仙侠",
+    "chars": 2355
+  },
+  {
+    "ok": true,
+    "book": "邪修天王",
+    "chapter": "第三章 天外异灵",
+    "genre": "仙侠",
+    "chars": 2461
+  },
+  {
+    "ok": true,
+    "book": "仙府！",
+    "chapter": "第一章 鱼塘lv1",
+    "genre": "仙侠",
+    "chars": 2284
+  },
+  {
+    "ok": true,
+    "book": "仙府！",
+    "chapter": "第二章 侥幸",
+    "genre": "仙侠",
+    "chars": 2316
+  },
+  {
+    "ok": true,
+    "book": "仙府！",
+    "chapter": "第三章 鸡圈lv1",
+    "genre": "仙侠",
+    "chars": 2407
+  },
+  {
+    "ok": true,
+    "book": "御兽仙朝：我能设计进化形态",
+    "chapter": "第1章 万兽衍策",
+    "genre": "仙侠",
+    "chars": 7359
+  },
+  {
+    "ok": true,
+    "book": "御兽仙朝：我能设计进化形态",
+    "chapter": "第2章 隐藏进化",
+    "genre": "仙侠",
+    "chars": 5069
+  },
+  {
+    "ok": true,
+    "book": "御兽仙朝：我能设计进化形态",
+    "chapter": "第3章 它听懂了",
+    "genre": "仙侠",
+    "chars": 4286
+  },
+  {
+    "ok": true,
+    "book": "急急如律令",
+    "chapter": "第1章 花子鬼登门",
+    "genre": "科幻",
+    "chars": 3039
+  },
+  {
+    "ok": true,
+    "book": "急急如律令",
+    "chapter": "第2章 将军法",
+    "genre": "科幻",
+    "chars": 3059
+  },
+  {
+    "ok": true,
+    "book": "急急如律令",
+    "chapter": "第3章 将军法禁忌（求月票求收藏）",
+    "genre": "科幻",
+    "chars": 3120
+  },
+  {
+    "ok": true,
+    "book": "末日边缘",
+    "chapter": "第1章 我回到了末世前一周",
+    "genre": "科幻",
+    "chars": 2202
+  },
+  {
+    "ok": true,
+    "book": "末日边缘",
+    "chapter": "第2章 薅完兄弟",
+    "genre": "科幻",
+    "chars": 2064
+  },
+  {
+    "ok": true,
+    "book": "末日边缘",
+    "chapter": "第3章 摩天鬼楼",
+    "genre": "科幻",
+    "chars": 3316
+  },
+  {
+    "ok": true,
+    "book": "废土边境检查官",
+    "chapter": "第一章 幸福城，您的废土避难首选！",
+    "genre": "科幻",
+    "chars": 2484
+  },
+  {
+    "ok": true,
+    "book": "废土边境检查官",
+    "chapter": "第二章 铁饭碗，文明收集器！",
+    "genre": "科幻",
+    "chars": 2948
+  },
+  {
+    "ok": true,
+    "book": "废土边境检查官",
+    "chapter": "第三章 心火燃，基因差距！",
+    "genre": "科幻",
+    "chars": 2998
+  },
+  {
+    "ok": true,
+    "book": "堑壕大栓与魔法",
+    "chapter": "第3章 你说你们叫什么纵队？",
+    "genre": "科幻",
+    "chars": 2542
+  },
+  {
+    "ok": true,
+    "book": "堑壕大栓与魔法",
+    "chapter": "第5章 不一样的20世纪初期",
+    "genre": "科幻",
+    "chars": 3612
+  },
+  {
+    "ok": true,
+    "book": "堑壕大栓与魔法",
+    "chapter": "第2章 既不神圣，也不帝国......",
+    "genre": "科幻",
+    "chars": 2533
+  },
+  {
+    "ok": true,
+    "book": "科技入侵现代",
+    "chapter": "第1章 欢迎来到1960",
+    "genre": "科幻",
+    "chars": 4262
+  },
+  {
+    "ok": true,
+    "book": "科技入侵现代",
+    "chapter": "第2章 活见鬼了",
+    "genre": "科幻",
+    "chars": 1916
+  },
+  {
+    "ok": true,
+    "book": "科技入侵现代",
+    "chapter": "第3章 历史的幽灵",
+    "genre": "科幻",
+    "chars": 2120
+  },
+  {
+    "ok": true,
+    "book": "现实编程协会",
+    "chapter": "第1章 异常的消失案",
+    "genre": "科幻",
+    "chars": 4789
+  },
+  {
+    "ok": true,
+    "book": "现实编程协会",
+    "chapter": "第2章 现实编程协会",
+    "genre": "科幻",
+    "chars": 3940
+  },
+  {
+    "ok": true,
+    "book": "现实编程协会",
+    "chapter": "第3章 “微笑自杀案”",
+    "genre": "科幻",
+    "chars": 3716
+  },
+  {
+    "ok": true,
+    "book": "还能保送怪物职业学院？",
+    "chapter": "第1章 重生，但时间不对",
+    "genre": "科幻",
+    "chars": 2289
+  },
+  {
+    "ok": true,
+    "book": "还能保送怪物职业学院？",
+    "chapter": "第2章 内测试玩",
+    "genre": "科幻",
+    "chars": 2772
+  },
+  {
+    "ok": true,
+    "book": "还能保送怪物职业学院？",
+    "chapter": "第3章 地图迷雾",
+    "genre": "科幻",
+    "chars": 2101
+  },
+  {
+    "ok": true,
+    "book": "末世第一狠人",
+    "chapter": "001 一切都那么美好",
+    "genre": "科幻",
+    "chars": 2357
+  },
+  {
+    "ok": true,
+    "book": "末世第一狠人",
+    "chapter": "004 网呢！？（求投资，求票票）",
+    "genre": "科幻",
+    "chars": 2004
+  },
+  {
+    "ok": true,
+    "book": "末世第一狠人",
+    "chapter": "005 可怕真相",
+    "genre": "科幻",
+    "chars": 2377
+  },
+  {
+    "ok": true,
+    "book": "独守要塞三年，我成了长夜领主",
+    "chapter": "001：黑暗深处",
+    "genre": "科幻",
+    "chars": 2423
+  },
+  {
+    "ok": true,
+    "book": "独守要塞三年，我成了长夜领主",
+    "chapter": "002：领主、种印",
+    "genre": "科幻",
+    "chars": 2182
+  },
+  {
+    "ok": true,
+    "book": "独守要塞三年，我成了长夜领主",
+    "chapter": "003：信使",
+    "genre": "科幻",
+    "chars": 2683
+  },
+  {
+    "ok": true,
+    "book": "文明乐园",
+    "chapter": "第一章 山城山",
+    "genre": "科幻",
+    "chars": 2287
+  },
+  {
+    "ok": true,
+    "book": "文明乐园",
+    "chapter": "第二章 上城区",
+    "genre": "科幻",
+    "chars": 2022
+  },
+  {
+    "ok": true,
+    "book": "文明乐园",
+    "chapter": "第三章 复查",
+    "genre": "科幻",
+    "chars": 2350
+  },
+  {
+    "ok": true,
+    "book": "三塔游戏",
+    "chapter": "第1章 死刑即刻执行",
+    "genre": "科幻",
+    "chars": 2184
+  },
+  {
+    "ok": true,
+    "book": "三塔游戏",
+    "chapter": "第2章 朝花夕树",
+    "genre": "科幻",
+    "chars": 2361
+  },
+  {
+    "ok": true,
+    "book": "三塔游戏",
+    "chapter": "第3章 四级完整度",
+    "genre": "科幻",
+    "chars": 2593
+  },
+  {
+    "ok": true,
+    "book": "玩家重载",
+    "chapter": "第一章 怪谈",
+    "genre": "科幻",
+    "chars": 3058
+  },
+  {
+    "ok": true,
+    "book": "玩家重载",
+    "chapter": "第二章 神孽",
+    "genre": "科幻",
+    "chars": 2367
+  },
+  {
+    "ok": true,
+    "book": "玩家重载",
+    "chapter": "第三章 梯子",
+    "genre": "科幻",
+    "chars": 3091
+  },
+  {
+    "ok": true,
+    "book": "吞噬进化：我重生成了北极狼",
+    "chapter": "第一章 重生为狼。",
+    "genre": "科幻",
+    "chars": 1984
+  },
+  {
+    "ok": true,
+    "book": "吞噬进化：我重生成了北极狼",
+    "chapter": "第二章 惊人成长。",
+    "genre": "科幻",
+    "chars": 2025
+  },
+  {
+    "ok": true,
+    "book": "吞噬进化：我重生成了北极狼",
+    "chapter": "第三章 外出狩猎。",
+    "genre": "科幻",
+    "chars": 2163
+  },
+  {
+    "ok": true,
+    "book": "灵境行者",
+    "chapter": "第一章 礼物",
+    "genre": "科幻",
+    "chars": 3358
+  },
+  {
+    "ok": true,
+    "book": "灵境行者",
+    "chapter": "第二章 失踪",
+    "genre": "科幻",
+    "chars": 2764
+  },
+  {
+    "ok": true,
+    "book": "灵境行者",
+    "chapter": "第三章 角色卡",
+    "genre": "科幻",
+    "chars": 3224
+  },
+  {
+    "ok": true,
+    "book": "人在荒岛，灵气怎么复苏了？",
+    "chapter": "第1章 开挂的人生，无需多言",
+    "genre": "科幻",
+    "chars": 2744
+  },
+  {
+    "ok": true,
+    "book": "人在荒岛，灵气怎么复苏了？",
+    "chapter": "第2章 真正的大冒险总是会到来",
+    "genre": "科幻",
+    "chars": 2214
+  },
+  {
+    "ok": true,
+    "book": "人在荒岛，灵气怎么复苏了？",
+    "chapter": "第3章 资本主义居然顷刻间炼化了我的人格",
+    "genre": "科幻",
+    "chars": 2025
+  },
+  {
+    "ok": true,
+    "book": "这游戏也太真实了",
+    "chapter": "第一章 百分之百真实的游戏是有多真实？",
+    "genre": "科幻",
+    "chars": 2366
+  },
+  {
+    "ok": true,
+    "book": "这游戏也太真实了",
+    "chapter": "第二章 404号避难所",
+    "genre": "科幻",
+    "chars": 4752
+  },
+  {
+    "ok": true,
+    "book": "这游戏也太真实了",
+    "chapter": "第三章 这家伙是来真的？",
+    "genre": "科幻",
+    "chars": 3504
+  },
+  {
+    "ok": true,
+    "book": "维校的三好学生",
+    "chapter": "第1章 点兵",
+    "genre": "科幻",
+    "chars": 5515
+  },
+  {
+    "ok": true,
+    "book": "维校的三好学生",
+    "chapter": "第2章 兵家传承",
+    "genre": "科幻",
+    "chars": 4437
+  },
+  {
+    "ok": true,
+    "book": "维校的三好学生",
+    "chapter": "第3章 龙蛇将起",
+    "genre": "科幻",
+    "chars": 5006
+  },
+  {
+    "ok": true,
+    "book": "深海余烬",
+    "chapter": "第一章 那天，起了很大的雾",
+    "genre": "科幻",
+    "chars": 2631
+  },
+  {
+    "ok": true,
+    "book": "深海余烬",
+    "chapter": "第二章 失乡号的船长",
+    "genre": "科幻",
+    "chars": 3160
+  },
+  {
+    "ok": true,
+    "book": "深海余烬",
+    "chapter": "第三章 边境迷航",
+    "genre": "科幻",
+    "chars": 2796
+  },
+  {
+    "ok": true,
+    "book": "我在噩梦世界建立安全区",
+    "chapter": "第1章 欢迎来到安全区",
+    "genre": "科幻",
+    "chars": 4057
+  },
+  {
+    "ok": true,
+    "book": "我在噩梦世界建立安全区",
+    "chapter": "第2章 坠梦者",
+    "genre": "科幻",
+    "chars": 5311
+  },
+  {
+    "ok": true,
+    "book": "我在噩梦世界建立安全区",
+    "chapter": "第3章 日常",
+    "genre": "科幻",
+    "chars": 2518
+  },
+  {
+    "ok": true,
+    "book": "说好的民企，空天母舰什么鬼",
+    "chapter": "第1章 魔法开局",
+    "genre": "科幻",
+    "chars": 2162
+  },
+  {
+    "ok": true,
+    "book": "说好的民企，空天母舰什么鬼",
+    "chapter": "第2章 免税一号",
+    "genre": "科幻",
+    "chars": 2220
+  },
+  {
+    "ok": true,
+    "book": "说好的民企，空天母舰什么鬼",
+    "chapter": "第3章 修拖拉机？",
+    "genre": "科幻",
+    "chars": 2408
+  },
+  {
+    "ok": true,
+    "book": "深渊片场",
+    "chapter": "第一章 诡异的清扫工作",
+    "genre": "悬疑",
+    "chars": 3208
+  },
+  {
+    "ok": true,
+    "book": "深渊片场",
+    "chapter": "第二章 真实恐怖片",
+    "genre": "悬疑",
+    "chars": 2071
+  },
+  {
+    "ok": true,
+    "book": "深渊片场",
+    "chapter": "第三章 深渊电影院",
+    "genre": "悬疑",
+    "chars": 2019
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏之诡相无间",
+    "chapter": "第一章 恐怖来袭",
+    "genre": "悬疑",
+    "chars": 3819
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏之诡相无间",
+    "chapter": "第二章 逃不出的小区",
+    "genre": "悬疑",
+    "chars": 3146
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏之诡相无间",
+    "chapter": "第三章 回忆中出现的诡异",
+    "genre": "悬疑",
+    "chars": 2959
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从S级开始称量阳间",
+    "chapter": "第一章 天要下雨",
+    "genre": "悬疑",
+    "chars": 2164
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从S级开始称量阳间",
+    "chapter": "第五章 不能相信的眼睛",
+    "genre": "悬疑",
+    "chars": 2589
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从S级开始称量阳间",
+    "chapter": "第三章 鬼血严力",
+    "genre": "悬疑",
+    "chars": 2486
+  },
+  {
+    "ok": true,
+    "book": "镇妖博物馆",
+    "chapter": "引子",
+    "genre": "悬疑",
+    "chars": 284
+  },
+  {
+    "ok": true,
+    "book": "镇妖博物馆",
+    "chapter": "第一章 卧虎腰牌",
+    "genre": "悬疑",
+    "chars": 2700
+  },
+  {
+    "ok": true,
+    "book": "镇妖博物馆",
+    "chapter": "第二章 梦",
+    "genre": "悬疑",
+    "chars": 2465
+  },
+  {
+    "ok": true,
+    "book": "怪谈游戏设计师",
+    "chapter": "第1章 一个平凡普通且温馨的夜晚",
+    "genre": "悬疑",
+    "chars": 3681
+  },
+  {
+    "ok": true,
+    "book": "怪谈游戏设计师",
+    "chapter": "第2章 太内向，不敢和爸妈说话",
+    "genre": "悬疑",
+    "chars": 2436
+  },
+  {
+    "ok": true,
+    "book": "怪谈游戏设计师",
+    "chapter": "第3章 文明城市江沪瀚",
+    "genre": "悬疑",
+    "chars": 2528
+  },
+  {
+    "ok": true,
+    "book": "活人深处",
+    "chapter": "第1章 日记",
+    "genre": "悬疑",
+    "chars": 4640
+  },
+  {
+    "ok": true,
+    "book": "活人深处",
+    "chapter": "第2章 孤独者",
+    "genre": "悬疑",
+    "chars": 2097
+  },
+  {
+    "ok": true,
+    "book": "活人深处",
+    "chapter": "第3章 爱好",
+    "genre": "悬疑",
+    "chars": 2123
+  },
+  {
+    "ok": true,
+    "book": "拐个张家女人下墓，佛爷坐不住了",
+    "chapter": "第1章 王凯旋",
+    "genre": "悬疑",
+    "chars": 2274
+  },
+  {
+    "ok": true,
+    "book": "拐个张家女人下墓，佛爷坐不住了",
+    "chapter": "第2章 黑驴蹄子",
+    "genre": "悬疑",
+    "chars": 2004
+  },
+  {
+    "ok": true,
+    "book": "拐个张家女人下墓，佛爷坐不住了",
+    "chapter": "第3章 野人沟",
+    "genre": "悬疑",
+    "chars": 2249
+  },
+  {
+    "ok": true,
+    "book": "香江驱邪1911",
+    "chapter": "第1章 阳寿还剩十分钟，先揍个神婆再死",
+    "genre": "悬疑",
+    "chars": 7002
+  },
+  {
+    "ok": true,
+    "book": "香江驱邪1911",
+    "chapter": "第2章 米生虫，伙计病，棺材煞",
+    "genre": "悬疑",
+    "chars": 3921
+  },
+  {
+    "ok": true,
+    "book": "香江驱邪1911",
+    "chapter": "第3章 鬼医命格",
+    "genre": "悬疑",
+    "chars": 7787
+  },
+  {
+    "ok": true,
+    "book": "我在九叔世界做大佬",
+    "chapter": "第一章：绝世凶人",
+    "genre": "悬疑",
+    "chars": 2496
+  },
+  {
+    "ok": true,
+    "book": "我在九叔世界做大佬",
+    "chapter": "第二章：极道凶威",
+    "genre": "悬疑",
+    "chars": 1998
+  },
+  {
+    "ok": true,
+    "book": "我在九叔世界做大佬",
+    "chapter": "第三章：四目道长",
+    "genre": "悬疑",
+    "chars": 1989
+  },
+  {
+    "ok": true,
+    "book": "魔临",
+    "chapter": "第一章 欢迎",
+    "genre": "悬疑",
+    "chars": 3540
+  },
+  {
+    "ok": true,
+    "book": "魔临",
+    "chapter": "第二章 结束与开始",
+    "genre": "悬疑",
+    "chars": 8362
+  },
+  {
+    "ok": true,
+    "book": "魔临",
+    "chapter": "第三章 主上，您醒了？",
+    "genre": "悬疑",
+    "chars": 2662
+  },
+  {
+    "ok": true,
+    "book": "噩梦惊袭",
+    "chapter": "第1章 噩梦",
+    "genre": "悬疑",
+    "chars": 2145
+  },
+  {
+    "ok": true,
+    "book": "噩梦惊袭",
+    "chapter": "第2章 游戏开始",
+    "genre": "悬疑",
+    "chars": 1932
+  },
+  {
+    "ok": true,
+    "book": "噩梦惊袭",
+    "chapter": "第3章 旅途",
+    "genre": "悬疑",
+    "chars": 1949
+  },
+  {
+    "ok": true,
+    "book": "深夜书屋",
+    "chapter": "第一章 不要烧我！",
+    "genre": "悬疑",
+    "chars": 4157
+  },
+  {
+    "ok": true,
+    "book": "深夜书屋",
+    "chapter": "第二章 地狱！",
+    "genre": "悬疑",
+    "chars": 2821
+  },
+  {
+    "ok": true,
+    "book": "深夜书屋",
+    "chapter": "第三章 妻子？",
+    "genre": "悬疑",
+    "chars": 3431
+  },
+  {
+    "ok": true,
+    "book": "向日取火",
+    "chapter": "第1章 异响",
+    "genre": "悬疑",
+    "chars": 2297
+  },
+  {
+    "ok": true,
+    "book": "向日取火",
+    "chapter": "第2章 路口",
+    "genre": "悬疑",
+    "chars": 2072
+  },
+  {
+    "ok": true,
+    "book": "向日取火",
+    "chapter": "第3章 家里有只小手办",
+    "genre": "悬疑",
+    "chars": 2201
+  },
+  {
+    "ok": true,
+    "book": "我的细胞监狱",
+    "chapter": "第一章 神秘的监狱",
+    "genre": "悬疑",
+    "chars": 2331
+  },
+  {
+    "ok": true,
+    "book": "我的细胞监狱",
+    "chapter": "第二章 韩东的发现",
+    "genre": "悬疑",
+    "chars": 2433
+  },
+  {
+    "ok": true,
+    "book": "我的细胞监狱",
+    "chapter": "第三章 从头开始",
+    "genre": "悬疑",
+    "chars": 2538
+  },
+  {
+    "ok": true,
+    "book": "最后的江湖术士",
+    "chapter": "第6章 大雾",
+    "genre": "悬疑",
+    "chars": 2050
+  },
+  {
+    "ok": true,
+    "book": "最后的江湖术士",
+    "chapter": "第5章 干活",
+    "genre": "悬疑",
+    "chars": 2042
+  },
+  {
+    "ok": true,
+    "book": "最后的江湖术士",
+    "chapter": "第3章 太爷",
+    "genre": "悬疑",
+    "chars": 2234
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从鬼湖开始",
+    "chapter": "第1章 湖底女尸",
+    "genre": "悬疑",
+    "chars": 2093
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从鬼湖开始",
+    "chapter": "第2章 太平古镇的驭鬼者",
+    "genre": "悬疑",
+    "chars": 2035
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：从鬼湖开始",
+    "chapter": "第3章 脱困",
+    "genre": "悬疑",
+    "chars": 2067
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我不当人了",
+    "chapter": "第一章 老旧居民楼",
+    "genre": "悬疑",
+    "chars": 2086
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我不当人了",
+    "chapter": "第二章 鬼",
+    "genre": "悬疑",
+    "chars": 2148
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我不当人了",
+    "chapter": "第三章 找炮灰",
+    "genre": "悬疑",
+    "chars": 2136
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我从民国来",
+    "chapter": "第一章 羊皮纸的宝藏",
+    "genre": "悬疑",
+    "chars": 2072
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我从民国来",
+    "chapter": "第二章 深夜书屋",
+    "genre": "悬疑",
+    "chars": 2055
+  },
+  {
+    "ok": true,
+    "book": "神秘复苏：我从民国来",
+    "chapter": "第三章 第二世",
+    "genre": "悬疑",
+    "chars": 2037
+  },
+  {
+    "ok": true,
+    "book": "诡异世界求生手册",
+    "chapter": "001 黄历",
+    "genre": "悬疑",
+    "chars": 2894
+  },
+  {
+    "ok": true,
+    "book": "诡异世界求生手册",
+    "chapter": "002 张养序",
+    "genre": "悬疑",
+    "chars": 2035
+  },
+  {
+    "ok": true,
+    "book": "诡异世界求生手册",
+    "chapter": "003 冯玉漱",
+    "genre": "悬疑",
+    "chars": 2247
+  },
+  {
+    "ok": true,
+    "book": "屠魔快刀",
+    "chapter": "楔子 不信邪才能揽的活儿",
+    "genre": "悬疑",
+    "chars": 5316
+  },
+  {
+    "ok": true,
+    "book": "屠魔快刀",
+    "chapter": "第一章 准备简历",
+    "genre": "悬疑",
+    "chars": 4580
+  },
+  {
+    "ok": true,
+    "book": "屠魔快刀",
+    "chapter": "第二章 百乐门",
+    "genre": "悬疑",
+    "chars": 4786
+  },
+  {
+    "ok": true,
+    "book": "白衣卿相",
+    "chapter": "0001【嘉祐七年深秋】",
+    "genre": "历史",
+    "chars": 3213
+  },
+  {
+    "ok": true,
+    "book": "白衣卿相",
+    "chapter": "0002【山中之民】",
+    "genre": "历史",
+    "chars": 3154
+  },
+  {
+    "ok": true,
+    "book": "白衣卿相",
+    "chapter": "0003【草台班子】",
+    "genre": "历史",
+    "chars": 3490
+  },
+  {
+    "ok": true,
+    "book": "北洋之梦",
+    "chapter": "第1章 北洋总统预备班",
+    "genre": "历史",
+    "chars": 4911
+  },
+  {
+    "ok": true,
+    "book": "北洋之梦",
+    "chapter": "第2章  李中堂，标准答案在这儿，会抄吗？（求收藏，求追读）",
+    "genre": "历史",
+    "chars": 4151
+  },
+  {
+    "ok": true,
+    "book": "北洋之梦",
+    "chapter": "第3章 甲午年的第一个蝴蝶效应（求收藏，求月票，求追读）",
+    "genre": "历史",
+    "chars": 5283
+  },
+  {
+    "ok": true,
+    "book": "嗣皇帝",
+    "chapter": "第一章 躺平了",
+    "genre": "历史",
+    "chars": 2194
+  },
+  {
+    "ok": true,
+    "book": "嗣皇帝",
+    "chapter": "第二章 科举舞弊",
+    "genre": "历史",
+    "chars": 2236
+  },
+  {
+    "ok": true,
+    "book": "嗣皇帝",
+    "chapter": "第三章 坐看山倾",
+    "genre": "历史",
+    "chars": 2093
+  },
+  {
+    "ok": true,
+    "book": "状元郎",
+    "chapter": "第一章 朝为田舍郎",
+    "genre": "历史",
+    "chars": 2214
+  },
+  {
+    "ok": true,
+    "book": "状元郎",
+    "chapter": "第二章 容易受伤的男人",
+    "genre": "历史",
+    "chars": 3054
+  },
+  {
+    "ok": true,
+    "book": "状元郎",
+    "chapter": "第三章 秀才的含金量",
+    "genre": "历史",
+    "chars": 3563
+  },
+  {
+    "ok": true,
+    "book": "草芥称王",
+    "chapter": "第1章 不想失业的新娘",
+    "genre": "历史",
+    "chars": 3561
+  },
+  {
+    "ok": true,
+    "book": "草芥称王",
+    "chapter": "第2章 屠嬷嬷的心思",
+    "genre": "历史",
+    "chars": 2533
+  },
+  {
+    "ok": true,
+    "book": "草芥称王",
+    "chapter": "第3章 好面就得三揉三醒",
+    "genre": "历史",
+    "chars": 3077
+  },
+  {
+    "ok": true,
+    "book": "江左伪郎",
+    "chapter": "第1章 泰山亡奴",
+    "genre": "历史",
+    "chars": 3539
+  },
+  {
+    "ok": true,
+    "book": "江左伪郎",
+    "chapter": "第2章 高风亮节",
+    "genre": "历史",
+    "chars": 3488
+  },
+  {
+    "ok": true,
+    "book": "江左伪郎",
+    "chapter": "第3章 好消息",
+    "genre": "历史",
+    "chars": 3038
+  },
+  {
+    "ok": true,
+    "book": "红楼芳华，权倾天下",
+    "chapter": "第1章 路见不平",
+    "genre": "历史",
+    "chars": 2013
+  },
+  {
+    "ok": true,
+    "book": "红楼芳华，权倾天下",
+    "chapter": "第2章 王熙凤捉奸",
+    "genre": "历史",
+    "chars": 1992
+  },
+  {
+    "ok": true,
+    "book": "红楼芳华，权倾天下",
+    "chapter": "第3章 捉奸拱火",
+    "genre": "历史",
+    "chars": 2069
+  },
+  {
+    "ok": true,
+    "book": "尸祸一六四四",
+    "chapter": "第1章 太子",
+    "genre": "历史",
+    "chars": 2819
+  },
+  {
+    "ok": true,
+    "book": "尸祸一六四四",
+    "chapter": "第2章 侍女",
+    "genre": "历史",
+    "chars": 2257
+  },
+  {
+    "ok": true,
+    "book": "尸祸一六四四",
+    "chapter": "第3章 活死人",
+    "genre": "历史",
+    "chars": 2900
+  },
+  {
+    "ok": true,
+    "book": "五代风华",
+    "chapter": "第1章 草芥",
+    "genre": "历史",
+    "chars": 2816
+  },
+  {
+    "ok": true,
+    "book": "五代风华",
+    "chapter": "第2章 试武",
+    "genre": "历史",
+    "chars": 2652
+  },
+  {
+    "ok": true,
+    "book": "五代风华",
+    "chapter": "第3章 养杀气",
+    "genre": "历史",
+    "chars": 2822
+  },
+  {
+    "ok": true,
+    "book": "朕真的不务正业",
+    "chapter": "第一章 刺王杀驾",
+    "genre": "历史",
+    "chars": 3568
+  },
+  {
+    "ok": true,
+    "book": "朕真的不务正业",
+    "chapter": "第二章 全是妖孽",
+    "genre": "历史",
+    "chars": 3435
+  },
+  {
+    "ok": true,
+    "book": "朕真的不务正业",
+    "chapter": "第三章 皇帝学武，不务正业",
+    "genre": "历史",
+    "chars": 4024
+  },
+  {
+    "ok": true,
+    "book": "大宋文豪",
+    "chapter": "第1章 穿越到大宋的学霸",
+    "genre": "历史",
+    "chars": 2706
+  },
+  {
+    "ok": true,
+    "book": "大宋文豪",
+    "chapter": "第2章 披王袍而操市利",
+    "genre": "历史",
+    "chars": 2624
+  },
+  {
+    "ok": true,
+    "book": "大宋文豪",
+    "chapter": "第3章 一纸《御夏策》，文成满堂惊！",
+    "genre": "历史",
+    "chars": 2421
+  },
+  {
+    "ok": true,
+    "book": "清妖",
+    "chapter": "第一章 小爷我买单",
+    "genre": "历史",
+    "chars": 2089
+  },
+  {
+    "ok": true,
+    "book": "清妖",
+    "chapter": "第二章 办个假证吧",
+    "genre": "历史",
+    "chars": 2362
+  },
+  {
+    "ok": true,
+    "book": "清妖",
+    "chapter": "第三章 真的也能办",
+    "genre": "历史",
+    "chars": 2015
+  },
+  {
+    "ok": true,
+    "book": "文豪1879：独行法兰西",
+    "chapter": "序章",
+    "genre": "历史",
+    "chars": 328
+  },
+  {
+    "ok": true,
+    "book": "文豪1879：独行法兰西",
+    "chapter": "第1章 开学日",
+    "genre": "历史",
+    "chars": 3260
+  },
+  {
+    "ok": true,
+    "book": "文豪1879：独行法兰西",
+    "chapter": "第2章 意外的邀请",
+    "genre": "历史",
+    "chars": 3283
+  },
+  {
+    "ok": true,
+    "book": "我在俄国当文豪",
+    "chapter": "1、大学生",
+    "genre": "历史",
+    "chars": 2322
+  },
+  {
+    "ok": true,
+    "book": "我在俄国当文豪",
+    "chapter": "2、《万卡》",
+    "genre": "历史",
+    "chars": 2248
+  },
+  {
+    "ok": true,
+    "book": "我在俄国当文豪",
+    "chapter": "3、新的果戈理诞生了！",
+    "genre": "历史",
+    "chars": 2308
+  },
+  {
+    "ok": true,
+    "book": "创业在晚唐",
+    "chapter": "第一章 ：溃卒",
+    "genre": "历史",
+    "chars": 3126
+  },
+  {
+    "ok": true,
+    "book": "创业在晚唐",
+    "chapter": "第二章 ：带甲",
+    "genre": "历史",
+    "chars": 3056
+  },
+  {
+    "ok": true,
+    "book": "创业在晚唐",
+    "chapter": "第三章：老六",
+    "genre": "历史",
+    "chars": 3300
+  },
+  {
+    "ok": true,
+    "book": "大明草包探花",
+    "chapter": "第一章 人分南北",
+    "genre": "历史",
+    "chars": 2024
+  },
+  {
+    "ok": true,
+    "book": "大明草包探花",
+    "chapter": "第二章 方半城",
+    "genre": "历史",
+    "chars": 2139
+  },
+  {
+    "ok": true,
+    "book": "大明草包探花",
+    "chapter": "第三章 秦淮河",
+    "genre": "历史",
+    "chars": 2410
+  },
+  {
+    "ok": true,
+    "book": "大明黑帆",
+    "chapter": "第1章 投名状",
+    "genre": "历史",
+    "chars": 2497
+  },
+  {
+    "ok": true,
+    "book": "大明黑帆",
+    "chapter": "第2章 牵星术",
+    "genre": "历史",
+    "chars": 2464
+  },
+  {
+    "ok": true,
+    "book": "大明黑帆",
+    "chapter": "第3章 大航海时代",
+    "genre": "历史",
+    "chars": 2565
+  },
+  {
+    "ok": true,
+    "book": "日本战国：功名十字路",
+    "chapter": "第1章 我军败了！",
+    "genre": "历史",
+    "chars": 6697
+  },
+  {
+    "ok": true,
+    "book": "日本战国：功名十字路",
+    "chapter": "第2章 何去何从？",
+    "genre": "历史",
+    "chars": 2264
+  },
+  {
+    "ok": true,
+    "book": "日本战国：功名十字路",
+    "chapter": "第6章 奇货可居",
+    "genre": "历史",
+    "chars": 2411
+  },
+  {
+    "ok": true,
+    "book": "红楼：我和黛玉互穿了",
+    "chapter": "第1章 我和黛玉互换身份",
+    "genre": "历史",
+    "chars": 3172
+  },
+  {
+    "ok": true,
+    "book": "红楼：我和黛玉互穿了",
+    "chapter": "第2章 我到荣国府，就是来享福的！",
+    "genre": "历史",
+    "chars": 3061
+  },
+  {
+    "ok": true,
+    "book": "红楼：我和黛玉互穿了",
+    "chapter": "第3章 送宫花",
+    "genre": "历史",
+    "chars": 2225
+  },
+  {
+    "ok": true,
+    "book": "匹夫有责",
+    "chapter": "第1章 崇祯七年",
+    "genre": "历史",
+    "chars": 2265
+  },
+  {
+    "ok": true,
+    "book": "匹夫有责",
+    "chapter": "第2章 黄崖兵乱",
+    "genre": "历史",
+    "chars": 2095
+  },
+  {
+    "ok": true,
+    "book": "匹夫有责",
+    "chapter": "第3章 决定生死",
+    "genre": "历史",
+    "chars": 2296
+  },
+  {
+    "ok": true,
+    "book": "怪物世界",
+    "chapter": "第1章 盗版链接",
+    "genre": "游戏",
+    "chars": 2139
+  },
+  {
+    "ok": true,
+    "book": "怪物世界",
+    "chapter": "第2章 这是正版！",
+    "genre": "游戏",
+    "chars": 2934
+  },
+  {
+    "ok": true,
+    "book": "怪物世界",
+    "chapter": "第3章 新手难度？",
+    "genre": "游戏",
+    "chars": 2968
+  },
+  {
+    "ok": true,
+    "book": "教练凶猛",
+    "chapter": "第1章 冒充职业教练",
+    "genre": "游戏",
+    "chars": 2795
+  },
+  {
+    "ok": true,
+    "book": "教练凶猛",
+    "chapter": "第2章 机会",
+    "genre": "游戏",
+    "chars": 2642
+  },
+  {
+    "ok": true,
+    "book": "教练凶猛",
+    "chapter": "第3章 VG的病",
+    "genre": "游戏",
+    "chars": 2425
+  },
+  {
+    "ok": true,
+    "book": "异维囚笼",
+    "chapter": "第1章 孤注一掷",
+    "genre": "游戏",
+    "chars": 4161
+  },
+  {
+    "ok": true,
+    "book": "异维囚笼",
+    "chapter": "第2章 高度专注",
+    "genre": "游戏",
+    "chars": 7031
+  },
+  {
+    "ok": true,
+    "book": "异维囚笼",
+    "chapter": "第3章 溺亡者祷本（一）",
+    "genre": "游戏",
+    "chars": 2334
+  },
+  {
+    "ok": true,
+    "book": "美利坚：游戏制作教父",
+    "chapter": "第1章 电子游戏土葬那年",
+    "genre": "游戏",
+    "chars": 2072
+  },
+  {
+    "ok": true,
+    "book": "美利坚：游戏制作教父",
+    "chapter": "第2章 截胡老任，开发Tetris",
+    "genre": "游戏",
+    "chars": 2101
+  },
+  {
+    "ok": true,
+    "book": "美利坚：游戏制作教父",
+    "chapter": "第3章 头眼昏花，二手街机",
+    "genre": "游戏",
+    "chars": 2106
+  },
+  {
+    "ok": true,
+    "book": "熊学派的阿斯塔特",
+    "chapter": "1.蓝恩",
+    "genre": "游戏",
+    "chars": 3285
+  },
+  {
+    "ok": true,
+    "book": "熊学派的阿斯塔特",
+    "chapter": "2.意外之子",
+    "genre": "游戏",
+    "chars": 2761
+  },
+  {
+    "ok": true,
+    "book": "熊学派的阿斯塔特",
+    "chapter": "3.孽鬼、龟型石",
+    "genre": "游戏",
+    "chars": 2784
+  },
+  {
+    "ok": true,
+    "book": "伊塔之柱",
+    "chapter": "序章 探险队里的炼金术士",
+    "genre": "游戏",
+    "chars": 4736
+  },
+  {
+    "ok": true,
+    "book": "伊塔之柱",
+    "chapter": "第一章 少年、少女与狼的故事",
+    "genre": "游戏",
+    "chars": 5188
+  },
+  {
+    "ok": true,
+    "book": "伊塔之柱",
+    "chapter": "第二章 佣兵格言，拿钱办事",
+    "genre": "游戏",
+    "chars": 5289
+  },
+  {
+    "ok": true,
+    "book": "全职高手",
+    "chapter": "第一章 被驱逐的高手",
+    "genre": "游戏",
+    "chars": 4001
+  },
+  {
+    "ok": true,
+    "book": "全职高手",
+    "chapter": "第二章 C区47号",
+    "genre": "游戏",
+    "chars": 2460
+  },
+  {
+    "ok": true,
+    "book": "全职高手",
+    "chapter": "第三章 专职夜班",
+    "genre": "游戏",
+    "chars": 3643
+  },
+  {
+    "ok": true,
+    "book": "我在迷雾打造完美领地",
+    "chapter": "第1章 ：欢迎来到，迷雾之地",
+    "genre": "游戏",
+    "chars": 3220
+  },
+  {
+    "ok": true,
+    "book": "我在迷雾打造完美领地",
+    "chapter": "第2章 ：隐藏天赋",
+    "genre": "游戏",
+    "chars": 3461
+  },
+  {
+    "ok": true,
+    "book": "我在迷雾打造完美领地",
+    "chapter": "第3章：S级评价",
+    "genre": "游戏",
+    "chars": 2648
+  },
+  {
+    "ok": true,
+    "book": "LOL：什么叫中单混学家啊",
+    "chapter": "第一章 所谓混学",
+    "genre": "游戏",
+    "chars": 2099
+  },
+  {
+    "ok": true,
+    "book": "LOL：什么叫中单混学家啊",
+    "chapter": "第二章 什么叫我竟然开混了",
+    "genre": "游戏",
+    "chars": 2331
+  },
+  {
+    "ok": true,
+    "book": "LOL：什么叫中单混学家啊",
+    "chapter": "第三章 躺者如C",
+    "genre": "游戏",
+    "chars": 2174
+  },
+  {
+    "ok": true,
+    "book": "CS：最后一舞，舞成职业通天代",
+    "chapter": "第二章 有空来G2帮忙顶个号吗？（求收藏）",
+    "genre": "游戏",
+    "chars": 7326
+  },
+  {
+    "ok": true,
+    "book": "CS：最后一舞，舞成职业通天代",
+    "chapter": "第一章 十七岁的最后一舞！（求月票求收藏）",
+    "genre": "游戏",
+    "chars": 8976
+  },
+  {
+    "ok": true,
+    "book": "CS：最后一舞，舞成职业通天代",
+    "chapter": "第四章 狙来！！！",
+    "genre": "游戏",
+    "chars": 4743
+  },
+  {
+    "ok": true,
+    "book": "说好低调发育，全服公告什么鬼？",
+    "chapter": "第1章 嘎嘎嘎",
+    "genre": "游戏",
+    "chars": 3838
+  },
+  {
+    "ok": true,
+    "book": "说好低调发育，全服公告什么鬼？",
+    "chapter": "第2章 不一样的路",
+    "genre": "游戏",
+    "chars": 3575
+  },
+  {
+    "ok": true,
+    "book": "说好低调发育，全服公告什么鬼？",
+    "chapter": "第3章不要张嘴打蟑螂",
+    "genre": "游戏",
+    "chars": 2824
+  },
+  {
+    "ok": true,
+    "book": "超神机械师",
+    "chapter": "001 初生",
+    "genre": "游戏",
+    "chars": 4185
+  },
+  {
+    "ok": true,
+    "book": "超神机械师",
+    "chapter": "002 机械系",
+    "genre": "游戏",
+    "chars": 6164
+  },
+  {
+    "ok": true,
+    "book": "超神机械师",
+    "chapter": "003 人生如戏，全靠演技",
+    "genre": "游戏",
+    "chars": 3568
+  },
+  {
+    "ok": true,
+    "book": "CS：坏了，真让他成Goat了",
+    "chapter": "第1章 硬件不足",
+    "genre": "游戏",
+    "chars": 2592
+  },
+  {
+    "ok": true,
+    "book": "CS：坏了，真让他成Goat了",
+    "chapter": "第2章 你们……长脑袋了对吧！",
+    "genre": "游戏",
+    "chars": 3874
+  },
+  {
+    "ok": true,
+    "book": "CS：坏了，真让他成Goat了",
+    "chapter": "第3章 “啊”是最好的赞美",
+    "genre": "游戏",
+    "chars": 2720
+  },
+  {
+    "ok": true,
+    "book": "无垢时馈",
+    "chapter": "第1章 时馈",
+    "genre": "游戏",
+    "chars": 3459
+  },
+  {
+    "ok": true,
+    "book": "无垢时馈",
+    "chapter": "第2章 抽血",
+    "genre": "游戏",
+    "chars": 3658
+  },
+  {
+    "ok": true,
+    "book": "无垢时馈",
+    "chapter": "第3章 第二次使用",
+    "genre": "游戏",
+    "chars": 3353
+  },
+  {
+    "ok": true,
+    "book": "LOL：闭眼请神，什么叫人死了",
+    "chapter": "第1章 闭眼请神",
+    "genre": "游戏",
+    "chars": 2435
+  },
+  {
+    "ok": true,
+    "book": "LOL：闭眼请神，什么叫人死了",
+    "chapter": "第2章 我让你把Faker叫来！",
+    "genre": "游戏",
+    "chars": 2090
+  },
+  {
+    "ok": true,
+    "book": "LOL：闭眼请神，什么叫人死了",
+    "chapter": "第3章 普天同庆，EDG加冕为王！",
+    "genre": "游戏",
+    "chars": 2834
+  },
+  {
+    "ok": true,
+    "book": "蒸汽世界的奥秘侦探",
+    "chapter": "第1章 在迷雾的街头",
+    "genre": "游戏",
+    "chars": 5233
+  },
+  {
+    "ok": true,
+    "book": "蒸汽世界的奥秘侦探",
+    "chapter": "第2章 没有选择的选择",
+    "genre": "游戏",
+    "chars": 3204
+  },
+  {
+    "ok": true,
+    "book": "蒸汽世界的奥秘侦探",
+    "chapter": "第3章 蓬勃发展的世界",
+    "genre": "游戏",
+    "chars": 3701
+  },
+  {
+    "ok": true,
+    "book": "谁敢抢我唐僧肉！",
+    "chapter": "第一章 登仙，启动！",
+    "genre": "游戏",
+    "chars": 2841
+  },
+  {
+    "ok": true,
+    "book": "谁敢抢我唐僧肉！",
+    "chapter": "第二章  别人修仙我练武",
+    "genre": "游戏",
+    "chars": 5116
+  },
+  {
+    "ok": true,
+    "book": "谁敢抢我唐僧肉！",
+    "chapter": "第三章  石灰战法",
+    "genre": "游戏",
+    "chars": 2153
+  },
+  {
+    "ok": true,
+    "book": "我的技能版本不对",
+    "chapter": "第1章.我的完整人生终于补全了最后一块拼图",
+    "genre": "游戏",
+    "chars": 2106
+  },
+  {
+    "ok": true,
+    "book": "我的技能版本不对",
+    "chapter": "第2章.从游戏性来说，这款游戏属于烂完了",
+    "genre": "游戏",
+    "chars": 2105
+  },
+  {
+    "ok": true,
+    "book": "我的技能版本不对",
+    "chapter": "第3章.这概率堪比连续十次彩票头奖",
+    "genre": "游戏",
+    "chars": 2186
+  },
+  {
+    "ok": true,
+    "book": "亡灵天灾从坟场魔开始",
+    "chapter": "第1章 坟场魔（新书上传，求收藏）",
+    "genre": "游戏",
+    "chars": 3319
+  },
+  {
+    "ok": true,
+    "book": "亡灵天灾从坟场魔开始",
+    "chapter": "第2章 开始",
+    "genre": "游戏",
+    "chars": 2306
+  },
+  {
+    "ok": true,
+    "book": "亡灵天灾从坟场魔开始",
+    "chapter": "第3章 任务（求收藏）",
+    "genre": "游戏",
+    "chars": 2034
+  },
+  {
+    "ok": true,
+    "book": "神祇领主纪元",
+    "chapter": "第一章 穿越，神祇纪元",
+    "genre": "游戏",
+    "chars": 4141
+  },
+  {
+    "ok": true,
+    "book": "神祇领主纪元",
+    "chapter": "第二章 开辟神域，初始眷族",
+    "genre": "游戏",
+    "chars": 4328
+  },
+  {
+    "ok": true,
+    "book": "神祇领主纪元",
+    "chapter": "第三章 智慧神职，金手指",
+    "genre": "游戏",
+    "chars": 2774
+  },
+  {
+    "ok": false,
+    "book": "天命之上",
+    "chapter": "欢迎收藏",
+    "genre": "轻小说",
+    "error": "too short 1039831421/788829580"
+  },
+  {
+    "ok": true,
+    "book": "天命之上",
+    "chapter": "第一章 修车修表修电脑",
+    "genre": "轻小说",
+    "chars": 3485
+  },
+  {
+    "ok": true,
+    "book": "天命之上",
+    "chapter": "第二章 大难不死，必有补刀",
+    "genre": "轻小说",
+    "chars": 3955
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：继承万界遗产",
+    "chapter": "第1章 我和荒古圣体踢足球",
+    "genre": "轻小说",
+    "chars": 2226
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：继承万界遗产",
+    "chapter": "第2章 当太空人咯！",
+    "genre": "轻小说",
+    "chars": 4898
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：继承万界遗产",
+    "chapter": "第3章 我心中只有女帝一个神明",
+    "genre": "轻小说",
+    "chars": 3209
+  },
+  {
+    "ok": true,
+    "book": "冬日重现",
+    "chapter": "第1章 异常死亡",
+    "genre": "轻小说",
+    "chars": 9036
+  },
+  {
+    "ok": true,
+    "book": "冬日重现",
+    "chapter": "第2章 重回冬日",
+    "genre": "轻小说",
+    "chars": 5149
+  },
+  {
+    "ok": true,
+    "book": "冬日重现",
+    "chapter": "第3章 岛上的大小姐与企鹅",
+    "genre": "轻小说",
+    "chars": 4883
+  },
+  {
+    "ok": true,
+    "book": "谁说我不是正经冒险者",
+    "chapter": "第1章 你最好是正经的天赋",
+    "genre": "轻小说",
+    "chars": 2684
+  },
+  {
+    "ok": true,
+    "book": "谁说我不是正经冒险者",
+    "chapter": "第2章 第二天赋：乌洛波洛斯之环",
+    "genre": "轻小说",
+    "chars": 2212
+  },
+  {
+    "ok": true,
+    "book": "谁说我不是正经冒险者",
+    "chapter": "第3章 半个月顶人一年努力",
+    "genre": "轻小说",
+    "chars": 2492
+  },
+  {
+    "ok": true,
+    "book": "东京：崇华的我竟成了日娱之王",
+    "chapter": "第6章 全民制作人们大家好",
+    "genre": "轻小说",
+    "chars": 2055
+  },
+  {
+    "ok": true,
+    "book": "东京：崇华的我竟成了日娱之王",
+    "chapter": "第8章 只因你太美",
+    "genre": "轻小说",
+    "chars": 2065
+  },
+  {
+    "ok": true,
+    "book": "东京：崇华的我竟成了日娱之王",
+    "chapter": "第10章 花来！跑路！百万撤离！",
+    "genre": "轻小说",
+    "chars": 2062
+  },
+  {
+    "ok": true,
+    "book": "超人灭绝指南",
+    "chapter": "第001章 柯明庆",
+    "genre": "轻小说",
+    "chars": 4859
+  },
+  {
+    "ok": true,
+    "book": "超人灭绝指南",
+    "chapter": "第002章 柯明庆和超级英雄老爹",
+    "genre": "轻小说",
+    "chars": 2737
+  },
+  {
+    "ok": true,
+    "book": "超人灭绝指南",
+    "chapter": "第003章 柯明庆和魔法少女老妹",
+    "genre": "轻小说",
+    "chars": 2525
+  },
+  {
+    "ok": true,
+    "book": "谁让他当假面骑士的！",
+    "chapter": "第1章 我们旮旯骑士不是这样的！",
+    "genre": "轻小说",
+    "chars": 2198
+  },
+  {
+    "ok": true,
+    "book": "谁让他当假面骑士的！",
+    "chapter": "第5章 坏了，我也成不会拍照的帝骑了！",
+    "genre": "轻小说",
+    "chars": 2294
+  },
+  {
+    "ok": true,
+    "book": "谁让他当假面骑士的！",
+    "chapter": "第2章 数值怪就是这样快乐的！",
+    "genre": "轻小说",
+    "chars": 2293
+  },
+  {
+    "ok": true,
+    "book": "从魔法少女开始独断万古",
+    "chapter": "第一章：我等这一刻，望眼欲穿",
+    "genre": "轻小说",
+    "chars": 2368
+  },
+  {
+    "ok": true,
+    "book": "从魔法少女开始独断万古",
+    "chapter": "第二章：奇迹和魔法都是存在的",
+    "genre": "轻小说",
+    "chars": 2142
+  },
+  {
+    "ok": true,
+    "book": "从魔法少女开始独断万古",
+    "chapter": "第三章：怎么可能会后悔",
+    "genre": "轻小说",
+    "chars": 4300
+  },
+  {
+    "ok": true,
+    "book": "呢喃诗章",
+    "chapter": "第一章 将死之人",
+    "genre": "轻小说",
+    "chars": 2747
+  },
+  {
+    "ok": true,
+    "book": "呢喃诗章",
+    "chapter": "第二章 侦探的遗言",
+    "genre": "轻小说",
+    "chars": 3296
+  },
+  {
+    "ok": true,
+    "book": "呢喃诗章",
+    "chapter": "第三章 送葬",
+    "genre": "轻小说",
+    "chars": 3407
+  },
+  {
+    "ok": true,
+    "book": "魔王大人深不可测",
+    "chapter": "第1章 我叫罗炎，在魔王学院上学",
+    "genre": "轻小说",
+    "chars": 5394
+  },
+  {
+    "ok": true,
+    "book": "魔王大人深不可测",
+    "chapter": "第2章 恶魔都去考公了，只能我这个人类当魔王了",
+    "genre": "轻小说",
+    "chars": 6572
+  },
+  {
+    "ok": true,
+    "book": "魔王大人深不可测",
+    "chapter": "第3章 早在一千年前，也曾有人来到这片贫瘠的土地上",
+    "genre": "轻小说",
+    "chars": 4036
+  },
+  {
+    "ok": true,
+    "book": "在美漫当心灵导师的日子",
+    "chapter": "第一章 我成了蝙蝠侠的老师",
+    "genre": "轻小说",
+    "chars": 2880
+  },
+  {
+    "ok": true,
+    "book": "在美漫当心灵导师的日子",
+    "chapter": "第二章 再次的穿越",
+    "genre": "轻小说",
+    "chars": 3083
+  },
+  {
+    "ok": true,
+    "book": "在美漫当心灵导师的日子",
+    "chapter": "第三章 斯塔克的天价心理诊疗",
+    "genre": "轻小说",
+    "chars": 3002
+  },
+  {
+    "ok": true,
+    "book": "东京医途",
+    "chapter": "第1章 医疗事故",
+    "genre": "轻小说",
+    "chars": 3114
+  },
+  {
+    "ok": true,
+    "book": "东京医途",
+    "chapter": "第2章 祝你好运",
+    "genre": "轻小说",
+    "chars": 2205
+  },
+  {
+    "ok": true,
+    "book": "东京医途",
+    "chapter": "第3章 这也算奖励？",
+    "genre": "轻小说",
+    "chars": 3043
+  },
+  {
+    "ok": true,
+    "book": "没钱上大学的我只能去屠龙了",
+    "chapter": "第一章：剑道",
+    "genre": "轻小说",
+    "chars": 2679
+  },
+  {
+    "ok": true,
+    "book": "没钱上大学的我只能去屠龙了",
+    "chapter": "第二章：立春",
+    "genre": "轻小说",
+    "chars": 3530
+  },
+  {
+    "ok": true,
+    "book": "没钱上大学的我只能去屠龙了",
+    "chapter": "第三章：KY",
+    "genre": "轻小说",
+    "chars": 3004
+  },
+  {
+    "ok": true,
+    "book": "说好体验人生，仙子你怎么成真了",
+    "chapter": "第1章 朕这一生如履薄冰",
+    "genre": "轻小说",
+    "chars": 2095
+  },
+  {
+    "ok": true,
+    "book": "说好体验人生，仙子你怎么成真了",
+    "chapter": "第2章 从今天起，我就是你师父",
+    "genre": "轻小说",
+    "chars": 2104
+  },
+  {
+    "ok": true,
+    "book": "说好体验人生，仙子你怎么成真了",
+    "chapter": "第3章 清漪一定会成为很厉害很厉害的剑仙",
+    "genre": "轻小说",
+    "chars": 2059
+  },
+  {
+    "ok": true,
+    "book": "东京：从租借男友开始当完美男神",
+    "chapter": "第1章 租借男友",
+    "genre": "轻小说",
+    "chars": 2541
+  },
+  {
+    "ok": true,
+    "book": "东京：从租借男友开始当完美男神",
+    "chapter": "第2章 这么高的颜值，却这么纯情",
+    "genre": "轻小说",
+    "chars": 2466
+  },
+  {
+    "ok": true,
+    "book": "东京：从租借男友开始当完美男神",
+    "chapter": "第3章 朝日奈绪美",
+    "genre": "轻小说",
+    "chars": 4282
+  },
+  {
+    "ok": true,
+    "book": "鬼灭：我的呼吸法能加点",
+    "chapter": "第1章 不对，我退出键呢？",
+    "genre": "轻小说",
+    "chars": 2777
+  },
+  {
+    "ok": true,
+    "book": "鬼灭：我的呼吸法能加点",
+    "chapter": "第2章 赛前爆肝",
+    "genre": "轻小说",
+    "chars": 2987
+  },
+  {
+    "ok": true,
+    "book": "鬼灭：我的呼吸法能加点",
+    "chapter": "第3章 我真是见鬼了",
+    "genre": "轻小说",
+    "chars": 2472
+  },
+  {
+    "ok": true,
+    "book": "谁说我做的魔法卡牌有问题？",
+    "chapter": "第一章这张【心变】是你做的么？",
+    "genre": "轻小说",
+    "chars": 2814
+  },
+  {
+    "ok": true,
+    "book": "谁说我做的魔法卡牌有问题？",
+    "chapter": "第二章【反射筒】跟【枯萎】",
+    "genre": "轻小说",
+    "chars": 2370
+  },
+  {
+    "ok": true,
+    "book": "谁说我做的魔法卡牌有问题？",
+    "chapter": "第三章召唤卡、魔法卡、道具卡",
+    "genre": "轻小说",
+    "chars": 2073
+  },
+  {
+    "ok": true,
+    "book": "宇智波赤石之旅",
+    "chapter": "第一章 毕业仪式上的“幻术”",
+    "genre": "轻小说",
+    "chars": 2150
+  },
+  {
+    "ok": true,
+    "book": "宇智波赤石之旅",
+    "chapter": "第二章 这是何等的赤胆忠心！",
+    "genre": "轻小说",
+    "chars": 2208
+  },
+  {
+    "ok": true,
+    "book": "宇智波赤石之旅",
+    "chapter": "第三章 开眼",
+    "genre": "轻小说",
+    "chars": 2006
+  },
+  {
+    "ok": true,
+    "book": "柯南里的捡尸人",
+    "chapter": "第1章 你不要多想",
+    "genre": "轻小说",
+    "chars": 1512
+  },
+  {
+    "ok": true,
+    "book": "柯南里的捡尸人",
+    "chapter": "第2章 在？借一点点鲨气",
+    "genre": "轻小说",
+    "chars": 1510
+  },
+  {
+    "ok": true,
+    "book": "柯南里的捡尸人",
+    "chapter": "第3章 有事call劳模",
+    "genre": "轻小说",
+    "chars": 3059
+  },
+  {
+    "ok": true,
+    "book": "霍格沃茨：伏地魔也别阻止我学习",
+    "chapter": "002 对角巷购物",
+    "genre": "轻小说",
+    "chars": 2082
+  },
+  {
+    "ok": true,
+    "book": "霍格沃茨：伏地魔也别阻止我学习",
+    "chapter": "003 遇见哈利·波特",
+    "genre": "轻小说",
+    "chars": 2029
+  },
+  {
+    "ok": true,
+    "book": "霍格沃茨：伏地魔也别阻止我学习",
+    "chapter": "004 九又四分之三车站",
+    "genre": "轻小说",
+    "chars": 2131
+  },
+  {
+    "ok": true,
+    "book": "灭门夜，我易筋经大圆满！",
+    "chapter": "第一章 易筋经大圆满！",
+    "genre": "武侠",
+    "chars": 2412
+  },
+  {
+    "ok": true,
+    "book": "灭门夜，我易筋经大圆满！",
+    "chapter": "第二章 图命！",
+    "genre": "武侠",
+    "chars": 2166
+  },
+  {
+    "ok": true,
+    "book": "灭门夜，我易筋经大圆满！",
+    "chapter": "第四章 新的护卫任务",
+    "genre": "武侠",
+    "chars": 2661
+  },
+  {
+    "ok": true,
+    "book": "拔剑",
+    "chapter": "0、吴钩霜雪",
+    "genre": "武侠",
+    "chars": 4081
+  },
+  {
+    "ok": true,
+    "book": "拔剑",
+    "chapter": "0、强梁无奈做僧人",
+    "genre": "武侠",
+    "chars": 3787
+  },
+  {
+    "ok": true,
+    "book": "拔剑",
+    "chapter": "0、狼跋其胡，载踬其尾",
+    "genre": "武侠",
+    "chars": 996
+  },
+  {
+    "ok": true,
+    "book": "盖世双谐",
+    "chapter": "前言",
+    "genre": "武侠",
+    "chars": 764
+  },
+  {
+    "ok": true,
+    "book": "盖世双谐",
+    "chapter": "楔子",
+    "genre": "武侠",
+    "chars": 1427
+  },
+  {
+    "ok": true,
+    "book": "盖世双谐",
+    "chapter": "第一章 鱼市巨子",
+    "genre": "武侠",
+    "chars": 3133
+  },
+  {
+    "ok": true,
+    "book": "拳之下",
+    "chapter": "1、少年，异人",
+    "genre": "武侠",
+    "chars": 5363
+  },
+  {
+    "ok": true,
+    "book": "拳之下",
+    "chapter": "2、孙独鹤，黄皮书",
+    "genre": "武侠",
+    "chars": 5091
+  },
+  {
+    "ok": true,
+    "book": "拳之下",
+    "chapter": "3、皑皑白雪，满城风霜",
+    "genre": "武侠",
+    "chars": 5197
+  },
+  {
+    "ok": true,
+    "book": "人在峨眉，开局获取金色词条",
+    "chapter": "第1章 师太，我不想努力了！",
+    "genre": "武侠",
+    "chars": 2042
+  },
+  {
+    "ok": true,
+    "book": "人在峨眉，开局获取金色词条",
+    "chapter": "第2章 这峨眉，入定了",
+    "genre": "武侠",
+    "chars": 2485
+  },
+  {
+    "ok": true,
+    "book": "人在峨眉，开局获取金色词条",
+    "chapter": "第3章 新的金色词条",
+    "genre": "武侠",
+    "chars": 2152
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界当王爷",
+    "chapter": "第一章 我是镇西王？",
+    "genre": "武侠",
+    "chars": 3059
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界当王爷",
+    "chapter": "第二章 南海双剑",
+    "genre": "武侠",
+    "chars": 3162
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界当王爷",
+    "chapter": "第三章 王昱：又是我？",
+    "genre": "武侠",
+    "chars": 3090
+  },
+  {
+    "ok": true,
+    "book": "苦境：今天世界毁灭了吗",
+    "chapter": "第一章：你至少有三句话要说",
+    "genre": "武侠",
+    "chars": 2169
+  },
+  {
+    "ok": true,
+    "book": "苦境：今天世界毁灭了吗",
+    "chapter": "第二章：初出江湖就被人碰瓷",
+    "genre": "武侠",
+    "chars": 2048
+  },
+  {
+    "ok": true,
+    "book": "苦境：今天世界毁灭了吗",
+    "chapter": "第三章：苦境大舞台，挂小你别来",
+    "genre": "武侠",
+    "chars": 2077
+  },
+  {
+    "ok": true,
+    "book": "开局护送未亡人，获金刚不坏",
+    "chapter": "第1章 护送",
+    "genre": "武侠",
+    "chars": 3469
+  },
+  {
+    "ok": true,
+    "book": "开局护送未亡人，获金刚不坏",
+    "chapter": "第2章 解决",
+    "genre": "武侠",
+    "chars": 2049
+  },
+  {
+    "ok": true,
+    "book": "开局护送未亡人，获金刚不坏",
+    "chapter": "第3章 刘夫人",
+    "genre": "武侠",
+    "chars": 2018
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界玩养成",
+    "chapter": "第一章 “犯病”",
+    "genre": "武侠",
+    "chars": 3200
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界玩养成",
+    "chapter": "第二章 何为江湖",
+    "genre": "武侠",
+    "chars": 3003
+  },
+  {
+    "ok": true,
+    "book": "我在武侠世界玩养成",
+    "chapter": "第三章 初试身手",
+    "genre": "武侠",
+    "chars": 3053
+  },
+  {
+    "ok": true,
+    "book": "从易筋经开始，卧底成圣",
+    "chapter": "第二章 经映禅心，显照易筋",
+    "genre": "武侠",
+    "chars": 3115
+  },
+  {
+    "ok": true,
+    "book": "从易筋经开始，卧底成圣",
+    "chapter": "第一章 嵩山晨钟，佛门暗子",
+    "genre": "武侠",
+    "chars": 3384
+  },
+  {
+    "ok": true,
+    "book": "从易筋经开始，卧底成圣",
+    "chapter": "第三章 武场小校，抽签比武",
+    "genre": "武侠",
+    "chars": 2646
+  },
+  {
+    "ok": true,
+    "book": "秦时：我在天宗误入歧途",
+    "chapter": "第一章 潘家园中的淘古物",
+    "genre": "武侠",
+    "chars": 2424
+  },
+  {
+    "ok": true,
+    "book": "秦时：我在天宗误入歧途",
+    "chapter": "第二章 瓷枕黄粱，穿越伊始",
+    "genre": "武侠",
+    "chars": 3057
+  },
+  {
+    "ok": true,
+    "book": "秦时：我在天宗误入歧途",
+    "chapter": "第三章 三羊村，始知是战国",
+    "genre": "武侠",
+    "chars": 2083
+  },
+  {
+    "ok": true,
+    "book": "家师郭靖",
+    "chapter": "第一章 黄蓉三问",
+    "genre": "武侠",
+    "chars": 4132
+  },
+  {
+    "ok": true,
+    "book": "家师郭靖",
+    "chapter": "第二章 众人归来",
+    "genre": "武侠",
+    "chars": 2384
+  },
+  {
+    "ok": true,
+    "book": "家师郭靖",
+    "chapter": "第三章 金国覆灭",
+    "genre": "武侠",
+    "chars": 2869
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局满级九阳神功",
+    "chapter": "第1章 天书与满级九阳神功",
+    "genre": "武侠",
+    "chars": 2128
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局满级九阳神功",
+    "chapter": "第2章 既然两车互不相让，那就都别坐了。",
+    "genre": "武侠",
+    "chars": 2182
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局满级九阳神功",
+    "chapter": "第3章 ‘我记住你了’",
+    "genre": "武侠",
+    "chars": 2136
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局获十三龙十三象功力",
+    "chapter": "1.剑仙剑神",
+    "genre": "武侠",
+    "chars": 3960
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局获十三龙十三象功力",
+    "chapter": "2.胎穿大明",
+    "genre": "武侠",
+    "chars": 2636
+  },
+  {
+    "ok": true,
+    "book": "武侠：开局获十三龙十三象功力",
+    "chapter": "3.真龙现世",
+    "genre": "武侠",
+    "chars": 3225
+  },
+  {
+    "ok": true,
+    "book": "苦境：行走神州的乐子人",
+    "chapter": "第一章 北境三锋有四个？",
+    "genre": "武侠",
+    "chars": 2549
+  },
+  {
+    "ok": true,
+    "book": "苦境：行走神州的乐子人",
+    "chapter": "第二章 真香定律（求收藏）",
+    "genre": "武侠",
+    "chars": 2225
+  },
+  {
+    "ok": true,
+    "book": "苦境：行走神州的乐子人",
+    "chapter": "第三章 苦境大舞台，没挂你别来（求收藏）",
+    "genre": "武侠",
+    "chars": 2037
+  },
+  {
+    "ok": true,
+    "book": "剑出大唐",
+    "chapter": "第一章：太平道",
+    "genre": "武侠",
+    "chars": 2504
+  },
+  {
+    "ok": true,
+    "book": "剑出大唐",
+    "chapter": "第二章：浮雕图录",
+    "genre": "武侠",
+    "chars": 2965
+  },
+  {
+    "ok": true,
+    "book": "剑出大唐",
+    "chapter": "第三章：铁脚仙",
+    "genre": "武侠",
+    "chars": 2300
+  },
+  {
+    "ok": true,
+    "book": "综武：我的玩家们全是大佬",
+    "chapter": "第1章 欣喜的陆辞",
+    "genre": "武侠",
+    "chars": 2199
+  },
+  {
+    "ok": true,
+    "book": "综武：我的玩家们全是大佬",
+    "chapter": "第2章 燕七，一二三四五六七的七",
+    "genre": "武侠",
+    "chars": 2198
+  },
+  {
+    "ok": true,
+    "book": "综武：我的玩家们全是大佬",
+    "chapter": "第3章 意外情况",
+    "genre": "武侠",
+    "chars": 2059
+  },
+  {
+    "ok": true,
+    "book": "这江湖不混也罢",
+    "chapter": "第一章 我本无意入江湖",
+    "genre": "武侠",
+    "chars": 2060
+  },
+  {
+    "ok": true,
+    "book": "这江湖不混也罢",
+    "chapter": "第二章 星辰诀",
+    "genre": "武侠",
+    "chars": 2087
+  },
+  {
+    "ok": true,
+    "book": "这江湖不混也罢",
+    "chapter": "第三章 平常酒家",
+    "genre": "武侠",
+    "chars": 2222
+  },
+  {
+    "ok": true,
+    "book": "穿越天龙：天南我为尊",
+    "chapter": "第1章 穿越天龙寻琅嬛",
+    "genre": "武侠",
+    "chars": 2268
+  },
+  {
+    "ok": true,
+    "book": "穿越天龙：天南我为尊",
+    "chapter": "第2章 琅嬛福地玉仙子",
+    "genre": "武侠",
+    "chars": 2119
+  },
+  {
+    "ok": true,
+    "book": "穿越天龙：天南我为尊",
+    "chapter": "第3章 鸳鸯戏在河水间",
+    "genre": "武侠",
+    "chars": 2321
+  },
+  {
+    "ok": true,
+    "book": "拳之道！龙蛇起陆",
+    "chapter": "第一章 不该生在这个时代",
+    "genre": "武侠",
+    "chars": 3258
+  },
+  {
+    "ok": true,
+    "book": "拳之道！龙蛇起陆",
+    "chapter": "第二章 【命主：陈湛】",
+    "genre": "武侠",
+    "chars": 2345
+  },
+  {
+    "ok": true,
+    "book": "拳之道！龙蛇起陆",
+    "chapter": "第三章 1929，马三叛门，武圣犹在",
+    "genre": "武侠",
+    "chars": 2318
+  },
+  {
+    "ok": true,
+    "book": "哥布林重度依赖",
+    "chapter": "第1章 臭鱼烂虾",
+    "genre": "奇幻",
+    "chars": 2086
+  },
+  {
+    "ok": true,
+    "book": "哥布林重度依赖",
+    "chapter": "第2章 突袭",
+    "genre": "奇幻",
+    "chars": 2320
+  },
+  {
+    "ok": true,
+    "book": "哥布林重度依赖",
+    "chapter": "第3章 哥布林",
+    "genre": "奇幻",
+    "chars": 2023
+  },
+  {
+    "ok": true,
+    "book": "我的魔法没有上限！",
+    "chapter": "第一章 关于属性这件事",
+    "genre": "奇幻",
+    "chars": 2520
+  },
+  {
+    "ok": true,
+    "book": "我的魔法没有上限！",
+    "chapter": "第二章 魅惑法师",
+    "genre": "奇幻",
+    "chars": 2049
+  },
+  {
+    "ok": true,
+    "book": "我的魔法没有上限！",
+    "chapter": "第三章 术式天演",
+    "genre": "奇幻",
+    "chars": 2022
+  },
+  {
+    "ok": true,
+    "book": "这个地下城长蘑菇了",
+    "chapter": "1.变成蘑菇的公爵千金",
+    "genre": "奇幻",
+    "chars": 2424
+  },
+  {
+    "ok": true,
+    "book": "这个地下城长蘑菇了",
+    "chapter": "2.蘑菇园来了个外乡菇",
+    "genre": "奇幻",
+    "chars": 2421
+  },
+  {
+    "ok": true,
+    "book": "这个地下城长蘑菇了",
+    "chapter": "3.公爵的怒火",
+    "genre": "奇幻",
+    "chars": 2262
+  },
+  {
+    "ok": true,
+    "book": "主人说抽到的词条不能浪费",
+    "chapter": "第1章 何西和布鲁斯",
+    "genre": "奇幻",
+    "chars": 2236
+  },
+  {
+    "ok": true,
+    "book": "主人说抽到的词条不能浪费",
+    "chapter": "第2章 你想活出怎样的狗生",
+    "genre": "奇幻",
+    "chars": 2273
+  },
+  {
+    "ok": true,
+    "book": "主人说抽到的词条不能浪费",
+    "chapter": "第3章 语言的艺术",
+    "genre": "奇幻",
+    "chars": 2121
+  },
+  {
+    "ok": true,
+    "book": "修仙的我却来到了巫师世界",
+    "chapter": "第二章 天赋考核",
+    "genre": "奇幻",
+    "chars": 2634
+  },
+  {
+    "ok": true,
+    "book": "修仙的我却来到了巫师世界",
+    "chapter": "第三章 宣传和隐藏",
+    "genre": "奇幻",
+    "chars": 2849
+  },
+  {
+    "ok": true,
+    "book": "修仙的我却来到了巫师世界",
+    "chapter": "第四章 残酷的真相",
+    "genre": "奇幻",
+    "chars": 2018
+  },
+  {
+    "ok": true,
+    "book": "谁把遗言落这了？",
+    "chapter": "第一章 被撕裂的天空",
+    "genre": "奇幻",
+    "chars": 4445
+  },
+  {
+    "ok": true,
+    "book": "谁把遗言落这了？",
+    "chapter": "第二章 血色公审",
+    "genre": "奇幻",
+    "chars": 4782
+  },
+  {
+    "ok": true,
+    "book": "谁把遗言落这了？",
+    "chapter": "第三章 你能看见我？",
+    "genre": "奇幻",
+    "chars": 5500
+  },
+  {
+    "ok": true,
+    "book": "我的设定在你之上！",
+    "chapter": "第1章 新的时代",
+    "genre": "奇幻",
+    "chars": 6469
+  },
+  {
+    "ok": true,
+    "book": "我的设定在你之上！",
+    "chapter": "第2章 幻想消解",
+    "genre": "奇幻",
+    "chars": 4697
+  },
+  {
+    "ok": true,
+    "book": "我的设定在你之上！",
+    "chapter": "第3章 一位天使",
+    "genre": "奇幻",
+    "chars": 4987
+  },
+  {
+    "ok": true,
+    "book": "冒牌领主",
+    "chapter": "第1章 列车大劫案",
+    "genre": "奇幻",
+    "chars": 3226
+  },
+  {
+    "ok": true,
+    "book": "冒牌领主",
+    "chapter": "第2章 吸血鬼之戒",
+    "genre": "奇幻",
+    "chars": 2914
+  },
+  {
+    "ok": true,
+    "book": "冒牌领主",
+    "chapter": "第3章 灵能器官",
+    "genre": "奇幻",
+    "chars": 3381
+  },
+  {
+    "ok": true,
+    "book": "大不列颠之影",
+    "chapter": "第一章 亚瑟·黑斯廷斯",
+    "genre": "奇幻",
+    "chars": 3739
+  },
+  {
+    "ok": true,
+    "book": "大不列颠之影",
+    "chapter": "第二章 新的机遇？",
+    "genre": "奇幻",
+    "chars": 3980
+  },
+  {
+    "ok": true,
+    "book": "大不列颠之影",
+    "chapter": "第三章 刺穿苏格兰场",
+    "genre": "奇幻",
+    "chars": 2028
+  },
+  {
+    "ok": true,
+    "book": "绝夜之旅",
+    "chapter": "序幕 末日进行时",
+    "genre": "奇幻",
+    "chars": 3005
+  },
+  {
+    "ok": true,
+    "book": "绝夜之旅",
+    "chapter": "第一章 彼此孤立的时代",
+    "genre": "奇幻",
+    "chars": 3194
+  },
+  {
+    "ok": true,
+    "book": "绝夜之旅",
+    "chapter": "第二章 衔尾蛇",
+    "genre": "奇幻",
+    "chars": 3315
+  },
+  {
+    "ok": true,
+    "book": "诡秘：最后一个牧羊人",
+    "chapter": "第一章 穿越献祭现场",
+    "genre": "奇幻",
+    "chars": 2431
+  },
+  {
+    "ok": true,
+    "book": "诡秘：最后一个牧羊人",
+    "chapter": "第二章 倒吊",
+    "genre": "奇幻",
+    "chars": 2506
+  },
+  {
+    "ok": true,
+    "book": "诡秘：最后一个牧羊人",
+    "chapter": "第三章 M女士",
+    "genre": "奇幻",
+    "chars": 2844
+  },
+  {
+    "ok": true,
+    "book": "钢铁火药和施法者",
+    "chapter": "书中世界所使用的单位",
+    "genre": "奇幻",
+    "chars": 386
+  },
+  {
+    "ok": true,
+    "book": "钢铁火药和施法者",
+    "chapter": "序章",
+    "genre": "奇幻",
+    "chars": 3563
+  },
+  {
+    "ok": true,
+    "book": "钢铁火药和施法者",
+    "chapter": "《常用汉译名/音译名/外语对照表》",
+    "genre": "奇幻",
+    "chars": 2783
+  },
+  {
+    "ok": true,
+    "book": "战锤：以涅槃之名",
+    "chapter": "序章",
+    "genre": "奇幻",
+    "chars": 4087
+  },
+  {
+    "ok": true,
+    "book": "战锤：以涅槃之名",
+    "chapter": "第一章 卑鄙者之死",
+    "genre": "奇幻",
+    "chars": 4399
+  },
+  {
+    "ok": true,
+    "book": "战锤：以涅槃之名",
+    "chapter": "第二章 饥饿",
+    "genre": "奇幻",
+    "chars": 3087
+  },
+  {
+    "ok": true,
+    "book": "超魔术士：开局魔网又崩了",
+    "chapter": "第1章 魔网又崩了",
+    "genre": "奇幻",
+    "chars": 2412
+  },
+  {
+    "ok": true,
+    "book": "超魔术士：开局魔网又崩了",
+    "chapter": "货币与物价",
+    "genre": "奇幻",
+    "chars": 1479
+  },
+  {
+    "ok": true,
+    "book": "超魔术士：开局魔网又崩了",
+    "chapter": "魔力值系统",
+    "genre": "奇幻",
+    "chars": 1639
+  },
+  {
+    "ok": true,
+    "book": "帝皇在上",
+    "chapter": "第1章 三个选择",
+    "genre": "奇幻",
+    "chars": 4111
+  },
+  {
+    "ok": true,
+    "book": "帝皇在上",
+    "chapter": "第2章 分封",
+    "genre": "奇幻",
+    "chars": 2025
+  },
+  {
+    "ok": true,
+    "book": "帝皇在上",
+    "chapter": "第3章 烂地好起家",
+    "genre": "奇幻",
+    "chars": 2051
+  },
+  {
+    "ok": true,
+    "book": "我有一本任务日志",
+    "chapter": "第1章 贫民窟的年轻人",
+    "genre": "奇幻",
+    "chars": 2409
+  },
+  {
+    "ok": true,
+    "book": "我有一本任务日志",
+    "chapter": "第2章 马车上路",
+    "genre": "奇幻",
+    "chars": 2738
+  },
+  {
+    "ok": true,
+    "book": "我有一本任务日志",
+    "chapter": "第3章 森林的鬼影",
+    "genre": "奇幻",
+    "chars": 2060
+  },
+  {
+    "ok": true,
+    "book": "矢车菊魔女",
+    "chapter": "第1章 少女和狼",
+    "genre": "奇幻",
+    "chars": 3623
+  },
+  {
+    "ok": true,
+    "book": "矢车菊魔女",
+    "chapter": "第2章 沉睡的过往",
+    "genre": "奇幻",
+    "chars": 5438
+  },
+  {
+    "ok": true,
+    "book": "矢车菊魔女",
+    "chapter": "第3章 城堡·王权学派",
+    "genre": "奇幻",
+    "chars": 5688
+  },
+  {
+    "ok": true,
+    "book": "放开那个女巫",
+    "chapter": "第一章 从今天开始做王子",
+    "genre": "奇幻",
+    "chars": 2741
+  },
+  {
+    "ok": true,
+    "book": "放开那个女巫",
+    "chapter": "第二章 女巫安娜（上）",
+    "genre": "奇幻",
+    "chars": 2403
+  },
+  {
+    "ok": true,
+    "book": "放开那个女巫",
+    "chapter": "第三章 女巫安娜（下）",
+    "genre": "奇幻",
+    "chars": 2156
+  },
+  {
+    "ok": true,
+    "book": "这书有毒！",
+    "chapter": "第1章 关于我转生到笔下黑历史这件事",
+    "genre": "奇幻",
+    "chars": 2904
+  },
+  {
+    "ok": true,
+    "book": "这书有毒！",
+    "chapter": "第2章 我无话可说，速速动手",
+    "genre": "奇幻",
+    "chars": 2404
+  },
+  {
+    "ok": true,
+    "book": "这书有毒！",
+    "chapter": "第3章 开门，审判庭！",
+    "genre": "奇幻",
+    "chars": 4224
+  },
+  {
+    "ok": true,
+    "book": "以皇帝特权改变这个世界",
+    "chapter": "第1章 奥瑞利安领的伊恩男爵",
+    "genre": "奇幻",
+    "chars": 2161
+  },
+  {
+    "ok": true,
+    "book": "以皇帝特权改变这个世界",
+    "chapter": "第2章 巧言的管家",
+    "genre": "奇幻",
+    "chars": 2197
+  },
+  {
+    "ok": true,
+    "book": "以皇帝特权改变这个世界",
+    "chapter": "第3章 强健的骑士",
+    "genre": "奇幻",
+    "chars": 2662
+  },
+  {
+    "ok": true,
+    "book": "第四天灾就没有正常的",
+    "chapter": "第1章 我不懂剑法我还不懂战斗吗？",
+    "genre": "诸天无限",
+    "chars": 2152
+  },
+  {
+    "ok": true,
+    "book": "第四天灾就没有正常的",
+    "chapter": "第2章 故事的开端",
+    "genre": "诸天无限",
+    "chars": 2289
+  },
+  {
+    "ok": true,
+    "book": "第四天灾就没有正常的",
+    "chapter": "第3章 关于杂兵就是关底BOSS这件事",
+    "genre": "诸天无限",
+    "chars": 2380
+  },
+  {
+    "ok": true,
+    "book": "漫威世界的唯一玩家",
+    "chapter": "第1章 漫威里的玩家",
+    "genre": "诸天无限",
+    "chars": 2587
+  },
+  {
+    "ok": true,
+    "book": "漫威世界的唯一玩家",
+    "chapter": "第2章 新手村村长",
+    "genre": "诸天无限",
+    "chars": 2417
+  },
+  {
+    "ok": true,
+    "book": "漫威世界的唯一玩家",
+    "chapter": "第3章 节操？玩家有那玩意吗？",
+    "genre": "诸天无限",
+    "chars": 2053
+  },
+  {
+    "ok": true,
+    "book": "诸天：小李飞刀开始",
+    "chapter": "第1章 ：潘连城",
+    "genre": "诸天无限",
+    "chars": 2057
+  },
+  {
+    "ok": true,
+    "book": "诸天：小李飞刀开始",
+    "chapter": "第2章 ：初遇李寻欢",
+    "genre": "诸天无限",
+    "chars": 3079
+  },
+  {
+    "ok": true,
+    "book": "诸天：小李飞刀开始",
+    "chapter": "第3章 ：我啊，天纵奇才",
+    "genre": "诸天无限",
+    "chars": 4013
+  },
+  {
+    "ok": true,
+    "book": "白手起家，蝙蝠侠干碎我的致富梦",
+    "chapter": "第1章 到底是谁会想在哥谭找到合法工作",
+    "genre": "诸天无限",
+    "chars": 2184
+  },
+  {
+    "ok": true,
+    "book": "白手起家，蝙蝠侠干碎我的致富梦",
+    "chapter": "第2章 只要我没钱，就没人能偷到我",
+    "genre": "诸天无限",
+    "chars": 2113
+  },
+  {
+    "ok": true,
+    "book": "白手起家，蝙蝠侠干碎我的致富梦",
+    "chapter": "第3章 怎么真有人抢穷鬼啊",
+    "genre": "诸天无限",
+    "chars": 2071
+  },
+  {
+    "ok": true,
+    "book": "明尊",
+    "chapter": "第一章金手指成精啦！",
+    "genre": "诸天无限",
+    "chars": 4737
+  },
+  {
+    "ok": true,
+    "book": "明尊",
+    "chapter": "第二章我做珠子精的那些年",
+    "genre": "诸天无限",
+    "chars": 3165
+  },
+  {
+    "ok": true,
+    "book": "明尊",
+    "chapter": "第三章荒山孤坟借狐粮",
+    "genre": "诸天无限",
+    "chars": 4195
+  },
+  {
+    "ok": true,
+    "book": "人在漫威编剧本，说我幕后黑手？",
+    "chapter": "第1章 纽约的佛国",
+    "genre": "诸天无限",
+    "chars": 5670
+  },
+  {
+    "ok": true,
+    "book": "人在漫威编剧本，说我幕后黑手？",
+    "chapter": "第2章 漫威混乱的开端",
+    "genre": "诸天无限",
+    "chars": 3895
+  },
+  {
+    "ok": true,
+    "book": "人在漫威编剧本，说我幕后黑手？",
+    "chapter": "第3章 木乃伊？僵尸！",
+    "genre": "诸天无限",
+    "chars": 3441
+  },
+  {
+    "ok": true,
+    "book": "港片：做大佬，我用钱话事",
+    "chapter": "001章 林笑如",
+    "genre": "诸天无限",
+    "chars": 2357
+  },
+  {
+    "ok": true,
+    "book": "港片：做大佬，我用钱话事",
+    "chapter": "002章 不抢哪来的生意",
+    "genre": "诸天无限",
+    "chars": 2305
+  },
+  {
+    "ok": true,
+    "book": "港片：做大佬，我用钱话事",
+    "chapter": "003章 我对你的苦难没兴趣",
+    "genre": "诸天无限",
+    "chars": 2095
+  },
+  {
+    "ok": true,
+    "book": "诸天：一切从拜师石坚开始！",
+    "chapter": "第一章：不靠谱的师父！",
+    "genre": "诸天无限",
+    "chars": 3047
+  },
+  {
+    "ok": true,
+    "book": "诸天：一切从拜师石坚开始！",
+    "chapter": "第二章：赌狗不得好死！",
+    "genre": "诸天无限",
+    "chars": 2367
+  },
+  {
+    "ok": true,
+    "book": "诸天：一切从拜师石坚开始！",
+    "chapter": "第三章：穿越者怎么能没挂呢！",
+    "genre": "诸天无限",
+    "chars": 3856
+  },
+  {
+    "ok": true,
+    "book": "穿越魔教教主，但甲子荡魔",
+    "chapter": "第1章:穿越魔教教主，开局被白胡子老道打上门",
+    "genre": "诸天无限",
+    "chars": 3459
+  },
+  {
+    "ok": true,
+    "book": "穿越魔教教主，但甲子荡魔",
+    "chapter": "第2章:我部悍将刘三刀，只需三刀，必拿下…",
+    "genre": "诸天无限",
+    "chars": 2439
+  },
+  {
+    "ok": true,
+    "book": "穿越魔教教主，但甲子荡魔",
+    "chapter": "第3章:张三丰:莫欺少年穷！莫欺中年穷！莫欺老年穷！",
+    "genre": "诸天无限",
+    "chars": 2677
+  },
+  {
+    "ok": true,
+    "book": "噬恶演武，诸天除魔",
+    "chapter": "第1章 晨光少，病者多",
+    "genre": "诸天无限",
+    "chars": 5518
+  },
+  {
+    "ok": true,
+    "book": "噬恶演武，诸天除魔",
+    "chapter": "第2章 追到坟头来留客",
+    "genre": "诸天无限",
+    "chars": 4935
+  },
+  {
+    "ok": true,
+    "book": "噬恶演武，诸天除魔",
+    "chapter": "第3章 略通拳脚",
+    "genre": "诸天无限",
+    "chars": 4935
+  },
+  {
+    "ok": true,
+    "book": "伊塔纪元",
+    "chapter": "第一章 算账",
+    "genre": "诸天无限",
+    "chars": 2226
+  },
+  {
+    "ok": true,
+    "book": "伊塔纪元",
+    "chapter": "第二章 伊塔世界",
+    "genre": "诸天无限",
+    "chars": 2095
+  },
+  {
+    "ok": true,
+    "book": "伊塔纪元",
+    "chapter": "第三章 桃源村（一）",
+    "genre": "诸天无限",
+    "chars": 2076
+  },
+  {
+    "ok": true,
+    "book": "影视世界从药神开始",
+    "chapter": "第一章 我不是药神",
+    "genre": "诸天无限",
+    "chars": 3585
+  },
+  {
+    "ok": true,
+    "book": "影视世界从药神开始",
+    "chapter": "第二章 买药、刘思惠",
+    "genre": "诸天无限",
+    "chars": 3562
+  },
+  {
+    "ok": true,
+    "book": "影视世界从药神开始",
+    "chapter": "第三章 卖药",
+    "genre": "诸天无限",
+    "chars": 3483
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：全员杂鱼？",
+    "chapter": "第一章 我都割了金手指才来？",
+    "genre": "诸天无限",
+    "chars": 2241
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：全员杂鱼？",
+    "chapter": "第二章 换家行动",
+    "genre": "诸天无限",
+    "chars": 2266
+  },
+  {
+    "ok": true,
+    "book": "同时穿越：全员杂鱼？",
+    "chapter": "第三章 第三个林如海，又一条杂鱼",
+    "genre": "诸天无限",
+    "chars": 2211
+  },
+  {
+    "ok": true,
+    "book": "人在诸天，随时起飞",
+    "chapter": "第1章 外语好啊，外语得学呀",
+    "genre": "诸天无限",
+    "chars": 2527
+  },
+  {
+    "ok": true,
+    "book": "人在诸天，随时起飞",
+    "chapter": "第2章 我们的友谊坚不可摧",
+    "genre": "诸天无限",
+    "chars": 2765
+  },
+  {
+    "ok": true,
+    "book": "人在诸天，随时起飞",
+    "chapter": "第3章 生儿，但育女",
+    "genre": "诸天无限",
+    "chars": 2122
+  },
+  {
+    "ok": true,
+    "book": "诸天大邪修",
+    "chapter": "第1章 葵花宝典",
+    "genre": "诸天无限",
+    "chars": 2620
+  },
+  {
+    "ok": true,
+    "book": "诸天大邪修",
+    "chapter": "第2章 比武招亲",
+    "genre": "诸天无限",
+    "chars": 2869
+  },
+  {
+    "ok": true,
+    "book": "诸天大邪修",
+    "chapter": "第3章 难说",
+    "genre": "诸天无限",
+    "chars": 2608
+  },
+  {
+    "ok": true,
+    "book": "人在港综，打造超级财阀",
+    "chapter": "第1章 坤哥，你是不是痴线啊？",
+    "genre": "诸天无限",
+    "chars": 4097
+  },
+  {
+    "ok": true,
+    "book": "人在港综，打造超级财阀",
+    "chapter": "第2章 洪泰太子送上门",
+    "genre": "诸天无限",
+    "chars": 2717
+  },
+  {
+    "ok": true,
+    "book": "人在港综，打造超级财阀",
+    "chapter": "第3章 插旗、火拼",
+    "genre": "诸天无限",
+    "chars": 2756
+  },
+  {
+    "ok": true,
+    "book": "古龙世界里的第一深情",
+    "chapter": "第1章 方云华",
+    "genre": "诸天无限",
+    "chars": 2110
+  },
+  {
+    "ok": true,
+    "book": "古龙世界里的第一深情",
+    "chapter": "第2章 枯梅",
+    "genre": "诸天无限",
+    "chars": 2195
+  },
+  {
+    "ok": true,
+    "book": "古龙世界里的第一深情",
+    "chapter": "第3章 楚留香",
+    "genre": "诸天无限",
+    "chars": 2154
+  },
+  {
+    "ok": true,
+    "book": "人在箱庭，我真没想当上帝",
+    "chapter": "第2章：嗯？这万圣节女王怎么是只幼女啊？",
+    "genre": "诸天无限",
+    "chars": 2015
+  },
+  {
+    "ok": true,
+    "book": "人在箱庭，我真没想当上帝",
+    "chapter": "第3章：万圣节女王的加护",
+    "genre": "诸天无限",
+    "chars": 2058
+  },
+  {
+    "ok": true,
+    "book": "人在箱庭，我真没想当上帝",
+    "chapter": "第1章：啊？我去照顾万圣节女王？",
+    "genre": "诸天无限",
+    "chars": 2205
+  },
+  {
+    "ok": true,
+    "book": "武侠世界，武道人仙",
+    "chapter": "1，小龙女捡到了活神仙？",
+    "genre": "诸天无限",
+    "chars": 3308
+  },
+  {
+    "ok": true,
+    "book": "武侠世界，武道人仙",
+    "chapter": "2，砍树也是练武！",
+    "genre": "诸天无限",
+    "chars": 3200
+  },
+  {
+    "ok": true,
+    "book": "武侠世界，武道人仙",
+    "chapter": "3，什么？我练不出内力？",
+    "genre": "诸天无限",
+    "chars": 4571
+  },
+  {
+    "ok": true,
+    "book": "影视：开局获得阿尔法狗",
+    "chapter": "第一章：这才是天命之子该有的待遇",
+    "genre": "诸天无限",
+    "chars": 2343
+  },
+  {
+    "ok": true,
+    "book": "影视：开局获得阿尔法狗",
+    "chapter": "第二章：三美齐聚",
+    "genre": "诸天无限",
+    "chars": 2083
+  },
+  {
+    "ok": true,
+    "book": "影视：开局获得阿尔法狗",
+    "chapter": "第三章：最高奖励",
+    "genre": "诸天无限",
+    "chars": 2085
+  },
+  {
+    "ok": true,
+    "book": "东方既白",
+    "chapter": "第001章 方既白",
+    "genre": "军事",
+    "chars": 2102
+  },
+  {
+    "ok": true,
+    "book": "东方既白",
+    "chapter": "第002章 ‘大圣’（新年快乐）",
+    "genre": "军事",
+    "chars": 2106
+  },
+  {
+    "ok": true,
+    "book": "东方既白",
+    "chapter": "第003章 石婆婆巷二十一号",
+    "genre": "军事",
+    "chars": 2109
+  },
+  {
+    "ok": true,
+    "book": "谍战代号：申公豹",
+    "chapter": "第一章 替身",
+    "genre": "军事",
+    "chars": 3084
+  },
+  {
+    "ok": true,
+    "book": "谍战代号：申公豹",
+    "chapter": "第二章 投名状",
+    "genre": "军事",
+    "chars": 2640
+  },
+  {
+    "ok": true,
+    "book": "谍战代号：申公豹",
+    "chapter": "第三章 代号“申公豹”",
+    "genre": "军事",
+    "chars": 2053
+  },
+  {
+    "ok": true,
+    "book": "怕死抗什么日",
+    "chapter": "第1章 怎么才来啊",
+    "genre": "军事",
+    "chars": 2967
+  },
+  {
+    "ok": true,
+    "book": "怕死抗什么日",
+    "chapter": "第2章 援军明日抵达",
+    "genre": "军事",
+    "chars": 2748
+  },
+  {
+    "ok": true,
+    "book": "怕死抗什么日",
+    "chapter": "第3章 半个鸡蛋",
+    "genre": "军事",
+    "chars": 3222
+  },
+  {
+    "ok": true,
+    "book": "帝国余晖：从敦刻尔克开始",
+    "chapter": "第1章 阿兹海布鲁克的“花瓶”",
+    "genre": "军事",
+    "chars": 5577
+  },
+  {
+    "ok": true,
+    "book": "帝国余晖：从敦刻尔克开始",
+    "chapter": "第2章 绅士的战争",
+    "genre": "军事",
+    "chars": 3125
+  },
+  {
+    "ok": true,
+    "book": "帝国余晖：从敦刻尔克开始",
+    "chapter": "第3章 冷溪近卫团的传统",
+    "genre": "军事",
+    "chars": 5219
+  },
+  {
+    "ok": true,
+    "book": "谍战，都别猜了，我真是卧底啊",
+    "chapter": "第一章 回到民国",
+    "genre": "军事",
+    "chars": 2403
+  },
+  {
+    "ok": true,
+    "book": "谍战，都别猜了，我真是卧底啊",
+    "chapter": "第二章 我不想听理由",
+    "genre": "军事",
+    "chars": 2115
+  },
+  {
+    "ok": true,
+    "book": "谍战，都别猜了，我真是卧底啊",
+    "chapter": "第三章 帝国之未来",
+    "genre": "军事",
+    "chars": 2076
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从晋西北到长津湖百战百胜",
+    "chapter": "第1章 三枚子弹",
+    "genre": "军事",
+    "chars": 2177
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从晋西北到长津湖百战百胜",
+    "chapter": "第2章 夜黑风高",
+    "genre": "军事",
+    "chars": 2118
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从晋西北到长津湖百战百胜",
+    "chapter": "第3章 歼灭战",
+    "genre": "军事",
+    "chars": 2089
+  },
+  {
+    "ok": true,
+    "book": "佣兵我为王",
+    "chapter": "第1章 战区",
+    "genre": "军事",
+    "chars": 2457
+  },
+  {
+    "ok": true,
+    "book": "佣兵我为王",
+    "chapter": "第2章 袭击",
+    "genre": "军事",
+    "chars": 2892
+  },
+  {
+    "ok": true,
+    "book": "佣兵我为王",
+    "chapter": "第3章 交火",
+    "genre": "军事",
+    "chars": 2456
+  },
+  {
+    "ok": true,
+    "book": "抗战之我是一个工业人",
+    "chapter": "第一章：梦回1935",
+    "genre": "军事",
+    "chars": 2658
+  },
+  {
+    "ok": true,
+    "book": "抗战之我是一个工业人",
+    "chapter": "第二章：我们捡到宝了",
+    "genre": "军事",
+    "chars": 3174
+  },
+  {
+    "ok": true,
+    "book": "抗战之我是一个工业人",
+    "chapter": "第三章：因陋就简造手榴弹",
+    "genre": "军事",
+    "chars": 2207
+  },
+  {
+    "ok": true,
+    "book": "抗战：来自钢铁雄心的工程师",
+    "chapter": "第一章 绝不妥协，绝不屈服",
+    "genre": "军事",
+    "chars": 2653
+  },
+  {
+    "ok": true,
+    "book": "抗战：来自钢铁雄心的工程师",
+    "chapter": "第二章 此事在通辽狠人系列中，亦有记载",
+    "genre": "军事",
+    "chars": 3265
+  },
+  {
+    "ok": true,
+    "book": "抗战：来自钢铁雄心的工程师",
+    "chapter": "第三章 谁说战略轰炸机就不能狗斗",
+    "genre": "军事",
+    "chars": 2375
+  },
+  {
+    "ok": true,
+    "book": "长津湖：满仓有身装备栏",
+    "chapter": "第1章 雪域，传承",
+    "genre": "军事",
+    "chars": 2108
+  },
+  {
+    "ok": true,
+    "book": "长津湖：满仓有身装备栏",
+    "chapter": "第2章 来自天空的",
+    "genre": "军事",
+    "chars": 2094
+  },
+  {
+    "ok": true,
+    "book": "长津湖：满仓有身装备栏",
+    "chapter": "第6章 扎营",
+    "genre": "军事",
+    "chars": 2029
+  },
+  {
+    "ok": true,
+    "book": "我的谍战岁月",
+    "chapter": "第001章 程千帆",
+    "genre": "军事",
+    "chars": 2121
+  },
+  {
+    "ok": true,
+    "book": "我的谍战岁月",
+    "chapter": "第002章 抓捕",
+    "genre": "军事",
+    "chars": 2127
+  },
+  {
+    "ok": true,
+    "book": "我的谍战岁月",
+    "chapter": "第003章 牺牲",
+    "genre": "军事",
+    "chars": 2642
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从手搓大炮到工业巨擘",
+    "chapter": "第一章 兵工厂停产",
+    "genre": "军事",
+    "chars": 2158
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从手搓大炮到工业巨擘",
+    "chapter": "第二章 弯道超车",
+    "genre": "军事",
+    "chars": 2232
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从手搓大炮到工业巨擘",
+    "chapter": "第三章 地狱大炮",
+    "genre": "军事",
+    "chars": 2061
+  },
+  {
+    "ok": true,
+    "book": "我的抗联岁月",
+    "chapter": "楔子‘本书创作原因’",
+    "genre": "军事",
+    "chars": 206
+  },
+  {
+    "ok": true,
+    "book": "我的抗联岁月",
+    "chapter": "第一章 步入",
+    "genre": "军事",
+    "chars": 2013
+  },
+  {
+    "ok": true,
+    "book": "我的抗联岁月",
+    "chapter": "第二章 国殇之下",
+    "genre": "军事",
+    "chars": 2682
+  },
+  {
+    "ok": true,
+    "book": "长津湖：从决战朝鲜到越战的血",
+    "chapter": "第一章穿越伍万里，获得选择系统",
+    "genre": "军事",
+    "chars": 1180
+  },
+  {
+    "ok": true,
+    "book": "长津湖：从决战朝鲜到越战的血",
+    "chapter": "第二章 伍万里入伍，获得近战搏斗奖励",
+    "genre": "军事",
+    "chars": 1674
+  },
+  {
+    "ok": true,
+    "book": "长津湖：从决战朝鲜到越战的血",
+    "chapter": "第三章 第六百七十七名战士伍万里",
+    "genre": "军事",
+    "chars": 3331
+  },
+  {
+    "ok": true,
+    "book": "谍战：从看到记忆开始的谍海生涯",
+    "chapter": "第1章 火车抓捕",
+    "genre": "军事",
+    "chars": 2072
+  },
+  {
+    "ok": true,
+    "book": "谍战：从看到记忆开始的谍海生涯",
+    "chapter": "第2章 特殊能力",
+    "genre": "军事",
+    "chars": 2250
+  },
+  {
+    "ok": true,
+    "book": "谍战：从看到记忆开始的谍海生涯",
+    "chapter": "第3章 科室选择",
+    "genre": "军事",
+    "chars": 2303
+  },
+  {
+    "ok": true,
+    "book": "亮剑：谁敢叫我程瞎子？",
+    "chapter": "001 重生程瞎子，开局有点难！",
+    "genre": "军事",
+    "chars": 2674
+  },
+  {
+    "ok": true,
+    "book": "亮剑：谁敢叫我程瞎子？",
+    "chapter": "002枢纽平康镇，旅部见大头",
+    "genre": "军事",
+    "chars": 2394
+  },
+  {
+    "ok": true,
+    "book": "亮剑：谁敢叫我程瞎子？",
+    "chapter": "003 力压李云龙，扬威主力团",
+    "genre": "军事",
+    "chars": 2397
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从兵工厂打造一个工业帝国",
+    "chapter": "第1章 新一团落后的医疗条件",
+    "genre": "军事",
+    "chars": 2441
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从兵工厂打造一个工业帝国",
+    "chapter": "第2章 为伤员合成消毒剂",
+    "genre": "军事",
+    "chars": 2037
+  },
+  {
+    "ok": true,
+    "book": "亮剑：从兵工厂打造一个工业帝国",
+    "chapter": "第3章 老李准备绣花",
+    "genre": "军事",
+    "chars": 1986
+  },
+  {
+    "ok": true,
+    "book": "长津湖：最可爱的人",
+    "chapter": "第1章 第七穿插连",
+    "genre": "军事",
+    "chars": 2352
+  },
+  {
+    "ok": true,
+    "book": "长津湖：最可爱的人",
+    "chapter": "第2章 外挂与装备",
+    "genre": "军事",
+    "chars": 1949
+  },
+  {
+    "ok": true,
+    "book": "长津湖：最可爱的人",
+    "chapter": "第3章 1950他们正年轻",
+    "genre": "军事",
+    "chars": 3146
+  },
+  {
+    "ok": true,
+    "book": "炮火弧线",
+    "chapter": "第1章 剧本杀？不，是穿越哒！",
+    "genre": "军事",
+    "chars": 3308
+  },
+  {
+    "ok": true,
+    "book": "炮火弧线",
+    "chapter": "第2章 第一个部下",
+    "genre": "军事",
+    "chars": 4747
+  },
+  {
+    "ok": true,
+    "book": "炮火弧线",
+    "chapter": "第3章 挂彩了",
+    "genre": "军事",
+    "chars": 3038
+  },
+  {
+    "ok": true,
+    "book": "谍战：我能扫描万物信息",
+    "chapter": "第1章 穿越",
+    "genre": "军事",
+    "chars": 2141
+  },
+  {
+    "ok": true,
+    "book": "谍战：我能扫描万物信息",
+    "chapter": "第2章 甄别？",
+    "genre": "军事",
+    "chars": 2283
+  },
+  {
+    "ok": true,
+    "book": "谍战：我能扫描万物信息",
+    "chapter": "第3章 内鬼！",
+    "genre": "军事",
+    "chars": 2079
+  },
+  {
+    "ok": true,
     "cached": true,
     "book": "华娱：我只想摆烂，顶流什么鬼",
     "chapter": "第一章《偶像练习生》",

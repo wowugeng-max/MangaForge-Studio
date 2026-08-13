@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { registerFingerprintContractRoutes } from './fingerprint-contracts'
+import { resetFingerprintContractJobsForTest, setFingerprintLibBuildRunnerForTest } from '../fingerprint-contract-jobs'
 import { createNovelProject, createNovelReview } from '../novel'
 import { buildFingerprintScoreReviewRecord } from '../fingerprint-contract-scores'
 import * as workspaceModule from '../workspace'
@@ -118,6 +119,7 @@ async function seedFingerprintScoreReview(
 afterEach(async () => {
   await Promise.all(dirs.map((d) => rm(d, { recursive: true, force: true })))
   dirs = []
+  resetFingerprintContractJobsForTest()
 })
 
 describe('fingerprint contract routes', () => {
@@ -257,6 +259,33 @@ describe('fingerprint contract routes', () => {
     const res = await call(handlers.get('GET /api/fingerprint-contracts/scores'), { query: { set_id: 'no-such-set' } })
     expect(res.statusCode).toBe(200)
     expect(res.body.rows).toEqual([])
+  })
+
+  test('POST generate online_fetch runs expand then completes with a set id', async () => {
+    const ws = await tempWorkspace()
+    const lib = join(ws, 'workspace', 'fingerprint-lib')
+    await writeSamples(lib, 2)
+    setFingerprintLibBuildRunnerForTest(async ({ libRoot, onProgress }) => {
+      onProgress?.('mock fetch ok')
+      await writeFile(join(libRoot, 'human', 'urban', 'human_qd_online.txt'), sampleText(8), 'utf8')
+    })
+    const { app, handlers } = createRouteHarness()
+    registerFingerprintContractRoutes(app, () => join(ws, 'workspace'))
+    const started = await call(handlers.get('POST /api/fingerprint-contracts/generate'), {
+      body: { mode: 'online_fetch', label: '联网测试' },
+    })
+    expect(started.statusCode).toBe(200)
+    expect(started.body.job.mode).toBe('online_fetch')
+    expect(started.body.job.status).not.toBe('failed')
+    const jobId = started.body.job.id
+    let job = started.body.job
+    for (let i = 0; i < 60 && job.status !== 'completed' && job.status !== 'failed'; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      job = (await call(handlers.get('GET /api/fingerprint-contracts/jobs/:jobId'), { params: { jobId } })).body.job
+    }
+    expect(job.status).toBe('completed')
+    expect(job.set_id).toBe(jobId)
+    expect(String(job.error || '')).not.toContain('手动运行')
   })
 
   test('generate job records the produced set id when it completes', async () => {

@@ -1,5 +1,6 @@
+import { spawn } from 'child_process'
 import { readFile, writeFile, mkdir, readdir, stat } from 'fs/promises'
-import { join, basename } from 'path'
+import { basename, dirname, join, resolve } from 'path'
 import {
   BUILTIN_CONTRACT_SET_ID,
   getContractSetDir,
@@ -48,6 +49,13 @@ export function hasRunningFingerprintContractJob() {
 // Test-only: clears the in-process job map.
 export function resetFingerprintContractJobsForTest(): void {
   jobs.clear()
+  expandLibraryForTest = null
+}
+
+let expandLibraryForTest: FingerprintLibBuildRunner | null = null
+
+export function setFingerprintLibBuildRunnerForTest(runner: FingerprintLibBuildRunner | null) {
+  expandLibraryForTest = runner
 }
 
 async function listSampleFiles(libRoot: string): Promise<Array<{ abs: string; genre: string }>> {
@@ -109,11 +117,17 @@ async function readContractFile(path: string): Promise<FingerprintContract | nul
   }
 }
 
+export type FingerprintLibBuildRunner = (input: {
+  libRoot: string
+  onProgress?: (text: string) => void
+}) => Promise<void>
+
 export async function runOfflineRefitJob(input: {
   libRoot: string
   setId: string
   label: string
   notes: string
+  mode?: FingerprintContractSetMode
   onProgress?: (text: string) => void
 }) {
   if (input.setId === BUILTIN_CONTRACT_SET_ID) {
@@ -159,7 +173,7 @@ export async function runOfflineRefitJob(input: {
   for (const [slug, contract] of Object.entries(genreContracts)) {
     await writeFile(join(setDir, 'by-genre', `${slug}.json`), `${JSON.stringify(contract, null, 2)}\n`, 'utf8')
   }
-  const mode: FingerprintContractSetMode = 'offline_refit'
+  const mode: FingerprintContractSetMode = input.mode === 'online_fetch' ? 'online_fetch' : 'offline_refit'
   await writeFile(
     join(setDir, 'meta.json'),
     `${JSON.stringify({ mode, sample_count: samples.length, genre_count: Object.keys(genreContracts).length, created_at: new Date().toISOString(), inherited_prose_from: BUILTIN_CONTRACT_SET_ID }, null, 2)}\n`,
@@ -180,4 +194,64 @@ export async function runOfflineRefitJob(input: {
   ])
   report('完成')
   return { set_id: input.setId, sample_count: samples.length }
+}
+
+export function spawnQidianFingerprintLibBuild(input: {
+  libRoot: string
+  onProgress?: (text: string) => void
+}): Promise<void> {
+  const scriptPath = resolve(import.meta.dir, '../scripts/build-qidian-fingerprint-lib.ts')
+  const cwd = resolve(import.meta.dir, '..')
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd,
+      env: {
+        ...process.env,
+        PRESERVE_ACTIVE_CONTRACT: '1',
+        SKIP_EXISTING_BOOKS: '1',
+        FINGERPRINT_LIB_ROOT: input.libRoot,
+        FINGERPRINT_WORKSPACE: dirname(input.libRoot),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    const emit = (buf: Buffer) => {
+      for (const line of buf.toString('utf8').split(/\r?\n/)) {
+        const trimmed = line.trim()
+        if (trimmed) input.onProgress?.(trimmed.slice(0, 240))
+      }
+    }
+    child.stdout?.on('data', emit)
+    child.stderr?.on('data', emit)
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolvePromise()
+      else reject(new Error(`指纹库扩库脚本退出码 ${code}`))
+    })
+  })
+}
+
+export async function runOnlineFetchJob(input: {
+  libRoot: string
+  setId: string
+  label: string
+  notes: string
+  onProgress?: (text: string) => void
+  expandLibrary?: FingerprintLibBuildRunner
+}) {
+  const report = (text: string) => input.onProgress?.(text)
+  const expand = input.expandLibrary || expandLibraryForTest || spawnQidianFingerprintLibBuild
+  report('联网扩库：启动抓取脚本')
+  await expand({
+    libRoot: input.libRoot,
+    onProgress: (text) => report(`扩库 ${text}`),
+  })
+  report('扩库完成，开始拟合合同')
+  return runOfflineRefitJob({
+    libRoot: input.libRoot,
+    setId: input.setId,
+    label: input.label,
+    notes: input.notes,
+    mode: 'online_fetch',
+    onProgress: input.onProgress,
+  })
 }
