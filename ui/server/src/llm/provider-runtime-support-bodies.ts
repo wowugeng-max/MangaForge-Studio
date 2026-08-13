@@ -49,31 +49,40 @@ export function isMediaRouteType(routeType?: string) {
   return ['image', 'video', 'text_to_image', 'image_to_image', 'text_to_video', 'image_to_video'].includes(String(routeType || ''))
 }
 
-// 与前端 AspectRatioSelector 预设一致：预设尺寸直接映射到用户选择的比例
-// （1344*768 等预设是约 1MP 的近似值，按像素 gcd 反推会得到 7:4 这类错误比例）
-const PRESET_SIZE_RATIOS: Record<string, string> = {
-  '1024*1024': '1:1', '768*1344': '9:16', '1344*768': '16:9',
-  '864*1152': '3:4', '1152*864': '4:3', '1216*832': '3:2',
-  '832*1216': '2:3', '896*1120': '4:5', '1120*896': '5:4',
-  '1536*640': '21:9',
-}
+// 前端预设尺寸是"目标像素等级 + 32 对齐"的近似值（如 9:16 → 1088*1920），
+// 按像素 gcd 反推会得到 17:30 这类错误比例，因此优先就近匹配标准比例。
+const STANDARD_RATIOS = ['1:1', '9:16', '16:9', '3:4', '4:3', '3:2', '2:3', '4:5', '5:4', '21:9']
 
 function gcd(a: number, b: number): number {
   return b === 0 ? a : gcd(b, a % b)
 }
 
-/** chat 通道没有 size 字段可用：把 '1344*768' 折算成比例提示语拼进 prompt。 */
+function nearestStandardRatio(w: number, h: number): string {
+  const actual = w / h
+  let best = ''
+  let bestDiff = Infinity
+  for (const candidate of STANDARD_RATIOS) {
+    const [a, b] = candidate.split(':').map(Number)
+    const diff = Math.abs(actual - a / b) / (a / b)
+    if (diff < bestDiff) { bestDiff = diff; best = candidate }
+  }
+  // 容差 4%：预设尺寸因 32 对齐会轻微偏离标称比例；超出则按 gcd 精确约分
+  if (bestDiff <= 0.04) return best
+  const divisor = gcd(w, h)
+  return `${w / divisor}:${h / divisor}`
+}
+
+/** chat 通道没有 size 字段可用：把 '1920*1088' 折算成比例/分辨率提示语拼进 prompt。 */
 export function mediaSizePromptHint(size: unknown): string {
   if (typeof size !== 'string' || !size.trim()) return ''
   const normalized = size.trim().replace(/[xX×]/g, '*')
-  let ratio = PRESET_SIZE_RATIOS[normalized]
-  if (!ratio) {
-    const [w, h] = normalized.split('*').map(part => Number.parseInt(part, 10))
-    if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return ''
-    const divisor = gcd(w, h)
-    ratio = `${w / divisor}:${h / divisor}`
-  }
-  return `\n\n[图像要求] 宽高比 ${ratio}，目标尺寸 ${normalized.replace('*', 'x')}。`
+  const [w, h] = normalized.split('*').map(part => Number.parseInt(part, 10))
+  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return ''
+  const ratio = nearestStandardRatio(w, h)
+  // 2K/4K 档位补充分辨率关键字，Gemini 3 等模型能从自然语言里识别输出等级
+  const megapixels = (w * h) / 1e6
+  const tier = megapixels >= 7 ? '，分辨率 4K' : megapixels >= 3.3 ? '，分辨率 2K' : ''
+  return `\n\n[图像要求] 宽高比 ${ratio}，目标尺寸 ${normalized.replace('*', 'x')}${tier}。`
 }
 
 export function requestRouteType(request: LLMRequest, model: ModelRecord) {

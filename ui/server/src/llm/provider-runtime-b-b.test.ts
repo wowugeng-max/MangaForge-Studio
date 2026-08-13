@@ -801,6 +801,39 @@ describe('gemini chat-style image generation routing', () => {
     expect(body.messages[0].content).not.toContain('13:19')
   })
 
+  test('1080p-class preset sizes snap to the nearest standard ratio', () => {
+    const body = buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size: '1088*1920',
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    // 1088*1920 是 9:16 经 32 对齐后的近似值，gcd 约分会得到 17:30
+    expect(body.messages[0].content).toContain('宽高比 9:16')
+    expect(body.messages[0].content).toContain('1088x1920')
+    expect(body.messages[0].content).not.toContain('17:30')
+  })
+
+  test('2K/4K sizes append a resolution-tier keyword', () => {
+    const request = (size: string) => buildProviderRequestBody({
+      model: 'x',
+      messages: [{ role: 'user', content: 'a cat' }],
+      type: 'text_to_image',
+      size,
+    } as any, openaiSelection({
+      endpoint: 'chat/completions',
+      routeType: 'text_to_image',
+      model: { ...selection().model, model_name: 'gemini-3.1-flash-image', capabilities: { text_to_image: true } },
+    }))
+    expect(request('1088*1920').messages[0].content).not.toContain('分辨率')
+    expect(request('1440*2560').messages[0].content).toContain('分辨率 2K')
+    expect(request('2176*3840').messages[0].content).toContain('分辨率 4K')
+  })
+
   test('custom sizes fall back to reduced pixel ratio', () => {
     const body = buildProviderRequestBody({
       model: 'x',
