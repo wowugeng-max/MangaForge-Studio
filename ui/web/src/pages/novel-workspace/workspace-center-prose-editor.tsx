@@ -12,6 +12,11 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 import { openSearchPanel, search, searchKeymap } from '@codemirror/search'
 import { Compartment, EditorState } from '@codemirror/state'
 import { paragraphFocusExtension, typewriterExtension } from './prose-editor-extensions'
+import {
+  proseAnnotationsExtension,
+  setProseAnnotationsEffect,
+  type ProseAnnotation,
+} from './prose-annotations'
 import type { EditorDisplayPrefs } from './workspace-center-chrome'
 
 /** CodeMirror 搜索面板文案汉化。key 为 @codemirror/search 内部 phrase 原文。 */
@@ -45,11 +50,13 @@ export function ProseEditor({
   displayPrefs,
   proseEditorRef,
   onChange,
+  annotations,
 }: {
   value: string
   displayPrefs: EditorDisplayPrefs
   proseEditorRef: React.MutableRefObject<EditorView | null>
   onChange: (text: string) => void
+  annotations?: ProseAnnotation[]
 }) {
   const hostRef = React.useRef<HTMLDivElement | null>(null)
   const viewRef = React.useRef<EditorView | null>(null)
@@ -71,6 +78,12 @@ export function ProseEditor({
       ],
     })
   }, [displayPrefs.typewriter, displayPrefs.paragraphFocus])
+
+  React.useEffect(() => {
+    const view = viewRef.current
+    if (!view) return
+    view.dispatch({ effects: setProseAnnotationsEffect.of(annotations || []) })
+  }, [annotations])
 
   React.useEffect(() => {
     onChangeRef.current = onChange
@@ -166,6 +179,7 @@ export function ProseEditor({
           paragraphFocusCompartmentRef.current.of(displayPrefsRef.current.paragraphFocus ? paragraphFocusExtension() : []),
           search({ top: true }),
           EditorState.phrases.of(SEARCH_PHRASES),
+          proseAnnotationsExtension(),
           keymap.of([indentWithTab, ...defaultKeymap, ...historyKeymap, ...searchKeymap]),
           EditorView.updateListener.of(update => {
             if (!update.docChanged) return

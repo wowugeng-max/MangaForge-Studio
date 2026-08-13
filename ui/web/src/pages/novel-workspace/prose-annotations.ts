@@ -1,4 +1,6 @@
-/** 质检问题 → 正文批注定位(纯逻辑部分)。evidence 文本匹配,匹配不到降级跳过。 */
+/** 质检问题 → 正文批注:定位纯逻辑 + CodeMirror 装饰扩展。evidence 文本匹配,匹配不到降级跳过。 */
+import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
+import { RangeSetBuilder, StateEffect, StateField } from '@codemirror/state'
 import { issueLabel, issueSeverity } from './reference-panel-helpers'
 
 export type ProseAnnotationSeverity = 'critical' | 'high' | 'medium' | 'low'
@@ -72,4 +74,61 @@ export function locateProseAnnotations(text: string, issues: any[]): ProseAnnota
   }
 
   return kept.sort((a, b) => a.from - b.from)
+}
+
+/** 外部(质检报告变化)推入新批注集合。 */
+export const setProseAnnotationsEffect = StateEffect.define<ProseAnnotation[]>()
+
+function annotationDecorations(annotations: ProseAnnotation[], docLength: number): DecorationSet {
+  const builder = new RangeSetBuilder<Decoration>()
+  for (const annotation of annotations) {
+    if (annotation.from >= annotation.to || annotation.to > docLength) continue
+    const tooltip = annotation.fix ? `${annotation.label}\n改法：${annotation.fix}` : annotation.label
+    builder.add(
+      annotation.from,
+      annotation.to,
+      Decoration.mark({
+        class: `cm-prose-issue cm-prose-issue-${annotation.severity}`,
+        attributes: { title: tooltip },
+      }),
+    )
+  }
+  return builder.finish()
+}
+
+const proseAnnotationsField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(decorations, tr) {
+    decorations = decorations.map(tr.changes)
+    for (const effect of tr.effects) {
+      if (effect.is(setProseAnnotationsEffect)) {
+        decorations = annotationDecorations(effect.value, tr.newDoc.length)
+      }
+    }
+    return decorations
+  },
+  provide: field => EditorView.decorations.from(field),
+})
+
+const proseAnnotationsTheme = EditorView.baseTheme({
+  '.cm-prose-issue': {
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'wavy',
+    textDecorationSkipInk: 'none',
+    textUnderlineOffset: '4px',
+    cursor: 'help',
+  },
+  '.cm-prose-issue-critical, .cm-prose-issue-high': {
+    textDecorationColor: '#ff4d4f',
+  },
+  '.cm-prose-issue-medium': {
+    textDecorationColor: '#faad14',
+  },
+  '.cm-prose-issue-low': {
+    textDecorationColor: '#1677ff',
+  },
+})
+
+export function proseAnnotationsExtension() {
+  return [proseAnnotationsField, proseAnnotationsTheme]
 }

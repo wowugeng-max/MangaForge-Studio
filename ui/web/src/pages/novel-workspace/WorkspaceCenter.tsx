@@ -55,6 +55,9 @@ import { buildChapterHeaderStatus } from './chapter-header-status'
 import { createWritingSessionTracker } from './writing-session-stats'
 import { WorkspaceCommandPalette } from './workspace-command-palette'
 import { buildWorkspaceCommands } from './workspace-command-palette-model'
+import { locateProseAnnotations } from './prose-annotations'
+import { reportChapterId } from './workspace-center-quality-revision-panel'
+import { resolveQualityReportView } from './reference-panel-helpers'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -486,6 +489,22 @@ export function WorkspaceCenter({
     canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
     revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
   })
+  const proseAnnotations = React.useMemo(() => {
+    const chapterId = Number(activeChapter?.id || 0)
+    const text = String(activeChapter?.chapter_text || '')
+    if (!chapterId || !text) return []
+    const reports = (proseQualityReports || [])
+      .filter((report: any) => reportChapterId(report) === chapterId)
+      .sort((a: any, b: any) => (Date.parse(b?.created_at || '') || 0) - (Date.parse(a?.created_at || '') || 0))
+    const latest = reports[0]
+    if (!latest) return []
+    // 报告早于章节最近改动则视为过期,不再往正文上标
+    const reportTime = Date.parse(latest?.created_at || '') || 0
+    const chapterTime = Date.parse(activeChapter?.updated_at || '') || 0
+    if (chapterTime && reportTime && reportTime < chapterTime) return []
+    return locateProseAnnotations(text, resolveQualityReportView(latest)?.issues || [])
+  }, [proseQualityReports, activeChapter?.id, activeChapter?.chapter_text, activeChapter?.updated_at])
+
   const sessionTrackerRef = React.useRef<ReturnType<typeof createWritingSessionTracker> | null>(null)
   if (!sessionTrackerRef.current) sessionTrackerRef.current = createWritingSessionTracker()
   const activeChapterIdForSession = Number(activeChapter?.id || 0)
@@ -843,6 +862,7 @@ export function WorkspaceCenter({
             displayPrefs={editorDisplayPrefs}
             proseEditorRef={proseEditorRef}
             onChange={onChapterTextChange}
+            annotations={proseAnnotations}
           />
         </>
       )}
