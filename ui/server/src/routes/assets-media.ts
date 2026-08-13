@@ -3,7 +3,7 @@ import { execFile } from 'child_process'
 import { readFile } from 'fs/promises'
 import { isAbsolute, relative, resolve } from 'path'
 import { readAssetMediaFile } from '../asset-media'
-import { normalizeUploadFilename, uploadAssetBuffer } from '../asset-upload'
+import { normalizeUploadFilename, uploadAssetBuffer, uploadAssetBufferDeduped } from '../asset-upload'
 import { guessAssetMimeType } from '../asset-mime'
 
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
@@ -179,7 +179,9 @@ export async function handleAssetUpload(req: any, res: any, activeWorkspace: str
     validateUploadMime(kind, uploadContentType)
     const filename = normalizeUploadFilename(parsed.filename)
     if (kind === 'image' && requiresStrictImageParsing(uploadContentType)) assertParsableImageUpload(parsed.buffer, filename)
-    const filePath = await uploadAssetBuffer(activeWorkspace, filename, parsed.buffer)
+    const filePath = String(req.query?.dedupe || '') === 'content'
+      ? await uploadAssetBufferDeduped(activeWorkspace, parsed.filename, parsed.buffer)
+      : await uploadAssetBuffer(activeWorkspace, filename, parsed.buffer)
     res.json(await uploadMeta(kind, filePath, parsed.buffer, filename))
   } catch (error) {
     const message = String((error as any)?.message || error)

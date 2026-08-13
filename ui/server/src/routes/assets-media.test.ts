@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { parseFfprobeVideoMetadata, parseMultipartFileUpload } from './assets-media'
@@ -83,6 +83,71 @@ describe('asset media uploads', () => {
 
     expect(parsed.filename).toBe('shot.png')
     expect(parsed.buffer).toEqual(content)
+  })
+
+  test('deduplicates identical upload content when dedupe=content is requested', async () => {
+    const workspace = await tempWorkspace()
+    const { handleAssetUpload } = await import('./assets-media')
+    const makeRes = (): any => ({
+      statusCode: 200,
+      body: null,
+      json(payload: any) { this.body = payload; return this },
+      status(code: number) { this.statusCode = code; return this },
+    })
+    const oneByOnePng = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=',
+      'base64',
+    )
+
+    const first = makeRes()
+    await handleAssetUpload({
+      headers: { 'content-type': 'image/png' },
+      query: { filename: 'reference-1.png', dedupe: 'content' },
+      body: oneByOnePng,
+    } as any, first, workspace, 'image')
+    const repeated = makeRes()
+    await handleAssetUpload({
+      headers: { 'content-type': 'image/png' },
+      query: { filename: 'reference-2.png', dedupe: 'content' },
+      body: oneByOnePng,
+    } as any, repeated, workspace, 'image')
+    const different = makeRes()
+    await handleAssetUpload({
+      headers: { 'content-type': 'application/octet-stream' },
+      query: { filename: 'reference-1.png', dedupe: 'content' },
+      body: Buffer.from('other-reference-bytes'),
+    } as any, different, workspace, 'image')
+
+    expect(first.statusCode).toBe(200)
+    expect(repeated.statusCode).toBe(200)
+    expect(repeated.body.file_path).toBe(first.body.file_path)
+    expect(repeated.body).toMatchObject({ width: 1, height: 1, format: 'png' })
+    expect(different.body.file_path).not.toBe(first.body.file_path)
+    expect(await readdir(join(workspace, 'assets'))).toHaveLength(2)
+  })
+
+  test('keeps default uploads on unique timestamped names when dedupe is not requested', async () => {
+    const workspace = await tempWorkspace()
+    const { handleAssetUpload } = await import('./assets-media')
+    const makeRes = (): any => ({
+      statusCode: 200,
+      body: null,
+      json(payload: any) { this.body = payload; return this },
+      status(code: number) { this.statusCode = code; return this },
+    })
+
+    const first = makeRes()
+    const second = makeRes()
+    for (const res of [first, second]) {
+      await handleAssetUpload({
+        headers: { 'content-type': 'application/octet-stream' },
+        query: { filename: 'raw.png' },
+        body: Buffer.from('raw-bytes'),
+      } as any, res, workspace, 'image')
+    }
+
+    expect(second.body.file_path).not.toBe(first.body.file_path)
+    expect(await readdir(join(workspace, 'assets'))).toHaveLength(2)
   })
 
   test('saves raw upload bytes through the image upload route middleware contract', async () => {

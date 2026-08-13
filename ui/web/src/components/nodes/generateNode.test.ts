@@ -56,7 +56,7 @@ describe('GenerateNode migration behavior', () => {
     expect(componentSetup).toContain('if (!response.ok) throw new Error(`Reference media fetch failed with status ${response.status}`)')
     expect(componentSetup).toContain('return response.blob()')
     expect(componentSetup).toContain("formData.append('file', blob, filename)")
-    expect(componentSetup).toContain("apiClient.post('/assets/upload/image', formData)")
+    expect(componentSetup).toContain("apiClient.post('/assets/upload/image?dedupe=content', formData)")
     expect(componentSetup).toContain('response.data?.file_path')
     expect(componentSetup).toContain('normalizeGenerateNodeUploadedMediaPath(filePath)')
     expect(componentSetup).not.toContain('normalizeGenerateNodeImageUrl(buildAssetMediaUrl(filePath))')

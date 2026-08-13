@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'fs/promises'
+import { access, mkdir, readFile, writeFile } from 'fs/promises'
+import { createHash } from 'crypto'
 import { join, basename, isAbsolute, relative, resolve } from 'path'
 
 export function getAssetMediaRoot(activeWorkspace: string) {
@@ -14,6 +15,24 @@ export async function saveAssetUpload(activeWorkspace: string, filename: string,
   const safeName = basename(filename || `asset-${Date.now()}`)
   const filePath = join(getAssetMediaRoot(activeWorkspace), safeName)
   await writeFile(filePath, buffer)
+  return filePath
+}
+
+// Content-addressed variant for re-uploadable media (canvas reference
+// materialization): identical bytes always land on the same path, which keeps
+// compile-cache keys stable across sessions and stops duplicate files from
+// accumulating. Only a sanitized extension is taken from the client name.
+export async function saveDedupedAssetUpload(activeWorkspace: string, filename: string, buffer: Buffer) {
+  await ensureAssetMediaRoot(activeWorkspace)
+  const extensionMatch = basename(filename || '').match(/\.([a-z0-9]{1,8})$/i)
+  const extension = extensionMatch ? `.${extensionMatch[1].toLowerCase()}` : ''
+  const hash = createHash('sha256').update(buffer).digest('hex').slice(0, 32)
+  const filePath = join(getAssetMediaRoot(activeWorkspace), `ref-${hash}${extension}`)
+  try {
+    await access(filePath)
+  } catch {
+    await writeFile(filePath, buffer)
+  }
   return filePath
 }
 

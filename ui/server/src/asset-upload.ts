@@ -1,5 +1,5 @@
 import { basename } from 'path'
-import { saveAssetUpload } from './asset-media'
+import { saveAssetUpload, saveDedupedAssetUpload } from './asset-media'
 
 let uploadNameSequence = 0
 
@@ -11,4 +11,8 @@ export function normalizeUploadFilename(rawName: string) {
 
 export async function uploadAssetBuffer(activeWorkspace: string, filename: string, buffer: Buffer) {
   return await saveAssetUpload(activeWorkspace, filename, buffer)
+}
+
+export async function uploadAssetBufferDeduped(activeWorkspace: string, filename: string, buffer: Buffer) {
+  return await saveDedupedAssetUpload(activeWorkspace, filename, buffer)
 }

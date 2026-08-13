@@ -381,7 +381,7 @@ function GenerateNodeImpl(props: NodeProps) {
       uploadImage: async (blob, filename) => {
         const formData = new FormData()
         formData.append('file', blob, filename)
-        const response = await apiClient.post('/assets/upload/image', formData)
+        const response = await apiClient.post('/assets/upload/image?dedupe=content', formData)
         const filePath = response.data?.file_path
         if (!filePath) throw new Error('Reference media upload response is missing file_path')
         return normalizeGenerateNodeUploadedMediaPath(filePath)
