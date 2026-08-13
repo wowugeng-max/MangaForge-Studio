@@ -19,6 +19,8 @@ import { editorRevisionPhaseLabel } from './task-center/drawer-run-summary-edito
 
 const { Text, Paragraph } = Typography
 
+const QUALITY_PANEL_OPEN_KEY = 'novel_quality_panel_open'
+
 const REVISION_CHIPS = [
   { mode: 'expand_action', label: '补动作' },
   { mode: 'cut_description', label: '砍描写' },
@@ -291,7 +293,22 @@ export function WorkspaceCenterQualityRevisionPanel({
   const wordCount = chapterWordCount(activeChapter)
   const chapterId = Number(activeChapter?.id || 0)
   const hasProse = Boolean(chapterId && wordCount > 0)
-  const [open, setOpen] = React.useState(true)
+  // Collapsed by default; needsWork auto-expands below and the choice persists across sessions.
+  const [open, setOpen] = React.useState(() => {
+    try {
+      return localStorage.getItem(QUALITY_PANEL_OPEN_KEY) === '1'
+    } catch {
+      return false
+    }
+  })
+  const persistOpen = (value: boolean) => {
+    setOpen(value)
+    try {
+      localStorage.setItem(QUALITY_PANEL_OPEN_KEY, value ? '1' : '0')
+    } catch {
+      // localStorage unavailable (private mode/tests) — state stays in memory.
+    }
+  }
   const [customRevisionPrompt, setCustomRevisionPrompt] = React.useState('')
   const currentEditorRevisionTask = editorRevisionTask?.chapter_id === chapterId ? editorRevisionTask : null
   const revisionActive = Boolean(currentEditorRevisionTask && isActiveEditorRevisionTask(currentEditorRevisionTask))
@@ -391,7 +408,7 @@ export function WorkspaceCenterQualityRevisionPanel({
     <details
       className={`novel-quality-revision-panel${needsWork ? ' is-attention' : ''}`}
       open={open}
-      onToggle={(event) => setOpen((event.target as HTMLDetailsElement).open)}
+      onToggle={(event) => persistOpen((event.target as HTMLDetailsElement).open)}
     >
       <summary className="novel-quality-revision-summary">
         <span className="novel-quality-revision-title">质检修订</span>
@@ -399,6 +416,30 @@ export function WorkspaceCenterQualityRevisionPanel({
           {summaryBits.map(bit => (
             <span key={bit} className="novel-quality-revision-pill">{bit}</span>
           ))}
+        </span>
+        <span className="novel-quality-revision-summary-action">
+          {canRevise ? (
+            <Button
+              size="small"
+              type="primary"
+              disabled={revisionActive}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                applyRevision({})
+              }}
+            >一键修订</Button>
+          ) : onRefreshProseQuality ? (
+            <Button
+              size="small"
+              loading={proseQualityLoading}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                onRefreshProseQuality()
+              }}
+            >{latest ? (isStale ? '重新质检' : '复检') : '质检'}</Button>
+          ) : null}
         </span>
       </summary>
 

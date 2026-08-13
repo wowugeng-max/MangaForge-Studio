@@ -3818,35 +3818,38 @@
   padding-left: 8px;
   border-left: 1px solid #c9d8f0;
 }
+/* Lightweight progress strip: informative but visually subordinate to the primary action. */
 .chapter-action-bar-steps {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  min-height: 0;
+  max-height: 20px;
+  overflow: hidden;
 }
 .chapter-action-bar-step {
-  text-align: center;
   font-size: 11px;
-  font-weight: 600;
-  border-radius: 10px;
-  padding: 6px 4px;
-  border: 1px solid #e6ebf2;
-  background: #f7f9fc;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: #66758b;
+  opacity: 0.45;
+  white-space: nowrap;
 }
 .chapter-action-bar-step.is-done {
-  background: #e3f7ec;
-  border-color: #8fd6ae;
   color: #0f8a4b;
-  box-shadow: inset 0 0 0 1px rgba(15, 138, 75, 0.06);
+  opacity: 0.75;
 }
 .chapter-action-bar-step.is-now {
-  background: #eaf1ff;
-  border-color: #cdddff;
   color: #2f6fed;
+  opacity: 1;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .chapter-action-bar-step.is-done.is-now {
-  background: linear-gradient(180deg, #eaf1ff 0%, #e3f7ec 100%);
-  border-color: #8fd6ae;
   color: #0f8a4b;
 }
 .novel-writing-header {
@@ -3995,6 +3998,11 @@
 .novel-quality-revision-panel[open] .novel-quality-revision-summary {
   border-bottom: 1px solid #edf1f6;
   background: #f7faff;
+}
+.novel-quality-revision-summary-action {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
 }
 .novel-quality-revision-title {
   display: inline-flex;
