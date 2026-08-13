@@ -1,6 +1,6 @@
 # 小说工作台编辑器深度集成(第 3 批)实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 质检问题内联批注到正文、章内段落大纲导航、全书跨章查找。
 
@@ -30,8 +30,8 @@
 - severity/label 复用 `issueSeverity`/`issueLabel`;`fix` 取 `fix/required_change/suggestion`。
 - 结果按 from 排序、去重叠(重叠区间保留 severity 更高者)。
 
-- [ ] Step 1: 失败测试(命中单处/多处、evidence 数组、匹配不到跳过、重叠保留高严重度、string issue 无 evidence 跳过)
-- [ ] Step 2: 实现通过;Commit `feat(novel-editor): locate quality annotations in prose`
+- [x] Step 1: 失败测试(命中单处/多处、evidence 数组、匹配不到跳过、重叠保留高严重度、string issue 无 evidence 跳过)
+- [x] Step 2: 实现通过;Commit `feat(novel-editor): locate quality annotations in prose`
 
 ### Task 2: 批注 CM 扩展 + ProseEditor/WorkspaceCenter 接线
 
@@ -47,9 +47,9 @@
 3. WorkspaceCenter:最新报告(`reportChapterId` 匹配 + `created_at` 最新)→ `resolveQualityReportView(latest).issues` → `locateProseAnnotations(activeChapter.chapter_text, issues)` → 传给 ProseEditor;报告过期(报告时间 < 章节更新时间)时不显示批注。
 4. CSS:分级下划波浪线(critical/high 红、medium 金、low 蓝)。
 
-- [ ] Step 1: 扩展实现 + ProseEditor prop
-- [ ] Step 2: WorkspaceCenter 计算与传入
-- [ ] Step 3: 构建 + 守卫测试通过;Commit `feat(novel-editor): inline quality annotations`
+- [x] Step 1: 扩展实现 + ProseEditor prop
+- [x] Step 2: WorkspaceCenter 计算与传入
+- [x] Step 3: 构建 + 守卫测试通过;Commit `feat(novel-editor): inline quality annotations`
 
 ### Task 3: 章内大纲导航
 
@@ -65,9 +65,9 @@
 2. `ProseOutlineRail`:细栏(宽 148px,可滚动),列出段落项;点击 → `view.dispatch({ selection, effects: scrollIntoView(from, y:'start') })` 并 focus;当前光标所在段高亮(监听由 WorkspaceCenter 传入的 activeFrom,简化:点击态高亮即可)。
 3. 显示偏好 `outline` 默认 false,开关在显示设置弹层;开启时编辑器区左侧渲染。
 
-- [ ] Step 1: 失败测试(常规分段/连续空行/单段/空文本/label 截断)
-- [ ] Step 2: 实现纯模型通过
-- [ ] Step 3: rail 组件 + 偏好接线,构建通过;Commit `feat(novel-editor): in-chapter outline rail`
+- [x] Step 1: 失败测试(常规分段/连续空行/单段/空文本/label 截断)
+- [x] Step 2: 实现纯模型通过
+- [x] Step 3: rail 组件 + 偏好接线,构建通过;Commit `feat(novel-editor): in-chapter outline rail`
 
 ### Task 4: 全书查找
 
@@ -86,13 +86,13 @@
    - 结果按章分组:`第N章《标题》(k 处)` + 命中片段(高亮命中词);点击当前章命中 → 编辑器 selection 定位;点击其他章 → `onJumpToChapter(chapterId)` 并关 Modal。
 3. 命令面板加"全书查找"(section 编辑器,keywords: search/全书/跨章),入口回调 `openBookSearch`。
 
-- [ ] Step 1: 失败测试(命中/大小写/snippet 边界/上限 20/空查询)
-- [ ] Step 2: 纯模型实现通过
-- [ ] Step 3: Modal + 接线,构建通过;Commit `feat(novel-ui): book-wide search across chapters`
+- [x] Step 1: 失败测试(命中/大小写/snippet 边界/上限 20/空查询)
+- [x] Step 2: 纯模型实现通过
+- [x] Step 3: Modal + 接线,构建通过;Commit `feat(novel-ui): book-wide search across chapters`
 
 ## 验收核对
 
-- [ ] 质检报告含 evidence 的问题在正文中以分级波浪线标出,悬停显示问题与改法;报告过期不显示。
-- [ ] 大纲栏可开关、持久化,点击段落编辑器定位。
-- [ ] 命令面板可打开全书查找,跨章命中可跳章;当前章命中直接定位。
-- [ ] `bun run build:web` 与 novel-workspace 相关测试全绿。
+- [x] 质检报告含 evidence 的问题在正文中以分级波浪线标出,悬停显示问题与改法;报告过期不显示。
+- [x] 大纲栏可开关、持久化,点击段落编辑器定位。
+- [x] 命令面板可打开全书查找,跨章命中可跳章;当前章命中直接定位。
+- [x] `bun run build:web` 与 novel-workspace 相关测试全绿。
