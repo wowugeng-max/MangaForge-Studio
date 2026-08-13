@@ -16,6 +16,7 @@ import {
   type EditorRevisionTask,
 } from './editorRevisionTasks'
 import { editorRevisionPhaseLabel } from './task-center/drawer-run-summary-editor-revision'
+import { buildEditorRevisionProgress } from './editor-revision-progress'
 
 const { Text, Paragraph } = Typography
 
@@ -153,6 +154,16 @@ function EditorRevisionStatusStrip({
   const inFlightRunIdsRef = React.useRef(new Set<number>())
   const [pendingAction, setPendingAction] = React.useState<EditorRevisionPendingAction | null>(null)
   const active = isActiveEditorRevisionTask(task)
+  const [nowMs, setNowMs] = React.useState(() => Date.now())
+  React.useEffect(() => {
+    if (!active) return
+    const timer = setInterval(() => setNowMs(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [active])
+  const progress = React.useMemo(
+    () => buildEditorRevisionProgress(task, nowMs),
+    [task, nowMs],
+  )
   const statusLabel = task.status === 'completed'
     ? '已完成'
     : task.status === 'failed'
@@ -220,6 +231,32 @@ function EditorRevisionStatusStrip({
           <Text strong>{editorRevisionPhaseLabel(task.phase)}</Text>
           <Text type="secondary">第{task.chapter_no}章《{task.chapter_title || '未命名'}》</Text>
         </div>
+        {active && (
+          <div className="novel-editor-revision-progress">
+            <div className="novel-editor-revision-progress-steps">
+              {progress.steps.map(step => (
+                <span
+                  key={step.key}
+                  className={`novel-editor-revision-progress-step is-${step.status}`}
+                  title={step.durationLabel ? `${step.label} ${step.durationLabel}` : step.label}
+                >
+                  <span className="novel-editor-revision-progress-step-label">{step.label}</span>
+                  {step.durationLabel && (
+                    <span className="novel-editor-revision-progress-step-duration">{step.durationLabel}</span>
+                  )}
+                </span>
+              ))}
+            </div>
+            {progress.hint && (
+              <Text
+                type={progress.stalled ? 'danger' : 'secondary'}
+                className="novel-editor-revision-status-message"
+              >
+                {progress.hint}
+              </Text>
+            )}
+          </div>
+        )}
         {task.warnings.map((warning, index) => (
           <Text key={`${warning.code}-${index}`} type="warning" className="novel-editor-revision-status-message">
             {warning.message}
@@ -383,6 +420,9 @@ export function WorkspaceCenterQualityRevisionPanel({
 
 
   const summaryBits = [
+    revisionActive && currentEditorRevisionTask
+      ? `修订中·${editorRevisionPhaseLabel(currentEditorRevisionTask.phase)}`
+      : '',
     latest ? `${score || '-'}分` : '尚未质检',
     isStale ? '旧报告' : '',
     latest?.status === 'warn' ? '需检查' : latest ? (score >= 78 ? '可过关' : '待提升') : '',

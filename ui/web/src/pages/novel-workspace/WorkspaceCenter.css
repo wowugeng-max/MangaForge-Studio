@@ -4063,6 +4063,61 @@
   white-space: nowrap;
 }
 
+/* Editor revision phase progress */
+.novel-editor-revision-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+.novel-editor-revision-progress-steps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+.novel-editor-revision-progress-step {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: #f1f4f9;
+  color: #8794a8;
+  white-space: nowrap;
+}
+.novel-editor-revision-progress-step + .novel-editor-revision-progress-step::before {
+  content: none;
+}
+.novel-editor-revision-progress-step.is-completed {
+  background: #e8f6ee;
+  color: #2f9e5f;
+}
+.novel-editor-revision-progress-step.is-running {
+  background: #e6f0ff;
+  color: #1354c7;
+  font-weight: 600;
+}
+.novel-editor-revision-progress-step.is-failed {
+  background: #fdeceb;
+  color: #d4380d;
+}
+.novel-editor-revision-progress-step.is-skipped {
+  background: #f1f4f9;
+  color: #aab4c4;
+  text-decoration: line-through;
+}
+.novel-editor-revision-progress-step.is-canceled {
+  background: #f1f4f9;
+  color: #aab4c4;
+}
+.novel-editor-revision-progress-step-duration {
+  font-weight: 400;
+  opacity: 0.85;
+}
+
 /* Book-wide search modal */
 .novel-book-search-body {
   margin-top: 12px;
