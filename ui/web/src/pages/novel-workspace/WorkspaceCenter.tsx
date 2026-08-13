@@ -52,6 +52,7 @@ import {
 } from './editorRevisionTasks'
 import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
 import { buildChapterHeaderStatus } from './chapter-header-status'
+import { createWritingSessionTracker } from './writing-session-stats'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -483,6 +484,12 @@ export function WorkspaceCenter({
     canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
     revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
   })
+  const sessionTrackerRef = React.useRef<ReturnType<typeof createWritingSessionTracker> | null>(null)
+  if (!sessionTrackerRef.current) sessionTrackerRef.current = createWritingSessionTracker()
+  const activeChapterIdForSession = Number(activeChapter?.id || 0)
+  if (activeChapterIdForSession) {
+    sessionTrackerRef.current.record(activeChapterIdForSession, activeWordCount, Date.now())
+  }
   const headerStatus = buildChapterHeaderStatus({
     phase: chapterWorkflow.phase,
     phaseLabel: chapterWorkflow.phaseLabel,
@@ -496,6 +503,9 @@ export function WorkspaceCenter({
       ? { readyCount: writingQueue.readyCount, blockedCount: writingQueue.blockedCount, draftedCount: writingQueue.draftedCount }
       : null,
     delivery: deliverySummary.visible ? { statusLabel: deliverySummary.statusLabel } : null,
+    session: activeChapterIdForSession
+      ? sessionTrackerRef.current.stats(activeChapterIdForSession, Date.now())
+      : null,
   })
   const headerRevisionActive = Boolean(
     revisionActive && chapterWorkflow.primaryAction.key === 'apply_editor_revision',

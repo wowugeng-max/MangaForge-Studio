@@ -171,6 +171,9 @@ export function ChapterActionBar({
             {headerStatus ? (
               <>
                 <span className="chapter-action-bar-word-label">{headerStatus.wordLabel}</span>
+                {headerStatus.sessionLabel ? (
+                  <span className="chapter-action-bar-session-label">{headerStatus.sessionLabel}</span>
+                ) : null}
                 {headerStatus.saveDot ? (
                   <Tooltip title={SAVE_DOT_LABELS[headerStatus.saveDot]}>
                     <span className={`chapter-action-bar-save-dot is-${headerStatus.saveDot}`} aria-label={SAVE_DOT_LABELS[headerStatus.saveDot]} />

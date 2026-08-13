@@ -3689,6 +3689,11 @@
   color: rgba(0, 0, 0, 0.55);
   font-variant-numeric: tabular-nums;
 }
+.chapter-action-bar-session-label {
+  font-size: 12px;
+  color: #0f8a4b;
+  font-variant-numeric: tabular-nums;
+}
 .chapter-action-bar-save-dot {
   display: inline-block;
   width: 8px;

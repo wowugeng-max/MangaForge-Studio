@@ -47,4 +47,14 @@ describe('buildChapterHeaderStatus', () => {
   test('无任何详情来源时 detailItems 为空', () => {
     expect(buildChapterHeaderStatus({ phase: 'empty', phaseLabel: '未写' }).detailItems).toEqual([])
   })
+
+  test('会话统计输出 sessionLabel,未提供则为空串', () => {
+    const status = buildChapterHeaderStatus({
+      phase: 'writing',
+      phaseLabel: '写作中',
+      session: { sessionAdded: 820, wordsPerHour: 2400 },
+    })
+    expect(status.sessionLabel).toBe('本次 +820 字 · 2,400 字/时')
+    expect(buildChapterHeaderStatus({ phase: 'empty', phaseLabel: '未写' }).sessionLabel).toBe('')
+  })
 })

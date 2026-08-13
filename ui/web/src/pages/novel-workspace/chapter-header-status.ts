@@ -1,5 +1,6 @@
 /** 章节头部状态行与详情 popover 的纯推导模型,渲染层不做任何判断。 */
 import type { ChapterWorkflowPhase } from './chapter-workflow-presenter'
+import { formatWritingSessionLabel, type WritingSessionStats } from './writing-session-stats'
 
 export type ChapterHeaderStatusInput = {
   phase: ChapterWorkflowPhase
@@ -10,6 +11,7 @@ export type ChapterHeaderStatusInput = {
   material?: { score?: number | null; canGenerate?: boolean; recommendations?: string[] } | null
   queue?: { readyCount?: number; blockedCount?: number; draftedCount?: number } | null
   delivery?: { statusLabel?: string } | null
+  session?: WritingSessionStats | null
 }
 
 export type ChapterHeaderDetailItem = {
@@ -23,6 +25,7 @@ export type ChapterHeaderStatus = {
   phaseLabel: string
   phaseTone: 'green' | 'red' | 'gold' | 'blue'
   wordLabel: string
+  sessionLabel: string
   saveDot: 'saved' | 'saving' | 'error' | null
   detailItems: ChapterHeaderDetailItem[]
 }
@@ -77,6 +80,7 @@ export function buildChapterHeaderStatus(input: ChapterHeaderStatusInput): Chapt
     phaseLabel: input.phaseLabel,
     phaseTone: PHASE_TONES[input.phase] ?? 'blue',
     wordLabel,
+    sessionLabel: input.session ? formatWritingSessionLabel(input.session) : '',
     saveDot: input.saveStatus ?? null,
     detailItems,
   }
