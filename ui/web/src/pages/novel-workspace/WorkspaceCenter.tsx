@@ -56,6 +56,7 @@ import { createWritingSessionTracker } from './writing-session-stats'
 import { WorkspaceCommandPalette } from './workspace-command-palette'
 import { buildWorkspaceCommands } from './workspace-command-palette-model'
 import { locateProseAnnotations } from './prose-annotations'
+import { ProseOutlineRail } from './prose-outline-rail'
 import { reportChapterId } from './workspace-center-quality-revision-panel'
 import { resolveQualityReportView } from './reference-panel-helpers'
 import './WorkspaceCenter.css'
@@ -857,13 +858,21 @@ export function WorkspaceCenter({
             onOpenSideQuality={onFocusQualityPanel}
           />
 
-          <ProseEditor
-            value={activeChapter.chapter_text || ''}
-            displayPrefs={editorDisplayPrefs}
-            proseEditorRef={proseEditorRef}
-            onChange={onChapterTextChange}
-            annotations={proseAnnotations}
-          />
+          <div className="novel-prose-editor-row">
+            {editorDisplayPrefs.outline && (
+              <ProseOutlineRail
+                text={activeChapter.chapter_text || ''}
+                proseEditorRef={proseEditorRef}
+              />
+            )}
+            <ProseEditor
+              value={activeChapter.chapter_text || ''}
+              displayPrefs={editorDisplayPrefs}
+              proseEditorRef={proseEditorRef}
+              onChange={onChapterTextChange}
+              annotations={proseAnnotations}
+            />
+          </div>
         </>
       )}
 

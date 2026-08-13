@@ -16,6 +16,7 @@ export type EditorDisplayPrefs = {
   lineHeight: number
   typewriter: boolean
   paragraphFocus: boolean
+  outline: boolean
 }
 export type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error'
 
@@ -26,6 +27,7 @@ export const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = {
   lineHeight: 32,
   typewriter: false,
   paragraphFocus: false,
+  outline: false,
 }
 export const EDITOR_DISPLAY_PRESETS: Array<Pick<EditorDisplayPrefs, 'fontSize' | 'lineHeight'> & { key: string; label: string }> = [
   { key: 'webNovel', label: '网文标准', fontSize: 17, lineHeight: 32 },
@@ -116,6 +118,7 @@ export function loadEditorDisplayPrefs(): EditorDisplayPrefs {
       lineHeight: clampNumber(parsed?.lineHeight, 24, 48, DEFAULT_EDITOR_DISPLAY_PREFS.lineHeight),
       typewriter: parsed?.typewriter === true,
       paragraphFocus: parsed?.paragraphFocus === true,
+      outline: parsed?.outline === true,
     }
   } catch {
     return DEFAULT_EDITOR_DISPLAY_PREFS
@@ -159,6 +162,7 @@ export function EditorDisplayControls({
       lineHeight: clampNumber(patch.lineHeight ?? prefs.lineHeight, 24, 48, DEFAULT_EDITOR_DISPLAY_PREFS.lineHeight),
       typewriter: patch.typewriter ?? prefs.typewriter,
       paragraphFocus: patch.paragraphFocus ?? prefs.paragraphFocus,
+      outline: patch.outline ?? prefs.outline,
     })
   }
 
@@ -215,6 +219,17 @@ export function EditorDisplayControls({
               style={{ marginLeft: 'auto' }}
               checked={prefs.paragraphFocus}
               onChange={paragraphFocus => changePrefs({ paragraphFocus })}
+            />
+          </Tooltip>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 13 }}>章内大纲</Text>
+          <Tooltip title="编辑器左侧显示段落导航">
+            <Switch
+              size="small"
+              style={{ marginLeft: 'auto' }}
+              checked={prefs.outline}
+              onChange={outline => changePrefs({ outline })}
             />
           </Tooltip>
         </div>
