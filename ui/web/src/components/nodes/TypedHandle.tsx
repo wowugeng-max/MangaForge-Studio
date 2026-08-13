@@ -5,7 +5,7 @@ import { getTypeColor, getTypeLabel } from '../../utils/handleTypes'
 
 export const COLLAPSED_HANDLE_TOP = 21
 
-export function resolveTypedHandleTop(collapsed: boolean | undefined, top: number | undefined): number | string {
+export function resolveTypedHandleTop(collapsed: boolean | undefined, top: number | string | undefined): number | string {
   if (collapsed) return COLLAPSED_HANDLE_TOP
   return top ?? '50%'
 }
@@ -16,7 +16,7 @@ type TypedHandleProps = {
   position: Position
   dataType: string
   label?: string
-  top?: number
+  top?: number | string
   collapsed?: boolean
   color?: string
   isConnectable?: boolean

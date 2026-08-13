@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Position, type NodeProps, useReactFlow, useUpdateNodeInternals } from 'reactflow'
 import { useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
-import { Button, Collapse, Input, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd'
-import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined } from '@ant-design/icons'
+import { Button, Collapse, Input, Progress, Select, Space, Spin, Switch, Tag, Tooltip, Typography, message } from 'antd'
+import { DownOutlined, PlayCircleOutlined, SaveOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { providerApi } from '../../api/providers'
 import { keyApi } from '../../api/keys'
 import apiClient from '../../api/client'
@@ -11,7 +11,7 @@ import { createSSEClient, type SSEClient, type SSEMessage } from '../../utils/ss
 import { getTypeLabel, inferParamType } from '../../utils/handleTypes'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
-import { AspectRatioPanel, AspectRatioTrigger, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
+import { AspectRatioGrid, getAspectRatioSize, type AspectRatioResolution, type AspectRatioValue } from '../AspectRatioSelector'
 import { CameraPanel, CameraTrigger, buildCameraPromptSuffix, type CustomCameraOptions } from '../CameraControl'
 import { CameraMovementPanel, CameraMovementTrigger, type CameraMovementPreset } from '../CameraMovement'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
@@ -19,6 +19,7 @@ import { useCanvasStore } from '../../stores/canvasStore'
 import { BaseNode } from './BaseNode'
 import { TypedHandle } from './TypedHandle'
 import { NodeConfigToolbar } from './NodeConfigToolbar'
+import { CopyContentButton } from './CopyContentButton'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
 
@@ -102,6 +103,123 @@ export function resolveComfyEngineParamInputValue(sourceData: any, paramType: st
   ])
 }
 
+/** 运行门槛：选了算力节点+凭证，或直接填了云端代理 Base URL，二者满足其一即可。 */
+export function resolveComfyEngineRunGate(input: {
+  selectedProvider?: string | null
+  selectedKeyId?: number | null
+  cloudBaseUrl?: string
+}): { ok: boolean; reason?: string } {
+  const hasProviderKey = Boolean(input.selectedProvider && Number(input.selectedKeyId))
+  const hasDirectUrl = Boolean(String(input.cloudBaseUrl || '').trim())
+  if (hasProviderKey || hasDirectUrl) return { ok: true }
+  return { ok: false, reason: '请选择 ComfyUI 算力节点和执行凭证，或在配置面板填写云端代理 Base URL' }
+}
+
+export type ComfyJsonValidation = {
+  status: 'empty' | 'ok' | 'error'
+  nodeCount?: number
+  paramCount?: number
+  missingNodes?: string[]
+  error?: string
+}
+
+export function validateComfyWorkflowJson(value: string): ComfyJsonValidation {
+  const raw = String(value || '').trim()
+  if (!raw) return { status: 'empty' }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return { status: 'error', error: '需要 JSON 对象（ComfyUI API 格式工作流）' }
+    }
+    const nodeCount = Object.values(parsed).filter(node => node && typeof node === 'object' && (node as any).class_type).length
+    if (!nodeCount) return { status: 'error', error: '未识别到 class_type 节点，请粘贴 API 格式（非界面导出格式）的工作流' }
+    return { status: 'ok', nodeCount }
+  } catch (error: any) {
+    return { status: 'error', error: `JSON 解析失败: ${String(error?.message || error)}` }
+  }
+}
+
+export function validateComfyParameterMappingJson(value: string, workflow?: Record<string, any> | null): ComfyJsonValidation {
+  const raw = String(value || '').trim()
+  if (!raw) return { status: 'empty' }
+  try {
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return { status: 'error', error: '需要 JSON 对象' }
+    const entries = Object.entries(parsed)
+    const invalid = entries.find(([, config]) => !config || typeof config !== 'object'
+      || !String((config as any).node_id || '').trim() || !String((config as any).field || '').trim())
+    if (invalid) return { status: 'error', error: `参数 "${invalid[0]}" 缺少 node_id 或 field` }
+    const missingNodes = workflow
+      ? entries.filter(([, config]) => !workflow[String((config as any).node_id)]).map(([name]) => name)
+      : []
+    return { status: 'ok', paramCount: entries.length, missingNodes }
+  } catch (error: any) {
+    return { status: 'error', error: `JSON 解析失败: ${String(error?.message || error)}` }
+  }
+}
+
+/** 扫描工作流常见节点（CLIPTextEncode / EmptyLatentImage / KSampler / LoadImage），自动生成参数映射。 */
+export function generateComfyEngineParameterMapping(
+  workflow: Record<string, any> | null | undefined,
+): Record<string, { node_id: string; field: string }> {
+  const mapping: Record<string, { node_id: string; field: string }> = {}
+  if (!workflow || typeof workflow !== 'object') return mapping
+  const entries = Object.entries(workflow).filter(([, node]) => node && typeof node === 'object' && (node as any).class_type)
+  const classOf = (node: any) => String(node?.class_type || '')
+
+  // KSampler 的 positive/negative 连接决定哪个 CLIPTextEncode 是正/负提示词
+  const sampler = entries.find(([, node]) => /KSampler/i.test(classOf(node)))
+  const samplerInputs = (sampler?.[1] as any)?.inputs || {}
+  const positiveId = Array.isArray(samplerInputs.positive) ? String(samplerInputs.positive[0]) : ''
+  const negativeId = Array.isArray(samplerInputs.negative) ? String(samplerInputs.negative[0]) : ''
+  const textNodes = entries.filter(([, node]) => /CLIPTextEncode/i.test(classOf(node)) && typeof (node as any)?.inputs?.text === 'string')
+  const positive = textNodes.find(([nodeId]) => nodeId === positiveId) || textNodes[0]
+  const negative = textNodes.find(([nodeId]) => nodeId === negativeId && nodeId !== positive?.[0])
+    || textNodes.find(([nodeId]) => nodeId !== positive?.[0])
+  if (positive) mapping.positive_prompt = { node_id: positive[0], field: 'inputs/text' }
+  if (negative) mapping.negative_prompt = { node_id: negative[0], field: 'inputs/text' }
+
+  const latent = entries.find(([, node]) => /Empty.*LatentImage/i.test(classOf(node)) && (node as any)?.inputs?.width !== undefined)
+  if (latent) {
+    mapping.width = { node_id: latent[0], field: 'inputs/width' }
+    mapping.height = { node_id: latent[0], field: 'inputs/height' }
+  }
+  if (sampler && samplerInputs.seed !== undefined) mapping.seed = { node_id: sampler[0], field: 'inputs/seed' }
+
+  const loadImages = entries.filter(([, node]) => /^LoadImage/i.test(classOf(node)))
+  loadImages.forEach(([nodeId], index) => {
+    mapping[index === 0 ? 'input_image' : `input_image_${index + 1}`] = { node_id: nodeId, field: 'inputs/image' }
+  })
+  return mapping
+}
+
+/** 工作流里出现视频类节点（VHS / AnimateDiff / Wan / SVD 等）则按视频任务投递。 */
+export function inferComfyWorkflowMediaType(workflow: Record<string, any> | null | undefined): 'image' | 'video' {
+  if (!workflow || typeof workflow !== 'object') return 'image'
+  const isVideoClass = Object.values(workflow).some(node =>
+    /video|vhs|animatediff|wan\d*[._ ]|svd|hunyuan/i.test(String((node as any)?.class_type || '')))
+  return isVideoClass ? 'video' : 'image'
+}
+
+/** ComfyUI 轮询没有精确百分比，按执行阶段给出指示性进度。 */
+export function comfyPhaseProgressPercent(phase: string): number {
+  const normalized = String(phase || '').toLowerCase()
+  if (normalized === 'comfyui') return 10
+  if (normalized === 'queued') return 20
+  if (normalized === 'polling') return 55
+  if (normalized === 'downloading') return 85
+  if (normalized === 'completed') return 100
+  return 35
+}
+
+/** 参数端口按节点高度百分比均匀分布，参数再多也不会悬出节点。 */
+export function comfyParamHandleTop(index: number, count: number): string {
+  if (count <= 1) return '55%'
+  const start = 30
+  const end = 88
+  return `${Math.round(start + index * ((end - start) / (count - 1)))}%`
+}
+
 function injectWorkflowValue(workflow: any, config: any, value: any) {
   if (value === undefined || value === '' || !config?.node_id || !config?.field) return
   const node = workflow?.[config.node_id]
@@ -126,6 +244,7 @@ export function applyComfyEngineParametersToWorkflow(input: {
   paramValues?: Record<string, any>
   connectedValues?: Record<string, any>
   cameraParams?: Record<string, string>
+  outputSize?: { width: number; height: number } | null
 }) {
   const workflow = JSON.parse(JSON.stringify(input.workflow || {}))
   const parameters = input.parameters || null
@@ -138,8 +257,28 @@ export function applyComfyEngineParametersToWorkflow(input: {
     const hasConnectedValue = Object.prototype.hasOwnProperty.call(connectedValues, paramName)
     let value = hasConnectedValue ? connectedValues[paramName] : paramValues[paramName]
     if (!hasExplicitParamValue(value)) continue
-    if (inferParamType(paramName) === 'text' && cameraSuffix) value = `${value}${cameraSuffix}`
+    // 镜头后缀只拼进正向提示词，负面提示词不追加
+    if (inferParamType(paramName) === 'text' && cameraSuffix && !/negative/i.test(paramName)) value = `${value}${cameraSuffix}`
     injectWorkflowValue(workflow, config, value)
+  }
+
+  // 比例面板选择的输出尺寸注入工作流；用户手填/连线的 width/height 优先
+  if (input.outputSize && input.outputSize.width > 0 && input.outputSize.height > 0) {
+    const userProvided = (name: string) => hasExplicitParamValue(connectedValues[name]) || hasExplicitParamValue(paramValues[name])
+    if (!userProvided('width') && !userProvided('height')) {
+      if (parameters?.width && parameters?.height) {
+        injectWorkflowValue(workflow, parameters.width, input.outputSize.width)
+        injectWorkflowValue(workflow, parameters.height, input.outputSize.height)
+      } else {
+        for (const node of Object.values(workflow)) {
+          const record = node as any
+          if (record && typeof record === 'object' && /Empty.*LatentImage/i.test(String(record.class_type || '')) && record.inputs) {
+            record.inputs.width = input.outputSize.width
+            record.inputs.height = input.outputSize.height
+          }
+        }
+      }
+    }
   }
 
   return { workflow, activeParameters: parameters }
@@ -194,6 +333,20 @@ function normalizeResultPacket(packet: any) {
   return typeof body === 'object' ? { ...body, content } : { content: String(body || '') }
 }
 
+/** 从参数值（优先正向提示词）或工作流 CLIPTextEncode 里提取提示词文本，用于血缘记录。 */
+export function resolveComfyEnginePromptText(
+  params: Record<string, any> | null | undefined,
+  workflow?: Record<string, any> | null,
+): string {
+  const paramEntries = Object.entries(params || {})
+  const positive = paramEntries.find(([name, value]) => name === 'positive_prompt' && hasExplicitParamValue(value))
+    || paramEntries.find(([name, value]) => inferParamType(name) === 'text' && !/negative/i.test(name) && hasExplicitParamValue(value))
+  if (positive) return String(positive[1]).trim()
+  const config = generateComfyEngineParameterMapping(workflow).positive_prompt
+  const text = config ? (workflow as any)?.[config.node_id]?.inputs?.text : ''
+  return typeof text === 'string' ? text.trim() : ''
+}
+
 export function buildComfyEngineResultWithLineage(input: {
   packet: any
   selectedProviderName: string
@@ -204,6 +357,7 @@ export function buildComfyEngineResultWithLineage(input: {
   aspectRatioValue: AspectRatioValue
   customWidth?: number
   customHeight?: number
+  resolution?: AspectRatioResolution
   cameraParams?: Record<string, string>
   sourceAssetIds?: number[] | null
 }) {
@@ -220,8 +374,9 @@ export function buildComfyEngineResultWithLineage(input: {
     source_mode: 'comfyui',
     source_workflow: input.workflow ?? input.fallbackWorkflow,
     source_params: input.params ?? input.fallbackParams,
+    source_prompt: resolveComfyEnginePromptText(input.params ?? input.fallbackParams, input.workflow ?? input.fallbackWorkflow),
     source_aspect_ratio: input.aspectRatioValue,
-    source_size: getAspectRatioSize(input.aspectRatioValue, input.customWidth, input.customHeight),
+    source_size: getAspectRatioSize(input.aspectRatioValue, input.customWidth, input.customHeight, input.resolution),
     source_camera_params: cameraParams,
     source_camera_suffix: buildCameraPromptSuffix(cameraParams) || null,
   }
@@ -234,9 +389,12 @@ export function buildComfyEngineAssetPayload(input: { result: any; projectId?: n
   const sourceAssetIds = Array.isArray(result.source_asset_ids)
     ? result.source_asset_ids.map((item: any) => Number(item)).filter((id: number) => Number.isFinite(id))
     : []
+  const promptText = String(result.source_prompt || '').trim()
+    || resolveComfyEnginePromptText(result.source_params, result.source_workflow)
+  const promptSnippet = promptText.slice(0, 10)
 
   return {
-    name: `${isVideo ? '视频' : '图像'} ComfyUI 产物`,
+    name: `${isVideo ? '🎬' : '🖼️'} ${promptSnippet ? `${promptSnippet}...` : 'ComfyUI 产物'}`,
     type: isVideo ? 'video' : 'image',
     file_path: content,
     ...(sourceAssetIds.length ? { source_asset_ids: sourceAssetIds } : {}),
@@ -250,6 +408,7 @@ export function buildComfyEngineAssetPayload(input: { result: any; projectId?: n
       source_mode: result.source_mode,
       source_workflow: result.source_workflow,
       source_params: result.source_params,
+      source_prompt: promptText,
       source_aspect_ratio: result.source_aspect_ratio,
       source_size: result.source_size,
       source_camera_params: result.source_camera_params,
@@ -269,12 +428,13 @@ export function buildComfyEngineGeneratePayload(input: {
   cloudBaseUrl?: string
   runninghubApiKey?: string
   comfyInputDir?: string
+  mediaType?: 'image' | 'video'
 }) {
   const payload: any = {
     api_key_id: Number(input.selectedKeyId) || undefined,
     provider: input.selectedProvider || undefined,
     model: 'comfyui-workflow',
-    type: 'image',
+    type: input.mediaType || 'image',
     prompt: JSON.stringify(input.workflow),
     params: { client_id: input.id },
   }
@@ -308,16 +468,18 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   const [runninghubApiKey, setRunninghubApiKey] = useState<string>(data?.runninghubApiKey || data?.runninghub_api_key || '')
   const [comfyInputDir, setComfyInputDir] = useState<string>(data?.comfyInputDir || data?.comfy_input_dir || '')
   const [configOpen, setConfigOpen] = useState(false)
-  const [activePanel, setActivePanel] = useState<'ratio' | 'camera' | 'movement' | null>(null)
+  const [activePanel, setActivePanel] = useState<'camera' | 'movement' | null>(null)
   const [aspectRatioValue, setAspectRatioValue] = useState<AspectRatioValue>(data?.aspectRatioValue ?? data?.aspectRatio ?? '16:9')
   const [customWidth, setCustomWidth] = useState(Number(data?.customWidth || 1280))
   const [customHeight, setCustomHeight] = useState(Number(data?.customHeight || 720))
+  const [resolution, setResolution] = useState<AspectRatioResolution>(data?.resolution || '1k')
   const [cameraParams, setCameraParams] = useState<Record<string, string>>(data?.cameraParams || {})
   const [customCameraOptions, setCustomCameraOptions] = useState<CustomCameraOptions>(data?.customCameraOptions || {})
   const [customMovements, setCustomMovements] = useState<CameraMovementPreset[]>(data?.customMovements || [])
   const [quickOpen, setQuickOpen] = useState(false)
   const [isRunning, setIsRunning] = useState(false)
   const [progressMsg, setProgressMsg] = useState('')
+  const [progressPhase, setProgressPhase] = useState('')
   const [showPreview, setShowPreview] = useState(Boolean(data?.showPreview ?? true))
   const [result, setResult] = useState<any>(data?.result || null)
   const [mediaDims, setMediaDims] = useState('')
@@ -328,6 +490,9 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   const runLineageRef = useRef<{ workflow: any; params: any; sourceAssetIds?: number[] } | null>(null)
 
   const parameters = useMemo(() => parseJsonObject(parametersJson, null), [parametersJson])
+  const parsedWorkflow = useMemo(() => parseJsonObject(workflowJson.trim(), null), [workflowJson])
+  const workflowValidation = useMemo(() => validateComfyWorkflowJson(workflowJson), [workflowJson])
+  const mappingValidation = useMemo(() => validateComfyParameterMappingJson(parametersJson, parsedWorkflow), [parametersJson, parsedWorkflow])
   const selectedProviderRecord = providers.find(provider => provider.id === selectedProvider)
   const selectedProviderName = selectedProviderRecord?.display_name || selectedProvider || '未配置算力节点'
   const availableKeys = keys.filter(key => String(key.provider).toLowerCase() === String(selectedProvider || '').toLowerCase() && key.is_active !== false)
@@ -412,13 +577,14 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       aspectRatioValue,
       customWidth,
       customHeight,
+      resolution,
       cameraParams,
       customCameraOptions,
       customMovements,
       showPreview,
       result,
     })
-  }, [id, selectedProvider, selectedKeyId, workflowJson, parameters, paramValues, cloudBaseUrl, runninghubApiKey, comfyInputDir, aspectRatioValue, customWidth, customHeight, cameraParams, customCameraOptions, customMovements, showPreview, result, updateNodeData])
+  }, [id, selectedProvider, selectedKeyId, workflowJson, parameters, paramValues, cloudBaseUrl, runninghubApiKey, comfyInputDir, aspectRatioValue, customWidth, customHeight, resolution, cameraParams, customCameraOptions, customMovements, showPreview, result, updateNodeData])
 
   useEffect(() => {
     setNodeStatus(id, isRunning ? 'running' : result ? 'success' : 'idle')
@@ -469,8 +635,13 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       edges: getEdges(),
       nodes: getNodes(),
     })
+    const ratioSize = getAspectRatioSize(aspectRatioValue, customWidth, customHeight, resolution)
+    const [sizeWidth, sizeHeight] = ratioSize.split('*').map(Number)
+    const outputSize = Number.isFinite(sizeWidth) && Number.isFinite(sizeHeight) && sizeWidth > 0 && sizeHeight > 0
+      ? { width: sizeWidth, height: sizeHeight }
+      : null
     return {
-      ...applyComfyEngineParametersToWorkflow({ workflow, parameters: activeParameters, paramValues, connectedValues, cameraParams }),
+      ...applyComfyEngineParametersToWorkflow({ workflow, parameters: activeParameters, paramValues, connectedValues, cameraParams, outputSize }),
       sourceAssetIds,
     }
   }
@@ -487,6 +658,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       aspectRatioValue,
       customWidth,
       customHeight,
+      resolution,
       cameraParams,
       sourceAssetIds: lineage?.sourceAssetIds,
     })
@@ -495,6 +667,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
     setNodeStatus(id, 'success')
     setIsRunning(false)
     setProgressMsg('')
+    setProgressPhase('')
     sseClientRef.current?.disconnect()
     sseClientRef.current = null
     message.success('物理节点渲染成功')
@@ -509,6 +682,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
     setNodeStatus(id, 'error')
     setIsRunning(false)
     setProgressMsg('')
+    setProgressPhase('')
     sseClientRef.current?.disconnect()
     sseClientRef.current = null
   }
@@ -516,6 +690,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   const handleSSEMessage = (msg: SSEMessage) => {
     if (msg.type === 'status') {
       setProgressMsg(String(msg.message || msg.progress || 'ComfyUI 正在执行...'))
+      if ((msg as any).phase) setProgressPhase(String((msg as any).phase))
       return
     }
     if (msg.type === 'result') {
@@ -532,9 +707,10 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
   }
 
   const handleRun = async () => {
-    if (!selectedProvider || !selectedKeyId) {
+    const runGate = resolveComfyEngineRunGate({ selectedProvider, selectedKeyId, cloudBaseUrl })
+    if (!runGate.ok) {
       setNodeStatus(id, 'error')
-      return message.warning('请选择 ComfyUI 算力节点和执行凭证')
+      return message.warning(runGate.reason)
     }
 
     let waitingForSSE = false
@@ -543,6 +719,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       runLineageRef.current = { workflow, params: paramValues, sourceAssetIds }
       setIsRunning(true)
       setProgressMsg('正在连接实时通道...')
+      setProgressPhase('')
       setNodeStatus(id, 'running')
       updateNodeData(id, { result: null, _finalUsedWorkflow: workflow, _finalUsedParams: paramValues, parameters: activeParameters })
 
@@ -560,6 +737,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
         cloudBaseUrl,
         runninghubApiKey,
         comfyInputDir,
+        mediaType: inferComfyWorkflowMediaType(workflow),
       }))
 
       if (res.data?.client_id && !res.data?.content && !res.data?.result?.content) {
@@ -574,8 +752,20 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
       if (!waitingForSSE) {
         setIsRunning(false)
         setProgressMsg('')
+        setProgressPhase('')
       }
     }
+  }
+
+  const handleGenerateMapping = () => {
+    const workflow = parsedWorkflow || parseJsonObject(findIncomingWorkflow()?.workflowJson || '', null)
+    if (!workflow) return message.warning('请先粘贴或连入有效的工作流 JSON')
+    const mapping = generateComfyEngineParameterMapping(workflow)
+    if (!Object.keys(mapping).length) return message.info('未识别到常见可暴露节点（CLIPTextEncode / EmptyLatentImage / KSampler / LoadImage）')
+    const nextJson = JSON.stringify(mapping, null, 2)
+    setParametersJson(nextJson)
+    updateNodeData(id, { parameters: mapping })
+    message.success(`已生成 ${Object.keys(mapping).length} 个参数映射`)
   }
 
   useEffect(() => {
@@ -623,16 +813,17 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
 
   const renderParameterHandles = () => {
     if (!parameters) return null
-    return Object.keys(parameters).map((paramName, index) => {
+    const paramNames = Object.keys(parameters)
+    return paramNames.map((paramName, index) => {
       const paramType = inferParamType(paramName)
       return (
-        <TypedHandle key={paramName} id={`param-${paramName}`} type="target" position={Position.Left} dataType={paramType} label={`参数 ${paramName}`} top={126 + index * 42} collapsed={nodeCollapsed} />
+        <TypedHandle key={paramName} id={`param-${paramName}`} type="target" position={Position.Left} dataType={paramType} label={`参数 ${paramName}`} top={comfyParamHandleTop(index, paramNames.length)} collapsed={nodeCollapsed} />
       )
     })
   }
 
   const quickPanel = (
-    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="算力与凭证" width={320} position={Position.Bottom}>
+    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="算力与凭证" width={320} position={Position.Top}>
       <Space.Compact block>
         <Select
           value={selectedProvider || undefined}
@@ -669,6 +860,7 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
                 <Input size="small" value={cloudBaseUrl} onChange={event => setCloudBaseUrl(event.target.value)} placeholder="RunningHub / 云端 ComfyUI Base URL" />
                 <Input.Password size="small" value={runninghubApiKey} onChange={event => setRunninghubApiKey(event.target.value)} placeholder="RunningHub API Key（Base URL 未含 key 时使用）" />
                 <Input size="small" value={comfyInputDir} onChange={event => setComfyInputDir(event.target.value)} placeholder="ComfyUI input 目录，用于本地素材映射" />
+                <Text type="secondary" style={{ fontSize: 10 }}>填写 Base URL 后可直接运行，无需再选算力节点与凭证。Key 会随画布数据保存在本机工作区，分享画布前请先清空。</Text>
               </Space>
             ),
           },
@@ -676,50 +868,68 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
             key: 'workflow',
             label: '工作流 JSON',
             children: (
-              <TextArea
-                className="nodrag nowheel"
-                value={workflowJson}
-                onChange={event => setWorkflowJson(event.target.value)}
-                autoSize={{ minRows: 6, maxRows: 12 }}
-                placeholder="粘贴 ComfyUI workflow JSON，或连入 workflow 资产到左侧紫色端口"
-                style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
-              />
+              <div style={{ display: 'grid', gap: 6 }}>
+                <TextArea
+                  className="nodrag nowheel"
+                  value={workflowJson}
+                  onChange={event => setWorkflowJson(event.target.value)}
+                  autoSize={{ minRows: 6, maxRows: 12 }}
+                  placeholder="粘贴 ComfyUI workflow JSON（API 格式），或连入 workflow 资产到左侧紫色端口"
+                  status={workflowValidation.status === 'error' ? 'error' : undefined}
+                  style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
+                />
+                {workflowValidation.status === 'ok' && <Text style={{ fontSize: 10, color: '#16a34a' }}>✓ 已识别 {workflowValidation.nodeCount} 个节点</Text>}
+                {workflowValidation.status === 'error' && <Text style={{ fontSize: 10, color: '#dc2626' }}>{workflowValidation.error}</Text>}
+              </div>
             ),
           },
           {
             key: 'mapping',
             label: '参数映射 JSON',
             children: (
-              <TextArea
-                className="nodrag nowheel"
-                value={parametersJson}
-                onChange={event => setParametersJson(event.target.value)}
-                autoSize={{ minRows: 4, maxRows: 8 }}
-                placeholder={'例如：{"positive_prompt":{"node_id":"6","field":"inputs/text"}}'}
-                style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
-              />
+              <div style={{ display: 'grid', gap: 6 }}>
+                <Button size="small" icon={<ThunderboltOutlined />} onClick={handleGenerateMapping} disabled={workflowValidation.status !== 'ok' && !findIncomingWorkflow()}>
+                  从工作流自动生成
+                </Button>
+                <TextArea
+                  className="nodrag nowheel"
+                  value={parametersJson}
+                  onChange={event => setParametersJson(event.target.value)}
+                  autoSize={{ minRows: 4, maxRows: 8 }}
+                  placeholder={'例如：{"positive_prompt":{"node_id":"6","field":"inputs/text"}}'}
+                  status={mappingValidation.status === 'error' ? 'error' : undefined}
+                  style={{ fontSize: 12, fontFamily: 'monospace', borderRadius: 8 }}
+                />
+                {mappingValidation.status === 'ok' && (
+                  <Text style={{ fontSize: 10, color: mappingValidation.missingNodes?.length ? '#d97706' : '#16a34a' }}>
+                    {mappingValidation.missingNodes?.length
+                      ? `⚠ ${mappingValidation.missingNodes.join('、')} 指向的节点不在当前工作流中`
+                      : `✓ ${mappingValidation.paramCount} 个参数端口`}
+                  </Text>
+                )}
+                {mappingValidation.status === 'error' && <Text style={{ fontSize: 10, color: '#dc2626' }}>{mappingValidation.error}</Text>}
+              </div>
             ),
           },
           {
             key: 'camera',
-            label: '镜头与比例',
+            label: '尺寸与镜头',
             children: (
               <div style={{ display: 'grid', gap: 8 }}>
+                <AspectRatioGrid
+                  value={aspectRatioValue}
+                  customWidth={customWidth}
+                  customHeight={customHeight}
+                  resolution={resolution}
+                  onChange={(next) => setAspectRatioValue(next)}
+                  onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
+                  onResolutionChange={(next) => setResolution(next)}
+                />
+                <Text type="secondary" style={{ fontSize: 10 }}>选定尺寸会注入工作流的出图节点（EmptyLatentImage 或映射的 width/height）；选"自适应"则保持工作流原尺寸。</Text>
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                  <AspectRatioTrigger value={aspectRatioValue} customWidth={customWidth} customHeight={customHeight} onClick={() => setActivePanel(activePanel === 'ratio' ? null : 'ratio')} />
                   <CameraTrigger value={cameraParams} onClick={() => setActivePanel(activePanel === 'camera' ? null : 'camera')} />
                   <CameraMovementTrigger onClick={() => setActivePanel(activePanel === 'movement' ? null : 'movement')} />
                 </div>
-                {activePanel === 'ratio' && (
-                  <AspectRatioPanel
-                    value={aspectRatioValue}
-                    customWidth={customWidth}
-                    customHeight={customHeight}
-                    onChange={(next) => setAspectRatioValue(next)}
-                    onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
-                    onClose={() => setActivePanel(null)}
-                  />
-                )}
                 {activePanel === 'camera' && (
                   <CameraPanel
                     value={cameraParams}
@@ -820,6 +1030,13 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
             <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>渲染结果</Text>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {resultContent && (
+                <CopyContentButton
+                  kind={isVideoResult ? 'video' : isMediaResult ? 'image' : 'text'}
+                  value={isMediaResult ? previewMediaSrc : String(resultContent)}
+                  style={{ color: '#722ed1', padding: 0, height: 'auto' }}
+                />
+              )}
               {resultContent && <Tooltip title="携带工作流血统保存到资产库"><Button type="text" size="small" icon={<SaveOutlined />} loading={savingAsset} onClick={handleSaveToAsset} style={{ color: '#722ed1', padding: 0, height: 'auto' }} /></Tooltip>}
               <Switch className="nodrag" size="small" checked={showPreview} onChange={value => setShowPreview(value)} />
             </div>
@@ -829,9 +1046,16 @@ function ComfyUIEngineNodeImpl(props: NodeProps) {
             <div style={{ flex: 1, position: 'relative', background: resultContent && !isMediaResult ? '#0f172a' : '#f1f5f9', borderRadius: 8, overflow: 'hidden', marginTop: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: 80 }}>
               {mediaDims && !isRunning && resultContent && <div style={{ position: 'absolute', top: 6, right: 6, background: 'rgba(15,23,42,0.75)', color: '#f8fafc', fontSize: 11, fontWeight: 600, padding: '2px 6px', borderRadius: 4, zIndex: 10, fontFamily: 'monospace' }}>{mediaDims}</div>}
               {isRunning ? (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 20, width: '100%' }}>
                   <Spin size="default" style={{ marginBottom: 12 }} />
-                  <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#722ed1' }}>{progressMsg}</Text>
+                  <Progress
+                    percent={comfyPhaseProgressPercent(progressPhase)}
+                    status="active"
+                    showInfo={false}
+                    strokeColor="#722ed1"
+                    style={{ width: '80%', margin: '0 0 8px' }}
+                  />
+                  <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, color: '#722ed1', textAlign: 'center' }}>{progressMsg}</Text>
                 </div>
               ) : resultContent ? (
                 isMediaResult ? (

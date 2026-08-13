@@ -1,7 +1,23 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { buildComfyEngineAssetPayload, collectComfyEngineConnectedInputs, isComfyEngineVideoPreviewContent, resolveComfyEngineParamInputValue, resolveComfyEnginePreviewMediaSrc } from './ComfyUIEngineNode'
+import {
+  applyComfyEngineParametersToWorkflow,
+  buildComfyEngineAssetPayload,
+  buildComfyEngineGeneratePayload,
+  collectComfyEngineConnectedInputs,
+  comfyParamHandleTop,
+  comfyPhaseProgressPercent,
+  generateComfyEngineParameterMapping,
+  inferComfyWorkflowMediaType,
+  isComfyEngineVideoPreviewContent,
+  resolveComfyEngineParamInputValue,
+  resolveComfyEnginePreviewMediaSrc,
+  resolveComfyEnginePromptText,
+  resolveComfyEngineRunGate,
+  validateComfyParameterMappingJson,
+  validateComfyWorkflowJson,
+} from './ComfyUIEngineNode'
 
 describe('ComfyUIEngineNode migration behavior', () => {
   test('builds browser-safe preview media src values for generated local assets', () => {
@@ -58,7 +74,7 @@ describe('ComfyUIEngineNode migration behavior', () => {
     })
 
     expect(payload).toMatchObject({
-      name: '视频 ComfyUI 产物',
+      name: '🎬 镜头推进...',
       type: 'video',
       project_id: 12,
       file_path: 'https://cdn.example/render.mp4',
@@ -74,6 +90,7 @@ describe('ComfyUIEngineNode migration behavior', () => {
         source_mode: 'comfyui',
         source_workflow: { '10': { inputs: { text: '镜头推进' } } },
         source_params: { positive_prompt: '镜头推进' },
+        source_prompt: '镜头推进',
         source_aspect_ratio: '16:9',
         source_size: '1280*720',
         source_camera_params: { lens: 'Arri Signature Prime' },
@@ -239,6 +256,141 @@ describe('ComfyUIEngineNode migration behavior', () => {
     expect(source).toContain('updateNodeInternals(id)')
     expect(source).toContain('[id, parameters, updateNodeInternals]')
     expect(source).not.toContain('useUpdateNodeInternals(id)')
+  })
+
+  test('allows running with only a cloud proxy base URL and blocks when nothing is configured', () => {
+    expect(resolveComfyEngineRunGate({ selectedProvider: 'runninghub', selectedKeyId: 3 })).toEqual({ ok: true })
+    expect(resolveComfyEngineRunGate({ cloudBaseUrl: ' https://grok.aicomic.site/v1 ' })).toEqual({ ok: true })
+    expect(resolveComfyEngineRunGate({ selectedProvider: 'runninghub', selectedKeyId: null, cloudBaseUrl: '' }).ok).toBe(false)
+    expect(resolveComfyEngineRunGate({}).ok).toBe(false)
+    expect(resolveComfyEngineRunGate({}).reason).toContain('Base URL')
+  })
+
+  test('validates workflow JSON with node counts and actionable errors', () => {
+    expect(validateComfyWorkflowJson('')).toEqual({ status: 'empty' })
+    expect(validateComfyWorkflowJson('{invalid').status).toBe('error')
+    expect(validateComfyWorkflowJson('[1,2]').status).toBe('error')
+    expect(validateComfyWorkflowJson(JSON.stringify({ nodes: [], links: [] })).error).toContain('API 格式')
+    expect(validateComfyWorkflowJson(JSON.stringify({
+      '3': { class_type: 'KSampler', inputs: {} },
+      '6': { class_type: 'CLIPTextEncode', inputs: { text: 'a' } },
+    }))).toEqual({ status: 'ok', nodeCount: 2 })
+  })
+
+  test('validates parameter mapping JSON and flags node ids missing from the workflow', () => {
+    expect(validateComfyParameterMappingJson('')).toEqual({ status: 'empty' })
+    expect(validateComfyParameterMappingJson('{"p":{"node_id":"6"}}').error).toContain('field')
+    const workflow = { '6': { class_type: 'CLIPTextEncode', inputs: { text: 'a' } } }
+    const ok = validateComfyParameterMappingJson('{"positive_prompt":{"node_id":"6","field":"inputs/text"}}', workflow)
+    expect(ok).toEqual({ status: 'ok', paramCount: 1, missingNodes: [] })
+    const missing = validateComfyParameterMappingJson('{"positive_prompt":{"node_id":"99","field":"inputs/text"}}', workflow)
+    expect(missing.missingNodes).toEqual(['positive_prompt'])
+  })
+
+  test('generates parameter mappings from common workflow nodes with sampler-linked prompts', () => {
+    const workflow = {
+      '3': { class_type: 'KSampler', inputs: { seed: 42, positive: ['7', 0], negative: ['6', 0] } },
+      '5': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 } },
+      '6': { class_type: 'CLIPTextEncode', inputs: { text: 'bad quality' } },
+      '7': { class_type: 'CLIPTextEncode', inputs: { text: 'a hero' } },
+      '10': { class_type: 'LoadImage', inputs: { image: 'ref.png' } },
+    }
+    // 6 在 7 之前出现,但 KSampler 的 positive 连接指向 7,正/负提示词必须按连接判定
+    expect(generateComfyEngineParameterMapping(workflow)).toEqual({
+      positive_prompt: { node_id: '7', field: 'inputs/text' },
+      negative_prompt: { node_id: '6', field: 'inputs/text' },
+      width: { node_id: '5', field: 'inputs/width' },
+      height: { node_id: '5', field: 'inputs/height' },
+      seed: { node_id: '3', field: 'inputs/seed' },
+      input_image: { node_id: '10', field: 'inputs/image' },
+    })
+    expect(generateComfyEngineParameterMapping(null)).toEqual({})
+  })
+
+  test('injects the selected output size into latent nodes unless the user provided width/height', () => {
+    const workflow = {
+      '5': { class_type: 'EmptyLatentImage', inputs: { width: 512, height: 512 } },
+    }
+    const injected = applyComfyEngineParametersToWorkflow({
+      workflow,
+      parameters: null,
+      outputSize: { width: 1088, height: 1920 },
+    })
+    expect(injected.workflow['5'].inputs).toEqual({ width: 1088, height: 1920 })
+
+    const mapped = applyComfyEngineParametersToWorkflow({
+      workflow,
+      parameters: {
+        width: { node_id: '5', field: 'inputs/width' },
+        height: { node_id: '5', field: 'inputs/height' },
+      },
+      paramValues: { width: 640, height: 640 },
+      outputSize: { width: 1088, height: 1920 },
+    })
+    // 用户手填的 width/height 优先于比例面板
+    expect(mapped.workflow['5'].inputs).toEqual({ width: 640, height: 640 })
+  })
+
+  test('does not append the camera suffix to negative prompts', () => {
+    const workflow = {
+      '6': { class_type: 'CLIPTextEncode', inputs: { text: '' } },
+      '7': { class_type: 'CLIPTextEncode', inputs: { text: '' } },
+    }
+    const applied = applyComfyEngineParametersToWorkflow({
+      workflow,
+      parameters: {
+        positive_prompt: { node_id: '7', field: 'inputs/text' },
+        negative_prompt: { node_id: '6', field: 'inputs/text' },
+      },
+      paramValues: { positive_prompt: '英雄登场', negative_prompt: '模糊, 低质量' },
+      cameraParams: { lens: 'Cooke S4' },
+    })
+    expect(applied.workflow['7'].inputs.text).not.toBe('英雄登场')
+    expect(applied.workflow['6'].inputs.text).toBe('模糊, 低质量')
+  })
+
+  test('infers video workflows from video-class nodes and forwards the media type', () => {
+    expect(inferComfyWorkflowMediaType({ '1': { class_type: 'VHS_VideoCombine' } })).toBe('video')
+    expect(inferComfyWorkflowMediaType({ '1': { class_type: 'ADE_AnimateDiffLoaderGen1' } })).toBe('video')
+    expect(inferComfyWorkflowMediaType({ '1': { class_type: 'KSampler' }, '2': { class_type: 'SaveImage' } })).toBe('image')
+    expect(inferComfyWorkflowMediaType(null)).toBe('image')
+
+    const payload = buildComfyEngineGeneratePayload({
+      id: 'comfy-1',
+      selectedKeyId: null,
+      selectedProvider: null,
+      workflow: {},
+      cloudBaseUrl: 'http://direct:8188',
+      mediaType: 'video',
+    })
+    expect(payload.type).toBe('video')
+    expect(payload.base_url).toBe('http://direct:8188')
+  })
+
+  test('resolves prompt text from params first and workflow text nodes as fallback', () => {
+    expect(resolveComfyEnginePromptText({ positive_prompt: '主角特写', negative_prompt: '模糊' })).toBe('主角特写')
+    expect(resolveComfyEnginePromptText({ scene_text: '雨夜街道' })).toBe('雨夜街道')
+    expect(resolveComfyEnginePromptText({}, {
+      '3': { class_type: 'KSampler', inputs: { positive: ['7', 0] } },
+      '7': { class_type: 'CLIPTextEncode', inputs: { text: '工作流内置提示词' } },
+    })).toBe('工作流内置提示词')
+    expect(resolveComfyEnginePromptText(null, null)).toBe('')
+  })
+
+  test('maps execution phases to indicative progress and keeps param handles inside the node', () => {
+    expect(comfyPhaseProgressPercent('queued')).toBe(20)
+    expect(comfyPhaseProgressPercent('polling')).toBe(55)
+    expect(comfyPhaseProgressPercent('downloading')).toBe(85)
+    expect(comfyPhaseProgressPercent('completed')).toBe(100)
+
+    expect(comfyParamHandleTop(0, 1)).toBe('55%')
+    expect(comfyParamHandleTop(0, 8)).toBe('30%')
+    expect(comfyParamHandleTop(7, 8)).toBe('88%')
+    for (let index = 0; index < 8; index += 1) {
+      const percent = Number.parseInt(comfyParamHandleTop(index, 8), 10)
+      expect(percent).toBeGreaterThanOrEqual(30)
+      expect(percent).toBeLessThanOrEqual(88)
+    }
   })
 
   test('does not replace workflow default text with only a camera suffix when no text input is provided', async () => {
