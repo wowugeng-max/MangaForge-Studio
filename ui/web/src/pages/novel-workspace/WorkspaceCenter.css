@@ -3673,6 +3673,40 @@
 .chapter-action-bar-tags .ant-tag {
   margin-inline-end: 0;
 }
+.chapter-action-bar-word-label {
+  font-size: 12px;
+  color: rgba(0, 0, 0, 0.55);
+  font-variant-numeric: tabular-nums;
+}
+.chapter-action-bar-save-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #bfbfbf;
+}
+.chapter-action-bar-save-dot.is-saved {
+  background: #52c41a;
+}
+.chapter-action-bar-save-dot.is-saving {
+  background: #8c8c8c;
+  animation: chapter-action-bar-save-pulse 1.2s ease-in-out infinite;
+}
+.chapter-action-bar-save-dot.is-error {
+  background: #ff4d4f;
+}
+@keyframes chapter-action-bar-save-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.chapter-action-bar-menu {
+  min-width: 220px;
+  max-width: 320px;
+}
+.chapter-action-bar-menu .ant-btn {
+  text-align: left;
+  justify-content: flex-start;
+}
 .chapter-action-bar-actions {
   display: flex;
   flex-wrap: wrap;

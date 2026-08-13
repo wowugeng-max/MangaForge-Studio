@@ -5,7 +5,6 @@ import {
   ClockCircleOutlined,
   FontSizeOutlined,
   LineHeightOutlined,
-  MoreOutlined,
   StopOutlined,
   SyncOutlined,
 } from '@ant-design/icons'
@@ -52,6 +51,7 @@ import {
   type EditorRevisionTask,
 } from './editorRevisionTasks'
 import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
+import { buildChapterHeaderStatus } from './chapter-header-status'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -483,6 +483,20 @@ export function WorkspaceCenter({
     canSyncStoryState: Boolean(deliverySummary.storyStateSyncAction || deliverySummary.storyStatePanel?.canSync),
     revisionAvailable: Boolean(chapterAcceptanceDesk?.acceptanceStatus === 'needs_revision'),
   })
+  const headerStatus = buildChapterHeaderStatus({
+    phase: chapterWorkflow.phase,
+    phaseLabel: chapterWorkflow.phaseLabel,
+    wordCount: activeWordCount,
+    wordTarget: generationTargetWordCount,
+    saveStatus: saveStatus === 'saved' ? 'saved' : saveStatus === 'saving' ? 'saving' : saveStatus === 'error' ? 'error' : null,
+    material: materialScore
+      ? { score: materialScore.score, canGenerate: materialScore.can_generate, recommendations: materialScore.recommendations }
+      : null,
+    queue: writingQueue?.visible
+      ? { readyCount: writingQueue.readyCount, blockedCount: writingQueue.blockedCount, draftedCount: writingQueue.draftedCount }
+      : null,
+    delivery: deliverySummary.visible ? { statusLabel: deliverySummary.statusLabel } : null,
+  })
   const headerRevisionActive = Boolean(
     revisionActive && chapterWorkflow.primaryAction.key === 'apply_editor_revision',
   )
@@ -645,42 +659,21 @@ export function WorkspaceCenter({
                   第{activeChapter.chapter_no}章《{displayValue(activeChapter.title) || '无标题'}》
                 </Title>
               }
-              statusTags={[
-                {
-                  key: 'chapter-status',
-                  label: activeWordCount > 0 ? '已写' : '未写',
-                  color: activeWordCount > 0 ? 'green' : 'default',
-                },
-                ...(materialScore ? [{
-                  key: 'material',
-                  label: `材料 ${materialScore.score ?? '-'}%`,
-                  color: materialScore.can_generate ? 'green' : Number(materialScore.score || 0) >= 65 ? 'gold' : 'red',
-                  tooltip: (materialScore.recommendations || []).slice(0, 4).join('；') || '材料完整度',
-                }] : []),
-              ]}
-              wordCountLabel={`${chapterWordCount(activeChapter)} 字`}
-              saveStatusLabel={saveStatus === 'saved' ? '已保存' : saveStatus === 'saving' ? '保存中' : saveStatus === 'error' ? '保存失败' : undefined}
+              headerStatus={headerStatus}
               detailsOpen={!writingAuxCollapsed}
               // Immersive shell never renders the inline details track, so hide the toggle there
               // (the aux content stays reachable via the trailing "辅助" Popover).
               onToggleDetails={isImmersiveShell ? undefined : () => setWritingAuxCollapsed(prev => !prev)}
-              detailsSummary={[
-                ...(writingQueue?.visible
-                  ? [
-                      `可写 ${writingQueue.readyCount}`,
-                      writingQueue.blockedCount > 0 ? `待补 ${writingQueue.blockedCount}` : '',
-                      writingQueue.draftedCount > 0 ? `待质检 ${writingQueue.draftedCount}` : '',
-                    ]
-                  : []),
-                deliverySummary.visible ? `交稿 ${deliverySummary.statusLabel}` : '',
-              ].filter(Boolean)}
+              detailsSummary={headerStatus.detailItems.map(item => item.label)}
+              menuExtra={(
+                <>
+                  {renderWordTargetControl()}
+                  <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
+                  {secondaryActionMenu}
+                </>
+              )}
               trailing={(
                 <Space size={6} wrap>
-                  {(chapterWorkflow.phase === 'empty' || chapterWorkflow.phase === 'blocked_materials' || recommendedAction.phase === 'draft') && renderWordTargetControl()}
-                  <EditorDisplayControls prefs={editorDisplayPrefs} onChange={setEditorDisplayPrefs} />
-                  <Popover content={secondaryActionMenu} trigger="click" placement="bottomRight">
-                    <Button className="novel-editor-more-actions" size="small" icon={<MoreOutlined />}>更多</Button>
-                  </Popover>
                   {isImmersiveShell && (
                     <div className="novel-writing-immersive-aux">
                       <Popover

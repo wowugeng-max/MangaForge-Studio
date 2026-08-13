@@ -1,13 +1,16 @@
 import React from 'react'
-import { DownOutlined, UpOutlined } from '@ant-design/icons'
-import { Button, Tag, Tooltip, Typography } from 'antd'
+import { DownOutlined, MoreOutlined, UpOutlined } from '@ant-design/icons'
+import { Button, Popover, Space, Tag, Tooltip, Typography } from 'antd'
 import {
   buildChapterWorkflowPresenter,
   chapterWorkflowStepLabels,
   type ChapterWorkflowInput,
   type ChapterWorkflowPresenter,
 } from './chapter-workflow-presenter'
+import type { ChapterHeaderStatus } from './chapter-header-status'
 import type { WritingCockpitActionKey } from './writingCockpitModel'
+
+const SAVE_DOT_LABELS = { saved: '已保存', saving: '保存中', error: '保存失败' } as const
 
 
 const MODEL_ACTION_KEYS = new Set([
@@ -70,9 +73,8 @@ export function ChapterActionBar({
   loading = false,
   primaryDisabled = false,
   title,
-  statusTags = [],
-  wordCountLabel,
-  saveStatusLabel,
+  headerStatus,
+  menuExtra,
   trailing,
   detailsOpen = false,
   onToggleDetails,
@@ -84,9 +86,8 @@ export function ChapterActionBar({
   loading?: boolean
   primaryDisabled?: boolean
   title?: React.ReactNode
-  statusTags?: Array<{ key: string; label: string; color?: string; tooltip?: string }>
-  wordCountLabel?: string
-  saveStatusLabel?: string
+  headerStatus?: ChapterHeaderStatus
+  menuExtra?: React.ReactNode
   trailing?: React.ReactNode
   detailsOpen?: boolean
   onToggleDetails?: () => void
@@ -167,13 +168,16 @@ export function ChapterActionBar({
           ) : null}
           <div className="chapter-action-bar-tags">
             <Tag color={phaseColor} bordered={false}>{presenter.phaseLabel}</Tag>
-            {statusTags.map(tag => (
-              <Tooltip key={tag.key} title={tag.tooltip || tag.label}>
-                <Tag color={tag.color || 'default'} bordered={false}>{tag.label}</Tag>
-              </Tooltip>
-            ))}
-            {wordCountLabel ? <Tag bordered={false}>{wordCountLabel}</Tag> : null}
-            {saveStatusLabel ? <Tag color="green" bordered={false}>{saveStatusLabel}</Tag> : null}
+            {headerStatus ? (
+              <>
+                <span className="chapter-action-bar-word-label">{headerStatus.wordLabel}</span>
+                {headerStatus.saveDot ? (
+                  <Tooltip title={SAVE_DOT_LABELS[headerStatus.saveDot]}>
+                    <span className={`chapter-action-bar-save-dot is-${headerStatus.saveDot}`} aria-label={SAVE_DOT_LABELS[headerStatus.saveDot]} />
+                  </Tooltip>
+                ) : null}
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -188,16 +192,31 @@ export function ChapterActionBar({
           >
             {presenter.primaryAction.label}
           </Button>
-          {presenter.secondaryActions.slice(0, 2).map(action => (
-            <Button
-              key={`${action.key}-${action.label}`}
-              type={action.kind === 'ghost' ? 'text' : 'default'}
-              className={crystalClassForAction(String(action.key), action.kind)}
-              onClick={() => run(action.key)}
-            >
-              {action.label}
-            </Button>
-          ))}
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            overlayClassName="chapter-action-bar-menu-popover"
+            content={(
+              <div className="chapter-action-bar-menu">
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                  {presenter.secondaryActions.map(action => (
+                    <Button
+                      key={`${action.key}-${action.label}`}
+                      block
+                      type={action.kind === 'ghost' ? 'text' : 'default'}
+                      className={crystalClassForAction(String(action.key), action.kind)}
+                      onClick={() => run(action.key)}
+                    >
+                      {action.label}
+                    </Button>
+                  ))}
+                  {menuExtra}
+                </Space>
+              </div>
+            )}
+          >
+            <Button className="novel-editor-more-actions" icon={<MoreOutlined />}>更多</Button>
+          </Popover>
           {trailing}
         </div>
       </div>
