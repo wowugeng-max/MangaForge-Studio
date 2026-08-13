@@ -21,7 +21,7 @@ import {
 import { buildCharacterPovUiModel } from './characterPovUiModel'
 import type { ChapterHandoffDeskModel, DeslopGateDiagnosticsModel, WritingQueueItem, WritingQueueModel } from './writingCockpitModel'
 import type { EditorView } from '@codemirror/view'
-import { ProseEditor } from './workspace-center-prose-editor'
+import { ProseEditor, openProseSearch } from './workspace-center-prose-editor'
 import { WorkspaceCenterWritingSupport } from './workspace-center-writing-support'
 import { WorkspaceCenterEmptyProject } from './workspace-center-empty-project'
 import { WorkspaceCenterNoChapter } from './workspace-center-no-chapter'
@@ -53,6 +53,8 @@ import {
 import { buildChapterWorkflowPresenter } from './chapter-workflow-presenter'
 import { buildChapterHeaderStatus } from './chapter-header-status'
 import { createWritingSessionTracker } from './writing-session-stats'
+import { WorkspaceCommandPalette } from './workspace-command-palette'
+import { buildWorkspaceCommands } from './workspace-command-palette-model'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -563,6 +565,40 @@ export function WorkspaceCenter({
       ].filter(Boolean).join(' · ')
     : ''
 
+  const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
+  const toggleWritingAux = () => {
+    if (isImmersiveShell) setImmersiveAuxOpen(prev => !prev)
+    else setWritingAuxCollapsed(prev => !prev)
+  }
+  const workspaceCommands = buildWorkspaceCommands({
+    presenter: activeChapter ? chapterWorkflow : null,
+    runWorkflowAction: runChapterWorkflowAction,
+    openFindReplace: () => openProseSearch(proseEditorRef.current),
+    openVersions: onOpenVersionHistory ? () => onOpenVersionHistory() : undefined,
+    openQuality: () => runChapterWorkflowAction('view_quality'),
+    openBrief: () => runChapterWorkflowAction('view_brief'),
+    toggleAux: toggleWritingAux,
+    auxCollapsed: isImmersiveShell ? !immersiveAuxOpen : writingAuxCollapsed,
+  })
+
+  React.useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const withModifier = event.metaKey || event.ctrlKey
+      if (!withModifier) return
+      if (event.key === 'k' || event.key === 'K') {
+        event.preventDefault()
+        setCommandPaletteOpen(prev => !prev)
+        return
+      }
+      if (event.key === 'Enter' && activeChapter && !headerRevisionActive && !chapterActionLoading) {
+        event.preventDefault()
+        runChapterWorkflowAction(chapterWorkflow.primaryAction.key)
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  })
+
   React.useEffect(() => {
     saveEditorDisplayPrefs(editorDisplayPrefs)
   }, [editorDisplayPrefs])
@@ -643,6 +679,11 @@ export function WorkspaceCenter({
   )
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#fafbfc' }}>
+      <WorkspaceCommandPalette
+        open={commandPaletteOpen}
+        commands={workspaceCommands}
+        onClose={() => setCommandPaletteOpen(false)}
+      />
       {isEmptyProject && (
         <WorkspaceCenterEmptyProject
           selectedProject={selectedProject}
