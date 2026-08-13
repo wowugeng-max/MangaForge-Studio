@@ -14,6 +14,7 @@ export type WorkspaceCommandContext = {
   presenter?: ChapterWorkflowPresenter | null
   runWorkflowAction: (key: string) => void
   openFindReplace?: () => void
+  openBookSearch?: () => void
   openVersions?: () => void
   openQuality?: () => void
   openBrief?: () => void
@@ -52,6 +53,15 @@ export function buildWorkspaceCommands(ctx: WorkspaceCommandContext): WorkspaceC
       section: '编辑器',
       keywords: ['find', 'replace', 'search', '搜索'],
       run: ctx.openFindReplace,
+    })
+  }
+  if (ctx.openBookSearch) {
+    commands.push({
+      key: 'editor:book-search',
+      label: '全书查找',
+      section: '编辑器',
+      keywords: ['search', 'book', '全书', '跨章'],
+      run: ctx.openBookSearch,
     })
   }
   if (ctx.openVersions) {

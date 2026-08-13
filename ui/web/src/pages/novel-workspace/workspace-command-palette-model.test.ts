@@ -48,6 +48,15 @@ describe('buildWorkspaceCommands', () => {
     expect(expanded.find(command => command.key === 'panel:aux')?.label).toBe('收起辅助面板')
   })
 
+  test('提供 openBookSearch 时含全书查找命令', () => {
+    const { ctx, calls } = contextWith({ openBookSearch: () => calls.push('book-search') })
+    const commands = buildWorkspaceCommands(ctx as any)
+    const bookSearch = commands.find(command => command.key === 'editor:book-search')
+    expect(bookSearch?.label).toBe('全书查找')
+    bookSearch?.run()
+    expect(calls).toContain('book-search')
+  })
+
   test('无 presenter 时只有固定命令', () => {
     const { ctx } = contextWith({ presenter: null })
     const commands = buildWorkspaceCommands(ctx)

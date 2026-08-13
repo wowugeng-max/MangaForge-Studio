@@ -4063,6 +4063,53 @@
   white-space: nowrap;
 }
 
+/* Book-wide search modal */
+.novel-book-search-body {
+  margin-top: 12px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+.novel-book-search-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0;
+}
+.novel-book-search-summary {
+  margin-bottom: 8px;
+}
+.novel-book-search-chapter {
+  margin-bottom: 12px;
+}
+.novel-book-search-chapter-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.novel-book-search-hit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: #f7f9fc;
+  border-radius: 6px;
+  padding: 6px 10px;
+  margin-bottom: 4px;
+  font-size: 13px;
+  color: #44536b;
+  cursor: pointer;
+  line-height: 1.6;
+}
+.novel-book-search-hit:hover {
+  background: #eef3fa;
+  color: #1f2d3d;
+}
+.novel-book-search-hit mark {
+  background: rgba(250, 173, 20, 0.4);
+  padding: 0 1px;
+}
+
 /* Delivery chip click popover */
 .novel-delivery-chip-interactive.ant-tag {
   cursor: pointer;

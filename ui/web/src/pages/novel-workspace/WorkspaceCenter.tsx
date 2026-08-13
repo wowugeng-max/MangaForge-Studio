@@ -57,6 +57,7 @@ import { WorkspaceCommandPalette } from './workspace-command-palette'
 import { buildWorkspaceCommands } from './workspace-command-palette-model'
 import { locateProseAnnotations } from './prose-annotations'
 import { ProseOutlineRail } from './prose-outline-rail'
+import { BookSearchModal } from './book-search-modal'
 import { reportChapterId } from './workspace-center-quality-revision-panel'
 import { resolveQualityReportView } from './reference-panel-helpers'
 import './WorkspaceCenter.css'
@@ -586,6 +587,7 @@ export function WorkspaceCenter({
     : ''
 
   const [commandPaletteOpen, setCommandPaletteOpen] = React.useState(false)
+  const [bookSearchOpen, setBookSearchOpen] = React.useState(false)
   const toggleWritingAux = () => {
     if (isImmersiveShell) setImmersiveAuxOpen(prev => !prev)
     else setWritingAuxCollapsed(prev => !prev)
@@ -594,6 +596,7 @@ export function WorkspaceCenter({
     presenter: activeChapter ? chapterWorkflow : null,
     runWorkflowAction: runChapterWorkflowAction,
     openFindReplace: () => openProseSearch(proseEditorRef.current),
+    openBookSearch: selectedProject?.id ? () => setBookSearchOpen(true) : undefined,
     openVersions: onOpenVersionHistory ? () => onOpenVersionHistory() : undefined,
     openQuality: () => runChapterWorkflowAction('view_quality'),
     openBrief: () => runChapterWorkflowAction('view_brief'),
@@ -703,6 +706,15 @@ export function WorkspaceCenter({
         open={commandPaletteOpen}
         commands={workspaceCommands}
         onClose={() => setCommandPaletteOpen(false)}
+      />
+      <BookSearchModal
+        open={bookSearchOpen}
+        projectId={selectedProject?.id ? Number(selectedProject.id) : null}
+        activeChapterId={activeChapter?.id ? Number(activeChapter.id) : null}
+        activeChapterText={String(activeChapter?.chapter_text || '')}
+        proseEditorRef={proseEditorRef}
+        onClose={() => setBookSearchOpen(false)}
+        onJumpToChapter={onSelectWritingQueueChapter}
       />
       {isEmptyProject && (
         <WorkspaceCenterEmptyProject
