@@ -5,6 +5,7 @@ import { Button, Empty, Input, Tooltip, Typography, message } from 'antd'
 import { EditOutlined, FileImageOutlined, SaveOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { BaseNode } from './BaseNode'
+import { CopyContentButton } from './CopyContentButton'
 import { TypedHandle } from './TypedHandle'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { DndItemTypes } from '../../constants/dnd'
@@ -197,11 +198,17 @@ function LoadAssetNodeImpl(props: NodeProps) {
           <Text strong style={{ fontSize: 13, color: '#475569' }}>
             {isMedia ? <><FileImageOutlined /> 媒体预览</> : <><EditOutlined /> 内容编辑</>}
           </Text>
-          {!isMedia && (
-            <Tooltip title="将修改后的内容另存为新资产">
-              <Button type="primary" size="small" icon={<SaveOutlined />} loading={isSaving} onClick={handleSaveAsNewAsset}>固化</Button>
-            </Tooltip>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            <CopyContentButton
+              kind={isMedia ? (isVideoPreview(asset, previewValue) ? 'video' : 'image') : 'text'}
+              value={isMedia ? previewValue : content}
+            />
+            {!isMedia && (
+              <Tooltip title="将修改后的内容另存为新资产">
+                <Button type="primary" size="small" icon={<SaveOutlined />} loading={isSaving} onClick={handleSaveAsNewAsset}>固化</Button>
+              </Tooltip>
+            )}
+          </div>
         </div>
 
         <div style={{ flex: 1, position: 'relative', background: isMedia ? '#f1f5f9' : '#ffffff', borderRadius: 8, border: '1px solid rgba(0,0,0,0.06)', overflow: 'hidden', minHeight: 80, display: isMedia ? 'flex' : 'block', alignItems: 'center', justifyContent: 'center' }}>

@@ -21,8 +21,9 @@ import { useCanvasStore } from '../../stores/canvasStore'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import CameraControl, { buildCameraPromptSuffix } from '../CameraControl'
 import CameraMovement from '../CameraMovement'
-import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
+import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, AspectRatioGrid, AspectRatioPickerButton, getAspectRatioSize, type AspectRatioResolution, type AspectRatioValue } from '../AspectRatioSelector'
 import { BaseNode } from './BaseNode'
+import { CopyContentButton } from './CopyContentButton'
 import { TypedHandle } from './TypedHandle'
 import { NodeConfigToolbar } from './NodeConfigToolbar'
 import { expandFissionAndDistribute } from '../../pages/canvasFission'
@@ -291,6 +292,7 @@ function GenerateNodeImpl(props: NodeProps) {
   const [routingStrategy, setRoutingStrategy] = useState(data?.routing_strategy || data?.routingStrategy || 'balanced')
   const [showOnlyFavorites, setShowOnlyFavorites] = useState(Boolean(data?.showOnlyFavorites ?? true))
   const [aspectRatio, setAspectRatio] = useState<AspectRatioValue>((data?.aspectRatio ?? '16:9') as AspectRatioValue)
+  const [resolution, setResolution] = useState<AspectRatioResolution>((data?.resolution as AspectRatioResolution) || '1k')
   const [customWidth, setCustomWidth] = useState<number>(data?.customWidth || 1920)
   const [customHeight, setCustomHeight] = useState<number>(data?.customHeight || 1080)
   const [useRoleAsset, setUseRoleAsset] = useState(Boolean(data?.useRoleAsset))
@@ -445,7 +447,7 @@ function GenerateNodeImpl(props: NodeProps) {
     return systemPrompt || DEFAULT_ROLE.prompt
   }, [useRoleAsset, roleAssetId, roleAssets, systemPrompt])
 
-  const ratioSize = getGenerateNodeAspectRatioSize(aspectRatio, customWidth, customHeight)
+  const ratioSize = getGenerateNodeAspectRatioSize(aspectRatio, customWidth, customHeight, resolution)
   const selectedKeyRecord = keys.find(key => Number(key.id) === Number(selectedKey))
   const selectedModelRecord = allModels.find(item => item.model_name === selectedModel)
   const projectId = Number(routeProjectId || 0) || null
@@ -659,6 +661,7 @@ function GenerateNodeImpl(props: NodeProps) {
       routing_strategy: routingStrategy,
       showOnlyFavorites,
       aspectRatio,
+      resolution,
       customWidth,
       customHeight,
       useRoleAsset,
@@ -710,7 +713,7 @@ function GenerateNodeImpl(props: NodeProps) {
       skill_pack_source: hasCompileMetadata ? skillPackSource || undefined : undefined,
       compiler_model_id: hasCompileMetadata ? compilerModelId ?? undefined : undefined,
     })
-  }, [id, mode, skillTargetMode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
+  }, [id, mode, skillTargetMode, prompt, systemPrompt, selectedModel, selectedKey, params, routingStrategy, showOnlyFavorites, aspectRatio, resolution, customWidth, customHeight, useRoleAsset, roleAssetId, temperature, showPreview, result, cameraParams, cameraCustomOptions, customMovements, referenceBindings, referenceValidationError, executionCompatibilityError, skillPackId, skillName, skillRevision, skillCompileEnabled, skillCompilerModelId, skillArguments, commandSkillArgumentsByCommand, compiledPrompt, compiledNegativePrompt, compiledReferences, compiledReferenceBindings, referenceModeHint, compiledInputHash, compileWarnings, skillPackSource, compilerModelId, skillPreviewResult, skillPreviewCached, effectiveSkillPackId, hasEffectiveSkill, hasCompileMetadata, updateNodeData])
 
   useEffect(() => {
     const initialStatus = resolveGenerateNodeInitialRunStatus({
@@ -1726,14 +1729,18 @@ function GenerateNodeImpl(props: NodeProps) {
     }
     const quickParams = pickQuickParams(selectedModelRecord?.context_ui_params?.[mode])
     const ratioSelect = (
-      <Tooltip key="_aspect_ratio" title="图像尺寸">
-        <Select
-          size="small"
-          value={aspectRatio}
-          style={{ width: 130 }}
-          onChange={selectAspectRatio}
-          options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
-        />
+      <Tooltip key="_aspect_ratio" title="图像比例与尺寸">
+        <span>
+          <AspectRatioPickerButton
+            value={aspectRatio}
+            customWidth={customWidth}
+            customHeight={customHeight}
+            resolution={resolution}
+            onChange={selectAspectRatio}
+            onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
+            onResolutionChange={selectResolution}
+          />
+        </span>
       </Tooltip>
     )
     if (quickParams.length === 0) return ratioSelect
@@ -1778,14 +1785,21 @@ function GenerateNodeImpl(props: NodeProps) {
   const hasModelSizeParam = (selectedModelRecord?.context_ui_params?.[mode] || []).some((param: any) => param?.name === 'size')
 
   // 选择比例时清掉模型自带的 size 参数，否则 params.size 优先级更高会让比例失效
-  const selectAspectRatio = (nextValue: unknown) => {
-    setAspectRatio(nextValue as AspectRatioValue)
+  const clearModelSizeParam = () => {
     if (hasModelSizeParam && params.size !== undefined) {
       const nextParams = { ...params }
       delete nextParams.size
       setParams(nextParams)
       updateNodeData(id, { params: nextParams })
     }
+  }
+  const selectAspectRatio = (nextValue: unknown) => {
+    setAspectRatio(nextValue as AspectRatioValue)
+    clearModelSizeParam()
+  }
+  const selectResolution = (nextValue: AspectRatioResolution) => {
+    setResolution(nextValue)
+    clearModelSizeParam()
   }
   const currentModeLabel = MODES.find(item => item.value === mode)?.label || mode.toUpperCase()
   const currentModelDisplay = selectedModelRecord?.display_name || selectedModel || '未配置模型'
@@ -1806,7 +1820,7 @@ function GenerateNodeImpl(props: NodeProps) {
   )
 
   const quickPanel = (
-    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="模式与模型" width={340} position={Position.Bottom}>
+    <NodeConfigToolbar open={quickOpen} onClose={() => setQuickOpen(false)} title="模式与模型" width={340} position={Position.Top}>
       <Space direction="vertical" size={8} style={{ width: '100%' }}>
         <Segmented
           size="small"
@@ -1860,22 +1874,15 @@ function GenerateNodeImpl(props: NodeProps) {
             children: (
               <Space direction="vertical" size={8} style={{ width: '100%' }}>
                 {isImageVideoMode && (
-                  <div style={{ display: 'grid', gap: 8, gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' }}>
-                    <Select
-                      size="small"
-                      value={aspectRatio}
-                      onChange={selectAspectRatio}
-                      options={GENERATE_NODE_ASPECT_RATIO_OPTIONS.map(r => ({ value: r.value, label: r.size ? `${r.label} · ${r.size}` : r.label }))}
-                    />
-                    {aspectRatio === 'custom' ? (
-                      <Space.Compact block>
-                        <InputNumber size="small" value={customWidth} min={1} onChange={value => setCustomWidth(Number(value || 0))} />
-                        <InputNumber size="small" value={customHeight} min={1} onChange={value => setCustomHeight(Number(value || 0))} />
-                      </Space.Compact>
-                    ) : (
-                      <Input size="small" value={ratioSize} disabled />
-                    )}
-                  </div>
+                  <AspectRatioGrid
+                    value={aspectRatio}
+                    customWidth={customWidth}
+                    customHeight={customHeight}
+                    resolution={resolution}
+                    onChange={selectAspectRatio}
+                    onCustomSizeChange={(width, height) => { setCustomWidth(width); setCustomHeight(height) }}
+                    onResolutionChange={selectResolution}
+                  />
                 )}
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                   <Text type="secondary" style={{ fontSize: 12, flexShrink: 0 }}>温度</Text>
@@ -2263,6 +2270,13 @@ function GenerateNodeImpl(props: NodeProps) {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
             <Text style={{ fontSize: 12, color: '#64748b', fontWeight: 700 }}>生成结果</Text>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              {resultContent && (
+                <CopyContentButton
+                  kind={isMediaResult ? (isVideoResult ? 'video' : 'image') : 'text'}
+                  value={isMediaResult ? previewMediaSrc : String(resultContent)}
+                  style={{ fontSize: 16, padding: 0, height: 'auto' }}
+                />
+              )}
               {resultContent && (
                 <Tooltip title="携带溯源信息固化到资产库">
                   <Button type="text" size="small" icon={<SaveOutlined />} onClick={handleSaveToAsset} style={{ fontSize: 16, color: '#0ea5e9', padding: 0, height: 'auto' }} />

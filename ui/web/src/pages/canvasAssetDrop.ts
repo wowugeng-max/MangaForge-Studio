@@ -1,4 +1,5 @@
 import type { Edge, Node, XYPosition } from 'reactflow'
+import { DEFAULT_NODE_SIZE } from '../constants/nodeDefaults'
 
 type CanvasAssetDropInput = {
   asset: any
@@ -33,7 +34,7 @@ export function buildCanvasAssetDropPlan(input: CanvasAssetDropInput): CanvasAss
         type: nodeType,
         position,
         data: { ...(config || {}), label: asset.name || config?.label || nodeType },
-        style: { width: 360, height: 380 },
+        style: { ...DEFAULT_NODE_SIZE },
       }],
       edges: [],
     }
@@ -73,7 +74,7 @@ export function buildCanvasAssetDropPlan(input: CanvasAssetDropInput): CanvasAss
         y: position.y + (relativePosition.y || 0),
       },
       data: { ...(templateNode.config || {}), label: templateNode.config?.label || templateNode.type },
-      style: { width: 360, height: 380 },
+      style: { ...DEFAULT_NODE_SIZE },
     }
   })
   const edges: Edge[] = Array.isArray(tplEdges)

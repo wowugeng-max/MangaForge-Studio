@@ -125,10 +125,10 @@ describe('ComfyForge canvas feature migration', () => {
     const canvasPage = source('CanvasPage.tsx')
 
     expect(canvasPage).toContain(
-      "type: 'loadAsset', position, data: { label: asset.name, asset }, style: { width: 360, height: 380 }"
+      "type: 'loadAsset', position, data: { label: asset.name, asset }, style: { ...DEFAULT_NODE_SIZE }"
     )
     expect(canvasPage).toContain(
-      "style: node.type === 'generate' ? { width: 360, height: 380 } : undefined"
+      "style: node.type === 'generate' ? { ...DEFAULT_NODE_SIZE } : undefined"
     )
   })
 

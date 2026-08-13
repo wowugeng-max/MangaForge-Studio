@@ -311,7 +311,7 @@ export default function FingerprintContracts() {
             />
             <Radio.Group value={mode} onChange={(e) => setMode(e.target.value)}>
               <Radio value="offline_refit">离线重拟合（推荐）</Radio>
-              <Radio value="online_fetch">联网抓取（耗时长、依赖站点，需在服务端手动运行 build 脚本）</Radio>
+              <Radio value="online_fetch">联网抓取（耗时长、依赖站点）</Radio>
             </Radio.Group>
             <Input
               placeholder="标签（可选）"
@@ -341,7 +341,7 @@ export default function FingerprintContracts() {
               开始生成
             </Button>
             {mode === 'online_fetch' && (
-              <Text type="secondary">联网抓取尚未接线：这里只会记录一条说明性失败任务，请改为在服务端手动运行 build 脚本完成抓取与拟合。</Text>
+              <Text type="secondary">将在服务端扩库（只抓免费章，跳过已入库的书），成功后再用新样本拟合一套合同集。不会覆盖内置合同。</Text>
             )}
           </Space>
         </Card>

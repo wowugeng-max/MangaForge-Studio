@@ -8,6 +8,7 @@ import {
 } from '@ant-design/icons';
 import apiClient from '../../api/client';
 import { projectApi } from '../../api/projects';
+import AssetLineagePanel from '../../components/AssetLineagePanel';
 import { buildAssetMediaUrl } from '../../utils/assetMedia';
 
 const { Title, Text, Paragraph } = Typography;
@@ -209,6 +210,7 @@ export default function AssetDetail() {
                   </Space>
                 </div>
               )}
+              <AssetLineagePanel data={asset.data} sourceAssetIds={asset.source_asset_ids} />
             </Card>
           )}
         </Col>

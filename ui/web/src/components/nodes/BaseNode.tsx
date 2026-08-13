@@ -7,6 +7,7 @@ import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import { useParams } from 'react-router-dom'
 import apiClient from '../../api/client'
 import { hexToRgba } from '../../utils/color'
+import { DEFAULT_NODE_SIZE } from '../../constants/nodeDefaults'
 
 const { Text } = Typography
 
@@ -64,7 +65,7 @@ export const BaseNode = memo((props: NodeProps & { onOpenConfig?: () => void }) 
   const COLLAPSED_HEIGHT = 42
   const handleLabelDoubleClick = (e: React.MouseEvent) => { e.stopPropagation(); setEditLabel(data?.label || ''); setEditing(true) }
   const handleLabelSave = () => { const trimmed = editLabel.trim(); if (trimmed && trimmed !== data?.label) updateNodeData(id, { label: trimmed, _customLabel: true }); setEditing(false) }
-  const handleToggleCollapse = () => { setNodes(nds => nds.map(n => n.id !== id ? n : ({ ...n, style: collapsed ? { ...n.style, width: n.data._prevWidth || 360, height: n.data._prevHeight || 380 } : { ...n.style, width: n.style?.width || n.width || 360, height: COLLAPSED_HEIGHT }, data: collapsed ? { ...n.data, _collapsed: false } : { ...n.data, _collapsed: true, _prevWidth: n.style?.width || n.width || 360, _prevHeight: n.style?.height || n.height || 380 } }))) }
+  const handleToggleCollapse = () => { setNodes(nds => nds.map(n => n.id !== id ? n : ({ ...n, style: collapsed ? { ...n.style, width: n.data._prevWidth || DEFAULT_NODE_SIZE.width, height: n.data._prevHeight || DEFAULT_NODE_SIZE.height } : { ...n.style, width: n.style?.width || n.width || DEFAULT_NODE_SIZE.width, height: COLLAPSED_HEIGHT }, data: collapsed ? { ...n.data, _collapsed: false } : { ...n.data, _collapsed: true, _prevWidth: n.style?.width || n.width || DEFAULT_NODE_SIZE.width, _prevHeight: n.style?.height || n.height || DEFAULT_NODE_SIZE.height } }))) }
 
   return <>
     <NodeResizer color={nodeColor} isVisible={selected && !collapsed} minWidth={minW} minHeight={minH} keepAspectRatio={false} handleStyle={{ width: 10, height: 10, borderRadius: 2, border: 'none', background: nodeColor }} />

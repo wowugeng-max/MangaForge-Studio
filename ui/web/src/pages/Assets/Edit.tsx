@@ -9,6 +9,7 @@ import {
 import apiClient from '../../api/client';
 import { projectApi } from '../../api/projects';
 import TagsInput from '../../components/TagsInput';
+import AssetLineagePanel from '../../components/AssetLineagePanel';
 import { buildAssetMediaUrl } from '../../utils/assetMedia';
 
 const { Option } = Select;
@@ -278,6 +279,7 @@ export default function AssetEdit() {
                     </Row>
                   </div>
                 )}
+                <AssetLineagePanel data={originalData} />
               </div>
             )}
           </div>

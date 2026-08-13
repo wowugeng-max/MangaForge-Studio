@@ -143,6 +143,29 @@ describe('DisplayNode migration behavior', () => {
     })
   })
 
+  test('keeps reference bindings lineage when saving display results', () => {
+    const referenceBindings = [
+      { reference_index: 0, reference_id: 'ref-1', reference_role: 'character', type: 'image', url: '/api/assets/media/ref.png', source_asset_ids: [7] },
+    ]
+    const payload = buildDisplayAssetPayload({
+      assetName: '带参考图',
+      projectId: 9,
+      data: {
+        result: {
+          content: 'assets/generated/with-ref.png',
+          type: 'image',
+          source_model: 'gpt-image',
+          source_asset_ids: [7],
+          reference_bindings: referenceBindings,
+          reference_mode_hint: 'first_frame',
+        },
+      },
+    })
+
+    expect(payload.data.reference_bindings).toEqual(referenceBindings)
+    expect(payload.data.reference_mode_hint).toBe('first_frame')
+  })
+
   test('normalizes camelCase source asset ids when saving display results', () => {
     const payload = buildDisplayAssetPayload({
       assetName: '外部客户端图',

@@ -7,6 +7,7 @@ import apiClient from '../api/client'
 import { useAssetLibraryStore, type Asset } from '../stores/assetLibraryStore'
 import { DndItemTypes } from '../constants/dnd'
 import TagsInput from './TagsInput'
+import AssetLineagePanel from './AssetLineagePanel'
 import { buildAssetMediaUrl } from '../utils/assetMedia'
 import { assetMatchesSearch } from '../utils/assetSearch'
 
@@ -265,6 +266,7 @@ export default function AssetLibrary({ projectId, onAddToCanvas }: AssetLibraryP
                 {Object.entries(editingAsset.data.source_camera_params).map(([key, value]) => <Tag key={key} color="blue" style={{ fontSize: 10, margin: 0 }}>{key}: {String(value)}</Tag>)}
               </div>
             </div>}
+            <AssetLineagePanel data={editingAsset.data} sourceAssetIds={(editingAsset as any).source_asset_ids} fontSize={10} />
           </div>}
         </>}
         {editingAsset.type === 'video' && <>

@@ -2,10 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useDrop } from 'react-dnd'
 import { Button, Input, Layout, Modal, Select, Space, Tag, Tooltip, Typography, message } from 'antd'
-import { ArrowLeftOutlined, ClearOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PartitionOutlined, PlayCircleOutlined, SaveOutlined, SearchOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, ClearOutlined, CopyOutlined, DeleteOutlined, EyeInvisibleOutlined, EyeOutlined, MenuFoldOutlined, MenuUnfoldOutlined, PartitionOutlined, PlayCircleOutlined, PlusOutlined, RightOutlined, SaveOutlined, SearchOutlined, SnippetsOutlined, StopOutlined, SyncOutlined, ThunderboltOutlined, UndoOutlined, RedoOutlined } from '@ant-design/icons'
 import ReactFlow, { Background, Controls, MiniMap, ReactFlowProvider, updateEdge, type Connection, type Edge, type ReactFlowInstance } from 'reactflow'
 import 'reactflow/dist/style.css'
 import { DndItemTypes } from '../constants/dnd'
+import { DEFAULT_DISPLAY_NODE_SIZE, DEFAULT_NODE_SIZE } from '../constants/nodeDefaults'
 import { useCanvasStore } from '../stores/canvasStore'
 import AssetLibrary from '../components/AssetLibrary'
 import { nodeTypes } from '../components/nodes'
@@ -24,6 +25,8 @@ import { resolveAutoConnectHandle } from '../utils/autoConnect'
 
 const NODE_MENU_SIZE = { width: 300, height: 380 }
 const GROUP_MENU_SIZE = { width: 180, height: 88 }
+const CONTEXT_MENU_SIZE = { width: 200, height: 170 }
+const CONTEXT_SUBMENU_WIDTH = 224
 
 const { Content, Sider } = Layout
 const { Title, Text } = Typography
@@ -46,6 +49,23 @@ const NODE_CATEGORY_LABELS: Record<NodeCategory, string> = {
 
 const getId = () => `node_${Date.now()}_${Math.floor(Math.random() * 10000)}`
 
+function ContextMenuItem(props: { icon: React.ReactNode; label: string; danger?: boolean; disabled?: boolean; trailing?: React.ReactNode; onClick?: () => void }) {
+  const [hover, setHover] = useState(false)
+  const color = props.disabled ? '#cbd5e1' : props.danger ? '#ff4d4f' : '#1e293b'
+  return (
+    <div
+      onClick={props.disabled ? undefined : props.onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', cursor: props.disabled ? 'not-allowed' : 'pointer', borderRadius: 8, background: hover && !props.disabled ? (props.danger ? '#fff1f0' : '#eef2ff') : 'transparent', color, fontSize: 13, fontWeight: 600, userSelect: 'none' }}
+    >
+      <span style={{ display: 'inline-flex', width: 16, justifyContent: 'center' }}>{props.icon}</span>
+      <span style={{ flex: 1 }}>{props.label}</span>
+      {props.trailing}
+    </div>
+  )
+}
+
 function CanvasWorkspace() {
   const navigate = useNavigate()
   const { id } = useParams<{ id: string }>()
@@ -57,11 +77,20 @@ function CanvasWorkspace() {
   const [projectName, setProjectName] = useState(id ? '加载中...' : '全局画布')
   const [saving, setSaving] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const [minimapVisible, setMinimapVisible] = useState(() => localStorage.getItem('canvas_minimap_visible') !== '0')
+  const toggleMinimap = useCallback(() => {
+    setMinimapVisible(visible => {
+      localStorage.setItem('canvas_minimap_visible', visible ? '0' : '1')
+      return !visible
+    })
+  }, [])
   const [saveMode, setSaveMode] = useState<string>('manual')
   const saveTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
   const [menuConfig, setMenuConfig] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [groupMenuConfig, setGroupMenuConfig] = useState<{ x: number; y: number; selectedNodeIds: string[]; dissolveGroupId?: string } | null>(null)
+  const [contextMenuConfig, setContextMenuConfig] = useState<{ x: number; y: number; flowX: number; flowY: number } | null>(null)
+  const [contextAddOpen, setContextAddOpen] = useState(false)
   const [comicModalOpen, setComicModalOpen] = useState(false)
   const [comicConfig, setComicConfig] = useState({ story: '', panelCount: 6, style: '', platform: '通用' })
   const clipboardRef = React.useRef<ClipboardPayload | null>(null)
@@ -267,7 +296,7 @@ function CanvasWorkspace() {
         _customLabel: true,
         _systemPromptOverride: storyboardSystemPrompt,
       },
-      style: { width: 360, height: 420 },
+      style: { ...DEFAULT_NODE_SIZE, height: 350 },
     }
     const imageGenNode = {
       id: imageGenId,
@@ -280,14 +309,14 @@ function CanvasWorkspace() {
         aspectRatio: '9:16',
         _customLabel: true,
       },
-      style: { width: 360, height: 380 },
+      style: { ...DEFAULT_NODE_SIZE },
     }
     const displayNode = {
       id: displayId,
       type: 'display',
       position: { x: baseX + gapX * 2, y: baseY },
       data: { label: '分镜预览', _customLabel: true },
-      style: { width: 300, height: 300 },
+      style: { ...DEFAULT_DISPLAY_NODE_SIZE },
     }
     const edge1 = {
       id: `edge_comic_1_${Date.now()}`,
@@ -343,12 +372,24 @@ function CanvasWorkspace() {
     setMenuConfig(null)
     setSearchTerm('')
     setPendingConnection(null)
+    setContextMenuConfig(null)
+    setContextAddOpen(false)
   }, [])
+
+  const openContextMenu = useCallback((x: number, y: number) => {
+    if (!reactFlowInstance) return
+    const pos = reactFlowInstance.screenToFlowPosition({ x, y })
+    const clamped = clampToViewport({ x, y, ...CONTEXT_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
+    setMenuConfig(null)
+    setGroupMenuConfig(null)
+    setContextAddOpen(false)
+    setContextMenuConfig({ x: clamped.x, y: clamped.y, flowX: pos.x, flowY: pos.y })
+  }, [reactFlowInstance])
 
   const createNodeAtMenu = (node: typeof AVAILABLE_NODES[number]) => {
     if (!menuConfig) return
     const newNodeId = getId()
-    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label }, style: node.type === 'generate' ? { width: 360, height: 380 } : undefined } as any)
+    addNode({ id: newNodeId, type: node.type, position: { x: menuConfig.flowX, y: menuConfig.flowY }, data: { label: node.label }, style: node.type === 'generate' ? { ...DEFAULT_NODE_SIZE } : undefined } as any)
     if (pendingConnection) {
       const store = useCanvasStore.getState()
       const sourceNode = store.nodes.find(n => n.id === pendingConnection.source)
@@ -416,8 +457,51 @@ function CanvasWorkspace() {
       setMenuConfig(null)
       const clamped = clampToViewport({ x: event.clientX, y: event.clientY, ...GROUP_MENU_SIZE, viewportWidth: window.innerWidth, viewportHeight: window.innerHeight })
       setGroupMenuConfig({ x: clamped.x, y: clamped.y, selectedNodeIds: [], dissolveGroupId: node.id })
+      return
     }
+    event.preventDefault()
+    event.stopPropagation()
+    if (!node.selected) {
+      const store = useCanvasStore.getState()
+      store.setNodes(store.nodes.map(n => ({ ...n, selected: n.id === node.id })))
+    }
+    openContextMenu(event.clientX, event.clientY)
+  }, [openContextMenu])
+
+  const copySelectedNodes = useCallback(() => {
+    const state = useCanvasStore.getState()
+    const payload = buildCopyPayload(state.nodes, state.edges)
+    if (!payload) return
+    clipboardRef.current = payload
+    message.success(`已复制 ${payload.nodes.length} 个节点`)
   }, [])
+
+  const pasteFromClipboard = useCallback(() => {
+    if (!clipboardRef.current) return
+    const plan = buildPastePlan(clipboardRef.current, getId)
+    saveHistory()
+    const store = useCanvasStore.getState()
+    store.setNodes([...store.nodes.map(n => ({ ...n, selected: false })), ...plan.nodes])
+    store.setEdges([...store.edges, ...plan.edges])
+    message.success(`已粘贴 ${plan.nodes.length} 个节点`)
+  }, [saveHistory])
+
+  const deleteSelectedElements = useCallback(() => {
+    const state = useCanvasStore.getState()
+    const selectedNodes = state.nodes.filter(n => n.selected)
+    const selectedEdges = state.edges.filter(e => e.selected)
+    if (!selectedNodes.length && !selectedEdges.length) return
+    saveHistory()
+    reactFlowInstance?.deleteElements({ nodes: selectedNodes, edges: selectedEdges })
+    if (selectedNodes.length) message.success(`已删除 ${selectedNodes.length} 个节点`)
+  }, [reactFlowInstance, saveHistory])
+
+  const createNodeFromContextMenu = (node: typeof AVAILABLE_NODES[number]) => {
+    if (!contextMenuConfig) return
+    addNode({ id: getId(), type: node.type, position: { x: contextMenuConfig.flowX, y: contextMenuConfig.flowY }, data: { label: node.label }, style: node.type === 'generate' ? { ...DEFAULT_NODE_SIZE } : undefined } as any)
+    setContextMenuConfig(null)
+    setContextAddOpen(false)
+  }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -453,24 +537,11 @@ function CanvasWorkspace() {
       if (!el || typeof el.closest !== 'function') return false
       return Boolean(el.closest('input, textarea, [contenteditable="true"], [data-config-panel]'))
     }
-    const pasteFromClipboard = () => {
-      if (!clipboardRef.current) return
-      const plan = buildPastePlan(clipboardRef.current, getId)
-      saveHistory()
-      const store = useCanvasStore.getState()
-      store.setNodes([...store.nodes.map(n => ({ ...n, selected: false })), ...plan.nodes])
-      store.setEdges([...store.edges, ...plan.edges])
-      message.success(`已粘贴 ${plan.nodes.length} 个节点`)
-    }
     const handler = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey) || isEditableTarget(e.target)) return
       const key = e.key.toLowerCase()
       if (key === 'c') {
-        const state = useCanvasStore.getState()
-        const payload = buildCopyPayload(state.nodes, state.edges)
-        if (!payload) return
-        clipboardRef.current = payload
-        message.success(`已复制 ${payload.nodes.length} 个节点`)
+        copySelectedNodes()
       } else if (key === 'v') {
         e.preventDefault()
         pasteFromClipboard()
@@ -485,7 +556,7 @@ function CanvasWorkspace() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [saveHistory])
+  }, [copySelectedNodes, pasteFromClipboard])
 
   return <Layout style={{ height: '100vh', overflow: 'hidden', background: 'linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%)' }}>
     <Layout.Header style={{ height: 72, background: 'rgba(255,255,255,0.88)', backdropFilter: 'blur(18px)', borderBottom: '1px solid rgba(148,163,184,0.18)', padding: '0 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', boxShadow: '0 8px 30px rgba(15,23,42,0.04)' }}>
@@ -531,21 +602,30 @@ function CanvasWorkspace() {
         <div style={{ width: 340, height: '100%', display: 'flex', flexDirection: 'column', background: 'linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248,250,252,0.96))' }}>
           <div style={{ padding: '18px 20px', background: 'linear-gradient(135deg, rgba(59,130,246,0.12), rgba(99,102,241,0.08))', borderBottom: '1px solid rgba(148,163,184,0.16)' }}>
             <Title level={5} style={{ margin: 0, color: '#2563eb' }}>💡 交互升级</Title>
-            <Text type="secondary" style={{ fontSize: 13 }}>可拖拽资产到画布，或双击空白处呼出搜索菜单。</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>可拖拽资产到画布，双击空白处搜索节点，右键打开操作菜单。</Text>
           </div>
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-            <AssetLibrary projectId={canvasProjectId} onAddToCanvas={(asset) => { const position = reactFlowInstance?.screenToFlowPosition({ x: 420, y: window.innerHeight / 2 }) ?? { x: 300, y: 200 }; addNode({ id: getId(), type: 'loadAsset', position, data: { label: asset.name, asset }, style: { width: 360, height: 380 } } as any); message.success(`「${asset.name}」已发送到画布`) }} />
+            <AssetLibrary projectId={canvasProjectId} onAddToCanvas={(asset) => { const position = reactFlowInstance?.screenToFlowPosition({ x: 420, y: window.innerHeight / 2 }) ?? { x: 300, y: 200 }; addNode({ id: getId(), type: 'loadAsset', position, data: { label: asset.name, asset }, style: { ...DEFAULT_NODE_SIZE } } as any); message.success(`「${asset.name}」已发送到画布`) }} />
           </div>
         </div>
       </Sider>
 
-      <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openNodeSearch(e.clientX, e.clientY) } }}>
+      <Content ref={(el: HTMLDivElement | null) => { (reactFlowWrapper as any).current = el; canvasDrop(el) }} style={{ background: 'transparent', position: 'relative' }} onDoubleClick={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) openNodeSearch(e.clientX, e.clientY) }} onContextMenu={(e) => { if ((e.target as HTMLElement).closest('.react-flow__pane')) { e.preventDefault(); openContextMenu(e.clientX, e.clientY) } }}>
         <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(circle at top right, rgba(99,102,241,0.09), transparent 28%), radial-gradient(circle at bottom left, rgba(14,165,233,0.08), transparent 24%)' }} />
         <ReactFlow nodes={nodes} edges={decoratedEdges} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onConnectStart={onConnectStart} onConnectEnd={onConnectEnd} onEdgeUpdate={onEdgeUpdate} edgeUpdaterRadius={12} isValidConnection={isValidConnection} onInit={setReactFlowInstance} nodeTypes={nodeTypes} fitView zoomOnDoubleClick={false} onPaneClick={closeNodeSearch} onNodeClick={closeNodeSearch} onSelectionContextMenu={onSelectionContextMenu} onNodeContextMenu={onNodeContextMenu} deleteKeyCode={['Backspace', 'Delete']} selectionKeyCode={['Shift', 'Control', 'Meta']}>
           <Background color="#cbd5e1" gap={18} />
           <Controls style={{ left: 16, right: 'auto' }} />
-          <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeColor} style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />
+          {minimapVisible && <MiniMap nodeColor={minimapNodeColor} nodeStrokeColor={minimapNodeColor} style={{ border: '1px solid rgba(148,163,184,0.25)', borderRadius: 16, right: 16, bottom: 16, boxShadow: '0 14px 36px rgba(15,23,42,0.12)' }} zoomable pannable />}
         </ReactFlow>
+
+        <Tooltip title={minimapVisible ? '隐藏画布预览图' : '显示画布预览图'} placement="left">
+          <Button
+            size="small"
+            icon={minimapVisible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+            onClick={toggleMinimap}
+            style={{ position: 'absolute', right: 16, bottom: minimapVisible ? 188 : 16, zIndex: 6, borderRadius: 8, boxShadow: '0 6px 18px rgba(15,23,42,0.10)' }}
+          />
+        </Tooltip>
 
         {menuConfig && <div style={{ position: 'fixed', left: menuConfig.x, top: menuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 16, width: 300, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden' }} onDoubleClick={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
           <div style={{ padding: 10, background: '#fafafa', borderBottom: '1px solid #e2e8f0' }}><Input prefix={<SearchOutlined style={{ color: '#bfbfbf' }} />} placeholder="搜索节点..." variant="borderless" ref={(input) => input && setTimeout(() => input.focus(), 50)} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} onKeyDown={(e) => {
@@ -572,6 +652,25 @@ function CanvasWorkspace() {
             {!filteredNodes.length && <div style={{ padding: '16px 0', textAlign: 'center' }}><Text type="secondary">未找到节点</Text></div>}
           </div>
         </div>}
+
+        {contextMenuConfig && (() => {
+          const hasSelection = nodes.some(n => n.selected) || edges.some(e => e.selected)
+          const submenuFitsRight = contextMenuConfig.x + CONTEXT_MENU_SIZE.width + CONTEXT_SUBMENU_WIDTH <= window.innerWidth
+          return <div style={{ position: 'fixed', left: contextMenuConfig.x, top: contextMenuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 14, width: CONTEXT_MENU_SIZE.width, border: '1px solid rgba(148,163,184,0.18)', padding: 4 }} onClick={(e) => e.stopPropagation()} onContextMenu={(e) => e.preventDefault()}>
+            <div style={{ position: 'relative' }} onMouseEnter={() => setContextAddOpen(true)} onMouseLeave={() => setContextAddOpen(false)}>
+              <ContextMenuItem icon={<PlusOutlined />} label="添加节点" trailing={<RightOutlined style={{ fontSize: 10, color: '#94a3b8' }} />} />
+              {contextAddOpen && <div style={{ position: 'absolute', top: -4, ...(submenuFitsRight ? { left: '100%', marginLeft: 2 } : { right: '100%', marginRight: 2 }), width: CONTEXT_SUBMENU_WIDTH, background: 'rgba(255,255,255,0.98)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 14, border: '1px solid rgba(148,163,184,0.18)', padding: 4 }}>
+                {AVAILABLE_NODES.map(node => (
+                  <ContextMenuItem key={node.type} icon={<span style={{ fontSize: 14 }}>{node.icon}</span>} label={node.label} onClick={() => createNodeFromContextMenu(node)} />
+                ))}
+              </div>}
+            </div>
+            <ContextMenuItem icon={<CopyOutlined />} label="复制选中" disabled={!hasSelection} onClick={() => { copySelectedNodes(); setContextMenuConfig(null) }} />
+            <ContextMenuItem icon={<SnippetsOutlined />} label="粘贴" disabled={!clipboardRef.current} onClick={() => { pasteFromClipboard(); setContextMenuConfig(null) }} />
+            <div style={{ height: 1, background: '#e2e8f0', margin: '4px 8px' }} />
+            <ContextMenuItem icon={<DeleteOutlined />} label="删除选中" danger disabled={!hasSelection} onClick={() => { deleteSelectedElements(); setContextMenuConfig(null) }} />
+          </div>
+        })()}
 
         {groupMenuConfig && <div style={{ position: 'fixed', left: groupMenuConfig.x, top: groupMenuConfig.y, zIndex: 9999, background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(16px)', boxShadow: '0 20px 45px rgba(15,23,42,0.18)', borderRadius: 14, width: 180, border: '1px solid rgba(148,163,184,0.18)', overflow: 'hidden', padding: 4 }} onClick={(e) => e.stopPropagation()}>{groupMenuConfig.selectedNodeIds.length > 0 && <div onClick={() => { createGroup(groupMenuConfig.selectedNodeIds, '节点组'); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13 }}>📦 创建节点组</Text></div>}{groupMenuConfig.dissolveGroupId && <div onClick={() => { dissolveGroup(groupMenuConfig.dissolveGroupId!); setGroupMenuConfig(null) }} style={{ padding: '8px 12px', cursor: 'pointer', borderRadius: 8 }}><Text strong style={{ fontSize: 13, color: '#ff4d4f' }}>🔓 解散节点组</Text></div>}</div>}
       </Content>

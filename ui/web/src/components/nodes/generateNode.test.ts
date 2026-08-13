@@ -319,6 +319,32 @@ describe('GenerateNode migration behavior', () => {
     expect(payload.data.source_camera_suffix).toContain('compressed perspective')
   })
 
+  test('falls back to upstream prompt bindings when the node prompt is empty', async () => {
+    const module = await loadGenerateNodeReferenceApi()
+    const normalizeBindings = module.normalizeGenerateNodeReferenceBindings
+    const referenceBindings = normalizeBindings([
+      { type: 'prompt', content: '一位女士在吃泡面', reference_role: 'prompt_context', source_asset_ids: [1] },
+    ], [])
+
+    const payload = buildGenerateNodeAssetPayload({
+      resultContent: '/api/assets/media/out.png',
+      mode: 'text_to_image',
+      prompt: '',
+      selectedModel: 'gemini-3.1-flash-image',
+      provider: 'gemini',
+      selectedRolePrompt: '',
+      params: {},
+      temperature: 0.7,
+      aspectRatio: '3:4',
+      ratioSize: '864*1152',
+      referenceBindings,
+    } as any)
+
+    // 提示词来自上游 prompt 资产时不能存成空串，否则血缘断在提示词这一环
+    expect(payload.data.source_prompt).toBe('一位女士在吃泡面')
+    expect(payload.name).toContain('一位女士在吃泡面'.slice(0, 10))
+  })
+
   test('keeps the editable source prompt and compile provenance in saved assets', () => {
     const payload = buildGenerateNodeAssetPayload({
       resultContent: 'https://cdn.example/out.png',
@@ -472,7 +498,7 @@ describe('GenerateNode migration behavior', () => {
       '21:9',
       'custom',
     ])
-    expect(getGenerateNodeAspectRatioSize('21:9')).toBe('1536*640')
+    expect(getGenerateNodeAspectRatioSize('21:9')).toBe('2208*928')
     expect(getGenerateNodeAspectRatioSize('', 1600, 900)).toBe('')
     expect(getGenerateNodeAspectRatioSize('custom', 1600, 900)).toBe('1600*900')
   })

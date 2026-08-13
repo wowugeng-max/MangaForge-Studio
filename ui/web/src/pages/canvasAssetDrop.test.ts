@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { buildCanvasAssetDropPlan } from './canvasAssetDrop'
+import { DEFAULT_NODE_SIZE } from '../constants/nodeDefaults'
 
 describe('canvas asset drop planner', () => {
   test('returns null for unsupported or incomplete canvas asset drops', () => {
@@ -42,7 +43,7 @@ describe('canvas asset drop planner', () => {
           type: 'generate',
           position: { x: 100, y: 200 },
           data: { label: '生图节点', mode: 'text_to_image' },
-          style: { width: 360, height: 380 },
+          style: { ...DEFAULT_NODE_SIZE },
         },
       ],
       edges: [],

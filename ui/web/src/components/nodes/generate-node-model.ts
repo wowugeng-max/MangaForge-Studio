@@ -11,7 +11,7 @@ import { useCanvasStore } from '../../stores/canvasStore'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
 import CameraControl, { buildCameraPromptSuffix } from '../CameraControl'
 import CameraMovement from '../CameraMovement'
-import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioValue } from '../AspectRatioSelector'
+import { ASPECT_RATIOS as SHARED_ASPECT_RATIOS, getAspectRatioSize, type AspectRatioResolution, type AspectRatioValue } from '../AspectRatioSelector'
 import { BaseNode } from './BaseNode'
 import { pickMediaResultContent } from '../../utils/mediaResult'
 import { buildAssetMediaUrl } from '../../utils/assetMedia'
@@ -250,8 +250,8 @@ export function resolveGenerateNodeSkillInstallApplication<T extends {
   return { status: 'installed_preserved', selection: input.currentSelection }
 }
 
-export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024) {
-  return getAspectRatioSize(value, customWidth, customHeight)
+export function getGenerateNodeAspectRatioSize(value: AspectRatioValue, customWidth = 1024, customHeight = 1024, resolution: AspectRatioResolution = '1k') {
+  return getAspectRatioSize(value, customWidth, customHeight, resolution)
 }
 
 export const PRESET_ROLES = [
@@ -1826,9 +1826,16 @@ export function buildGenerateNodeAssetPayload(input: {
       ...referenceBindings.flatMap(binding => binding.source_asset_ids || []),
     ]))
   const hasCompileProvenance = Boolean(input.compiledPrompt || input.compiledInputHash || input.skillName)
+  // 节点自身提示词为空时(常见于上游 prompt 资产直连),回退到参考绑定里的文本,避免血缘断在提示词这一环
+  const upstreamPromptText = (referenceBindings || [])
+    .filter(binding => binding.type === 'prompt' && binding.content)
+    .map(binding => String(binding.content).trim())
+    .filter(Boolean)
+    .join('\n')
+  const effectivePrompt = String(input.prompt || '').trim() || upstreamPromptText
 
   return {
-    name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${input.prompt.slice(0, 10) || input.selectedModel}...`,
+    name: `${assetType === 'image' ? '🖼️' : assetType === 'video' ? '🎬' : '📝'} ${effectivePrompt.slice(0, 10) || input.selectedModel}...`,
     type: assetType,
     ...(assetType === 'prompt' ? {} : { file_path: contentStr }),
     ...(mergedSourceAssetIds.length ? { source_asset_ids: mergedSourceAssetIds } : {}),
@@ -1841,7 +1848,7 @@ export function buildGenerateNodeAssetPayload(input: {
       source_provider: input.provider,
       source_model: input.selectedModel,
       source_mode: input.mode,
-      source_prompt: input.prompt,
+      source_prompt: effectivePrompt,
       source_system: input.selectedRolePrompt,
       source_params: { ...input.params, temperature: input.temperature, size: input.ratioSize },
       source_aspect_ratio: input.aspectRatio,

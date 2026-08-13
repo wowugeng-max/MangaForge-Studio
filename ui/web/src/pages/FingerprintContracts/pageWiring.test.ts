@@ -27,6 +27,10 @@ describe('fingerprint contracts page wiring', () => {
     expect(page).toContain('评分看板')
     expect(page).toContain('buildContractSetRows')
     expect(page).toContain('buildCheckPassRateItems')
+    expect(page).toContain("value=\"online_fetch\"")
+    expect(page).toContain('联网抓取（耗时长、依赖站点）')
+    expect(page).not.toContain('尚未接线')
+    expect(page).not.toContain('需在服务端手动运行 build 脚本')
   })
 
   test('job polling wires the unmount and duplicate-poll guards from the model', () => {

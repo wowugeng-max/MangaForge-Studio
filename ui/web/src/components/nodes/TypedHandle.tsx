@@ -33,7 +33,7 @@ export function TypedHandle({ id, type, position, dataType, label, top, collapse
         position={position}
         isConnectable={isConnectable}
         className="typed-handle"
-        style={{ top: resolveTypedHandleTop(collapsed, top), background, width: 12, height: 12, border: '2px solid #fff', transition: 'transform 0.15s ease, top 0.2s ease' }}
+        style={{ top: resolveTypedHandleTop(collapsed, top), background, width: 14, height: 14, border: '2px solid #fff', transition: 'transform 0.15s ease, top 0.2s ease' }}
       />
     </Tooltip>
   )

@@ -4,6 +4,7 @@ import { Button, Input, Modal, Tooltip, Typography, message } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import { useParams } from 'react-router-dom'
 import { BaseNode } from './BaseNode'
+import { CopyContentButton } from './CopyContentButton'
 import { TypedHandle } from './TypedHandle'
 import { nodeRegistry } from '../../utils/nodeRegistry'
 import { useAssetLibraryStore } from '../../stores/assetLibraryStore'
@@ -107,6 +108,9 @@ export function buildDisplayAssetPayload(input: {
   const assetData: Record<string, any> = {
     content: resolved.displayContent,
     ...lineage,
+    // 参考绑定不带 source_ 前缀,单独保留,否则展示节点固化会丢掉参考图血缘
+    ...(Array.isArray(upstream.reference_bindings) && upstream.reference_bindings.length ? { reference_bindings: upstream.reference_bindings } : {}),
+    ...(upstream.reference_mode_hint ? { reference_mode_hint: upstream.reference_mode_hint } : {}),
     ...(sourceAssetIds !== undefined ? { source_asset_ids: sourceAssetIds } : {}),
     ...dimensions,
   }
@@ -203,9 +207,16 @@ function DisplayNodeImpl(props: NodeProps) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexShrink: 0 }}>
           <Text type="secondary" style={{ fontSize: 13, fontWeight: 700, color: '#475569' }}>展示内容</Text>
           {displayContent && (
-            <Tooltip title="固化为资产">
-              <Button type="text" size="small" icon={<SaveOutlined />} onClick={() => setIsModalVisible(true)} style={{ color: '#0ea5e9', fontSize: 16 }} />
-            </Tooltip>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <CopyContentButton
+                kind={mediaType}
+                value={mediaType === 'text' ? displayContent : mediaSrc}
+                style={{ fontSize: 16 }}
+              />
+              <Tooltip title="固化为资产">
+                <Button type="text" size="small" icon={<SaveOutlined />} onClick={() => setIsModalVisible(true)} style={{ color: '#0ea5e9', fontSize: 16 }} />
+              </Tooltip>
+            </div>
           )}
         </div>
 
