@@ -13,6 +13,7 @@ import { MultiReferenceTransportError } from '../llm/multi-reference-transport'
 import { registerTask, taskMessageManager, unregisterTask, type CancelToken } from '../ws-manager'
 import { executeLocalComfyWorkflow, interruptLocalComfy, type ExecuteLocalComfyWorkflowOptions, type LocalComfyResult } from '../comfy-local'
 import { parseSkillCommand } from '../skills/skill-command'
+import { logSkillCompileFailure } from '../skills/compile-failure-log'
 import { CanvasReferenceError, validateCanvasReferenceAssets } from '../skills/reference-bindings'
 import type {
   CanvasMediaMode,
@@ -93,6 +94,8 @@ function skillErrorStatus(code: string): number {
   // Ambiguous selectors and duplicate leading commands are client choices;
   // callers can resolve them without retrying a provider request.
   if (code === 'SKILL_AMBIGUOUS' || code === 'SKILL_COMMAND_DUPLICATE') return 409
+  // Upstream provider failures are not client errors and stay retryable.
+  if (code === 'SKILL_COMPILER_PROVIDER_ERROR') return 502
   if (code.startsWith('SKILL_') || code.startsWith('REFERENCE_') || code.startsWith('MULTI_REFERENCE_')) return 422
   return 500
 }
@@ -1095,6 +1098,11 @@ export function registerGenerateRoutes(app: Express, getWorkspace: () => string,
         if (compiledSkill) request = compiledSkill.request
       }
     } catch (error) {
+      await logSkillCompileFailure(() => activeWorkspace, 'skill compile failed', skillErrorCode(error), error instanceof Error ? error.message : String(error), {
+        skill_name: selectedSkill?.skillName,
+        pack_id: selectedSkill?.packId,
+        mode: payload?.type,
+      })
       return skillErrorResponse(res, error)
     }
 

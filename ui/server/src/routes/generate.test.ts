@@ -1652,6 +1652,56 @@ describe('canvas generate route', () => {
     expect(taskCalls).toBe(0)
   })
 
+  test('maps compiler provider execution failures to a bad gateway status', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    let executeCalls = 0
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        const error = new Error('Skill compiler model request failed: upstream timeout')
+        ;(error as any).code = 'SKILL_COMPILER_PROVIDER_ERROR'
+        throw error
+      },
+      execute: async () => { executeCalls += 1; return { content: 'should-not-run' } as any },
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: { model: 'gpt-5.5', type: 'text_to_image', prompt: '原始提示', skill_name: 'prompt-optimizer' },
+    })
+
+    expect(res.statusCode).toBe(502)
+    expect(res.body).toMatchObject({ error_code: 'SKILL_COMPILER_PROVIDER_ERROR' })
+    expect(executeCalls).toBe(0)
+  })
+
+  test('records failed Skill compilations in the workspace log', async () => {
+    const workspace = await tempWorkspace()
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    registerGenerateRoutes(app as any, () => workspace, {
+      compilePromptSkill: async () => {
+        const error = new Error('Skill compiler model request failed: upstream timeout')
+        ;(error as any).code = 'SKILL_COMPILER_PROVIDER_ERROR'
+        throw error
+      },
+      execute: async () => ({ content: 'should-not-run' } as any),
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: { model: 'gpt-5.5', type: 'text_to_image', prompt: '原始提示', skill_name: 'prompt-optimizer' },
+    })
+
+    expect(res.statusCode).toBe(502)
+    const logs = JSON.parse(readFileSync(join(workspace, 'logs.json'), 'utf8'))
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({
+      level: 'error',
+      meta: { error_code: 'SKILL_COMPILER_PROVIDER_ERROR', skill_name: 'prompt-optimizer', mode: 'text_to_image' },
+    })
+    expect(String(logs[0].meta.detail)).toContain('upstream timeout')
+  })
+
   test('rejects duplicate leading Skill commands with 409 before compilation', async () => {
     const workspace = await tempWorkspace()
     const { registerGenerateRoutes } = await import('./generate')

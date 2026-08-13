@@ -984,5 +984,236 @@ describe('prompt compiler', () => {
     expect(calls).toHaveLength(0)
   })
 
+  test('surfaces provider execution errors as typed provider failures instead of empty results', async () => {
+    const root = await compilerRoot()
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 40, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => ({
+        content: '', parsed: null, raw: null, tool_calls: [], finish_reason: 'error',
+        error: 'All 0 retries exhausted. Last status: 502. Last error: upstream timeout',
+      } as any),
+    })
+
+    const error = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 40,
+    }).catch((reason) => reason)
+
+    expect(error).toBeInstanceOf(SkillCompilerError)
+    expect(error).toMatchObject({ code: 'SKILL_COMPILER_PROVIDER_ERROR' })
+    expect(error.message).toContain('upstream timeout')
+  })
+
+  test('surfaces provider errors during repair instead of reporting an invalid result', async () => {
+    const root = await compilerRoot()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 41, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        if (executions === 1) return { content: 'not-a-json-result' } as any
+        return {
+          content: '', parsed: null, raw: null, tool_calls: [], finish_reason: 'error',
+          error: 'All 0 retries exhausted. Last status: 429. Last error: rate limited',
+        } as any
+      },
+    })
+
+    const error = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 41,
+    }).catch((reason) => reason)
+
+    expect(executions).toBe(2)
+    expect(error).toBeInstanceOf(SkillCompilerError)
+    expect(error).toMatchObject({ code: 'SKILL_COMPILER_PROVIDER_ERROR' })
+    expect(error.message).toContain('rate limited')
+  })
+
+  test('allows transport retries for compiler and repair requests', async () => {
+    const root = await compilerRoot()
+    const executeOptions: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 42, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async (_workspace, _request, _modelId, options) => {
+        executeOptions.push(options)
+        if (executeOptions.length === 1) return { content: 'not-a-json-result' } as any
+        return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['references/base.txt'] }) }
+      },
+    })
+
+    await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 42,
+    })
+
+    expect(executeOptions).toHaveLength(2)
+    for (const options of executeOptions) {
+      expect(Number(options?.maxRetries)).toBeGreaterThanOrEqual(1)
+    }
+  })
+
+  test('states the parameter and reference allow-lists in the compiler system prompt', async () => {
+    const root = await compilerRoot()
+    const calls: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 43, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        calls.push(request)
+        return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['references/base.txt'] }) }
+      },
+    })
+
+    await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 43,
+    })
+
+    const system = String(calls[0].messages[0].content)
+    for (const key of ['size', 'aspect_ratio', 'duration', 'cameraParams', 'customMovements']) {
+      expect(system).toContain(key)
+    }
+    expect(system).toContain('"references/base.txt"')
+    expect(system.indexOf('references_used')).toBeGreaterThanOrEqual(0)
+  })
+
+  test('includes the validation failure reason in the repair request', async () => {
+    const root = await compilerRoot()
+    const requests: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 44, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        requests.push(request)
+        if (requests.length === 1) {
+          return { content: compilerResult('text_to_video', { skill_name: 'h3', parameters: { fps: 24 }, references_used: ['references/base.txt'] }) }
+        }
+        return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['references/base.txt'] }) }
+      },
+    })
+
+    const output = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 44,
+    })
+
+    expect(requests).toHaveLength(2)
+    const repairUser = JSON.stringify(requests[1].messages[1].content)
+    expect(repairUser).toContain('Unsupported or non-scalar parameter: fps')
+    expect(output.result.prompt).toBe('compiled prompt')
+  })
+
+  test('repairs model results whose references_used violates the allow-list', async () => {
+    const root = await compilerRoot()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 45, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        if (executions === 1) {
+          return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['base.txt'] }) }
+        }
+        return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['references/base.txt'] }) }
+      },
+    })
+
+    const output = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 45,
+    })
+
+    expect(executions).toBe(2)
+    expect(output.result.references_used).toEqual(['references/base.txt'])
+  })
+
+  test('does not repair reference files that are missing from disk', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'mf-compiler-missing-ref-'))
+    await mkdir(join(root, 'references'))
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 46, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => { executions += 1; return { content: '{}' } },
+    })
+
+    await expect(compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 46,
+    })).rejects.toThrow(expect.objectContaining({ code: 'SKILL_REFERENCE_MISSING' }))
+    expect(executions).toBe(0)
+  })
+
+  test('surfaces token-limit truncation as a typed error instead of an invalid-JSON repair loop', async () => {
+    const root = await compilerRoot()
+    for (const finishReason of ['length', 'max_tokens', 'MAX_TOKENS']) {
+      let executions = 0
+      const compiler = createPromptCompiler({
+        registry: { resolve: async () => skill(root) } as any,
+        readModels: async () => [{ id: 47, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+        executeWithRuntimeModel: async () => {
+          executions += 1
+          return { content: '{"skill_name":"h3","prompt":"cut off mid', finish_reason: finishReason } as any
+        },
+      })
+
+      const error = await compiler({
+        skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+        activeWorkspace: root, compilerModelId: 47,
+      }).catch((reason) => reason)
+
+      expect(error).toBeInstanceOf(SkillCompilerError)
+      expect(error).toMatchObject({ code: 'SKILL_RESULT_TRUNCATED' })
+      expect(executions).toBe(1)
+    }
+  })
+
+  test('surfaces token-limit truncation of the repair response as a typed error', async () => {
+    const root = await compilerRoot()
+    let executions = 0
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 48, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async () => {
+        executions += 1
+        if (executions === 1) return { content: 'not-a-json-result' } as any
+        return { content: '{"skill_name":"h3","prompt":"cut off mid', finish_reason: 'length' } as any
+      },
+    })
+
+    const error = await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 48,
+    }).catch((reason) => reason)
+
+    expect(executions).toBe(2)
+    expect(error).toBeInstanceOf(SkillCompilerError)
+    expect(error).toMatchObject({ code: 'SKILL_RESULT_TRUNCATED' })
+  })
+
+  test('budgets enough output tokens for long structured video prompts', async () => {
+    const root = await compilerRoot()
+    const calls: any[] = []
+    const compiler = createPromptCompiler({
+      registry: { resolve: async () => skill(root) } as any,
+      readModels: async () => [{ id: 49, model_name: 'chat', provider: 'x', display_name: 'chat', capabilities: { chat: true } } as any],
+      executeWithRuntimeModel: async (_workspace, request) => {
+        calls.push(request)
+        return { content: compilerResult('text_to_video', { skill_name: 'h3', references_used: ['references/base.txt'] }) }
+      },
+    })
+
+    await compiler({
+      skillName: 'h3', rawPrompt: 'x', mode: 'text_to_video', incomingAssets: [], nodeParams: {},
+      activeWorkspace: root, compilerModelId: 49,
+    })
+
+    expect(Number(calls[0].max_tokens)).toBeGreaterThanOrEqual(4096)
+  })
+
   test('exports typed error', () => expect(new SkillCompilerError('SKILL_RESULT_EMPTY', 'empty')).toBeInstanceOf(Error))
 })

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { SkillManifest } from '../skills/types'
@@ -641,6 +641,69 @@ describe('canvas skill routes', () => {
     const internal = await call(handlers.get('POST /api/skills/compile-preview')!, { body: { skillName: 'prompt-skill', prompt: 'x', mode: 'image_to_video', compilerModelId: 4 } })
     expect(internal.statusCode).toBe(500)
     expect(internal.body).toMatchObject({ error_code: 'REFERENCE_RUNTIME_FAILURE', detail: 'reference runtime failure' })
+  })
+
+  test('maps compiler provider execution failures to a bad gateway status', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      getRegistry: async () => ({ list: async () => [], invalidate() {} }),
+      compilePromptSkill: async () => {
+        throw new SkillCompilerError('SKILL_COMPILER_PROVIDER_ERROR', 'Skill compiler model request failed: upstream timeout')
+      },
+    })
+
+    const response = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: { skillName: 'prompt-skill', prompt: 'x', mode: 'image_to_video', compilerModelId: 4 },
+    })
+
+    expect(response.statusCode).toBe(502)
+    expect(response.body).toMatchObject({ error_code: 'SKILL_COMPILER_PROVIDER_ERROR' })
+    expect(response.body.detail).toContain('upstream timeout')
+  })
+
+  test('records failed preview compilations in the workspace log while successes stay silent', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(workspace)
+    const { registerSkillRoutes } = await import('./skills')
+    const { app, handlers } = createRouteHarness()
+    registerSkillRoutes(app as any, () => workspace, {
+      getRegistry: async () => ({ list: async () => [], invalidate() {} }),
+      compilePromptSkill: async () => {
+        throw new SkillCompilerError('SKILL_COMPILER_PROVIDER_ERROR', 'Skill compiler model request failed: upstream timeout')
+      },
+    })
+
+    const response = await call(handlers.get('POST /api/skills/compile-preview')!, {
+      body: { skill_name: 'prompt-skill', pack_id: 'h3', prompt: 'x', mode: 'image_to_video', compiler_model_id: 4 },
+    })
+
+    expect(response.statusCode).toBe(502)
+    const logs = JSON.parse(await readFile(join(workspace, 'logs.json'), 'utf8'))
+    expect(logs).toHaveLength(1)
+    expect(logs[0]).toMatchObject({
+      level: 'error',
+      meta: { error_code: 'SKILL_COMPILER_PROVIDER_ERROR', skill_name: 'prompt-skill', pack_id: 'h3', mode: 'image_to_video' },
+    })
+    expect(String(logs[0].meta.detail)).toContain('upstream timeout')
+
+    const cleanWorkspace = await mkdtemp(join(tmpdir(), 'mangaforge-skills-route-'))
+    workspaces.push(cleanWorkspace)
+    const clean = createRouteHarness()
+    registerSkillRoutes(clean.app as any, () => cleanWorkspace, {
+      getRegistry: async () => ({ list: async () => [], invalidate() {} }),
+      compilePromptSkill: async input => ({
+        result: { skill_name: 'prompt-skill', skill_version: 'abc123', mode: input.mode, prompt: 'compiled', negative_prompt: '', parameters: {}, references_used: [], warnings: [] },
+        inputHash: 'hash-1', cached: false, compilerModelId: 4, skill: manifest(),
+      }),
+    })
+    const ok = await call(clean.handlers.get('POST /api/skills/compile-preview')!, {
+      body: { skill_name: 'prompt-skill', prompt: 'x', mode: 'image_to_video', compiler_model_id: 4 },
+    })
+    expect(ok.statusCode).toBe(200)
+    expect(await readFile(join(cleanWorkspace, 'logs.json'), 'utf8').then(() => true, () => false)).toBe(false)
   })
 
   test('reads and writes the only supported workspace Skill setting', async () => {

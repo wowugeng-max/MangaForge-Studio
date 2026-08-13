@@ -16,6 +16,7 @@ import {
   type PromptCompilerDeps,
 } from '../skills/compiler'
 import type { CanvasReferenceErrorCode } from '../skills/reference-bindings'
+import { logSkillCompileFailure } from '../skills/compile-failure-log'
 import { readSkillSettings as defaultReadSkillSettings, writeSkillSettings as defaultWriteSkillSettings, type SkillSettings } from '../skills/settings'
 import type { CanvasMediaMode, PromptCompileInput, SkillManifest } from '../skills/types'
 
@@ -161,6 +162,8 @@ function normalizePackRecord(value: unknown): PackSummary | undefined {
 
 function compilerErrorStatus(code: string): number {
   if (code === 'SKILL_COMPILER_MODEL_REQUIRED' || code === 'SKILL_COMPILER_MODEL_INCOMPATIBLE' || code === 'SKILL_COMPILER_VISION_REQUIRED' || code === 'SKILL_AMBIGUOUS') return 409
+  // Upstream provider failures are not client errors and stay retryable.
+  if (code === 'SKILL_COMPILER_PROVIDER_ERROR') return 502
   if (code.startsWith('SKILL_') || REFERENCE_VALIDATION_ERROR_CODES.has(code as CanvasReferenceErrorCode)) return 422
   return 500
 }
@@ -349,7 +352,14 @@ export function registerSkillRoutes(app: Express, getWorkspace: () => string, de
     } catch (error) {
       if (error instanceof TypeError) return response.status(400).json(errorBody('SKILL_REQUEST_INVALID', error.message))
       const code = compilerErrorCode(error)
-      return response.status(compilerErrorStatus(code)).json(errorBody(code, compilerErrorDetail(error)))
+      const detail = compilerErrorDetail(error)
+      const body = isPlainRecord(req.body) ? req.body : {}
+      await logSkillCompileFailure(getWorkspace, 'skill compile-preview failed', code, detail, {
+        skill_name: body.skillName ?? body.skill_name,
+        pack_id: body.packId ?? body.pack_id,
+        mode: body.mode,
+      })
+      return response.status(compilerErrorStatus(code)).json(errorBody(code, detail))
     }
   })
 
