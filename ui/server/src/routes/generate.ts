@@ -977,10 +977,14 @@ async function resolveComfyExecutionOptions(
   const providerAsComfy = String(provider?.service_type || '').toLowerCase() === 'comfyui'
 
   if (!providerAsComfy && !modelAsComfy) return null
-  if (!provider) throw new Error('ComfyUI provider not found')
+  const payloadBaseUrl = String(payload?.base_url || payload?.baseUrl || payload?.comfy_base_url || payload?.comfyBaseUrl || '').trim()
+  // 画布节点可只配云端代理 Base URL 直连，无需预先登记 provider 记录
+  if (!provider && !(modelAsComfy && payloadBaseUrl)) throw new Error('ComfyUI provider not found')
   if (key && key.is_active === false) throw new Error('ComfyUI key is disabled')
 
-  const baseUrl = normalizeComfyBaseUrl((key as any)?.base_url || payload?.base_url || payload?.baseUrl || payload?.comfy_base_url || payload?.comfyBaseUrl || provider.default_base_url || '', key, payload)
+  const effectiveProvider: ProviderRecord = provider
+    || ({ id: 'comfyui-direct', display_name: 'ComfyUI 直连', service_type: 'comfyui', auth_type: 'bearer', custom_headers: {} } as ProviderRecord)
+  const baseUrl = normalizeComfyBaseUrl((key as any)?.base_url || payloadBaseUrl || (effectiveProvider as any).default_base_url || '', key, payload)
   if (!baseUrl) throw new Error('ComfyUI base URL is not configured')
   const workflowPayload = compiledSkill || referenceImages.length > 1
     ? applyCompiledSkillToComfyPayload(payload, compiledSkill, referenceImages)
@@ -996,7 +1000,7 @@ async function resolveComfyExecutionOptions(
         ? payload.inputFiles
         : undefined,
     comfyInputDir: String(payload?.comfy_input_dir || payload?.comfyInputDir || '').trim() || undefined,
-    headers: buildComfyHeaders(provider, key, baseUrl, payload),
+    headers: buildComfyHeaders(effectiveProvider, key, baseUrl, payload),
   }
 }
 

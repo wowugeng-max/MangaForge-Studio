@@ -3144,6 +3144,40 @@ describe('canvas generate route', () => {
     }))
   })
 
+  test('runs ComfyUI workflows without a provider record when the payload carries a base_url', async () => {
+    const workspace = await tempWorkspace()
+    await writeFile(join(workspace, 'providers.json'), JSON.stringify([]))
+    await writeFile(join(workspace, 'keys.json'), JSON.stringify([]))
+    const { registerGenerateRoutes } = await import('./generate')
+    const { app, handlers } = createRouteHarness()
+    const executed: any[] = []
+    registerGenerateRoutes(app as any, () => workspace, {
+      comfyExecute: async options => {
+        executed.push(options)
+        return { prompt_id: 'comfy-direct', output_files: [], history: {} }
+      },
+      sendMessage: async () => true,
+    })
+
+    const res = await call(handlers.get('POST /api/generate'), {
+      body: {
+        model: 'comfyui-workflow',
+        base_url: 'http://direct-comfy:8188',
+        runninghub_api_key: 'direct-secret',
+        prompt: JSON.stringify({ '3': { class_type: 'KSampler', inputs: { seed: 12 } } }),
+        params: { client_id: 'comfy-direct-node' },
+      },
+    })
+
+    // 画布节点只填云端代理 Base URL 时应可直连，不再要求预先登记 provider
+    expect(res.body).toMatchObject({ success: true, client_id: 'comfy-direct-node' })
+    while (!executed.length) {
+      await new Promise(resolve => setTimeout(resolve, 0))
+    }
+    expect(executed[0].baseUrl).toBe('http://direct-comfy:8188')
+    expect(executed[0].headers).toMatchObject({ Authorization: 'Bearer direct-secret' })
+  })
+
   test('source uses the shared task message manager so upstream WebSocket clients receive generation results', () => {
     const source = readFileSync(join(import.meta.dir, 'generate.ts'), 'utf8')
 
