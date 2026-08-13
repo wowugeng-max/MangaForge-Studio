@@ -1,5 +1,5 @@
 import React from 'react'
-import { Button, Card, Col, InputNumber, Popover, Row, Slider, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Col, InputNumber, Popover, Row, Slider, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import {
   FontSizeOutlined,
   LineHeightOutlined,
@@ -11,13 +11,23 @@ import type { DeslopGateDiagnosticsModel } from './writingCockpitModel'
 
 const { Text } = Typography
 
-export type EditorDisplayPrefs = { fontSize: number; lineHeight: number }
+export type EditorDisplayPrefs = {
+  fontSize: number
+  lineHeight: number
+  typewriter: boolean
+  paragraphFocus: boolean
+}
 export type SaveStatus = 'idle' | 'unsaved' | 'saving' | 'saved' | 'error'
 
 export const EDITOR_DISPLAY_PREFS_KEY = 'novel.workspace.editorDisplayPrefs'
 export const NOVEL_WRITING_AUX_COLLAPSED_KEY = 'novel.workspace.writingAuxCollapsed'
-export const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = { fontSize: 17, lineHeight: 32 }
-export const EDITOR_DISPLAY_PRESETS: Array<EditorDisplayPrefs & { key: string; label: string }> = [
+export const DEFAULT_EDITOR_DISPLAY_PREFS: EditorDisplayPrefs = {
+  fontSize: 17,
+  lineHeight: 32,
+  typewriter: false,
+  paragraphFocus: false,
+}
+export const EDITOR_DISPLAY_PRESETS: Array<Pick<EditorDisplayPrefs, 'fontSize' | 'lineHeight'> & { key: string; label: string }> = [
   { key: 'webNovel', label: '网文标准', fontSize: 17, lineHeight: 32 },
   { key: 'review', label: '宽松审稿', fontSize: 18, lineHeight: 38 },
   { key: 'sprint', label: '紧凑冲刺', fontSize: 16, lineHeight: 28 },
@@ -104,6 +114,8 @@ export function loadEditorDisplayPrefs(): EditorDisplayPrefs {
     return {
       fontSize: clampNumber(parsed?.fontSize, 15, 26, DEFAULT_EDITOR_DISPLAY_PREFS.fontSize),
       lineHeight: clampNumber(parsed?.lineHeight, 24, 48, DEFAULT_EDITOR_DISPLAY_PREFS.lineHeight),
+      typewriter: parsed?.typewriter === true,
+      paragraphFocus: parsed?.paragraphFocus === true,
     }
   } catch {
     return DEFAULT_EDITOR_DISPLAY_PREFS
@@ -145,11 +157,13 @@ export function EditorDisplayControls({
     onChange({
       fontSize: clampNumber(patch.fontSize ?? prefs.fontSize, 15, 26, DEFAULT_EDITOR_DISPLAY_PREFS.fontSize),
       lineHeight: clampNumber(patch.lineHeight ?? prefs.lineHeight, 24, 48, DEFAULT_EDITOR_DISPLAY_PREFS.lineHeight),
+      typewriter: patch.typewriter ?? prefs.typewriter,
+      paragraphFocus: patch.paragraphFocus ?? prefs.paragraphFocus,
     })
   }
 
   const resetPrefs = () => onChange(DEFAULT_EDITOR_DISPLAY_PREFS)
-  const applyPreset = (preset: EditorDisplayPrefs) => onChange(preset)
+  const applyPreset = (preset: Pick<EditorDisplayPrefs, 'fontSize' | 'lineHeight'>) => changePrefs(preset)
 
   const content = (
     <div style={{ width: 260, padding: '4px 2px 0' }}>
@@ -181,6 +195,28 @@ export function EditorDisplayControls({
             <Text type="secondary" style={{ marginLeft: 'auto', fontSize: 12 }}>{prefs.lineHeight}px</Text>
           </div>
           <Slider min={24} max={48} value={prefs.lineHeight} onChange={lineHeight => changePrefs({ lineHeight })} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 13 }}>打字机模式</Text>
+          <Tooltip title="光标行始终保持在视口中间">
+            <Switch
+              size="small"
+              style={{ marginLeft: 'auto' }}
+              checked={prefs.typewriter}
+              onChange={typewriter => changePrefs({ typewriter })}
+            />
+          </Tooltip>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Text style={{ fontSize: 13 }}>段落聚焦</Text>
+          <Tooltip title="淡化当前段落以外的内容">
+            <Switch
+              size="small"
+              style={{ marginLeft: 'auto' }}
+              checked={prefs.paragraphFocus}
+              onChange={paragraphFocus => changePrefs({ paragraphFocus })}
+            />
+          </Tooltip>
         </div>
         <Button size="small" block onClick={resetPrefs}> 恢复默认</Button>
       </Space>

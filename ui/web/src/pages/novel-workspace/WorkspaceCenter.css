@@ -3882,6 +3882,60 @@
 }
 
 
+/* CodeMirror search panel (in-chapter find/replace) */
+.novel-prose-editor-host .cm-panels {
+  background: #f7f9fc;
+  border-bottom: 1px solid #e1e6ee;
+  color: #334155;
+}
+.novel-prose-editor-host .cm-search {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+.novel-prose-editor-host .cm-search input,
+.novel-prose-editor-host .cm-search button,
+.novel-prose-editor-host .cm-search label {
+  font-size: 12px;
+  margin: 0;
+}
+.novel-prose-editor-host .cm-search input {
+  border: 1px solid #d4dce8;
+  border-radius: 6px;
+  padding: 3px 8px;
+  outline: none;
+}
+.novel-prose-editor-host .cm-search input:focus {
+  border-color: #1677ff;
+}
+.novel-prose-editor-host .cm-search button {
+  border: 1px solid #d4dce8;
+  border-radius: 6px;
+  background: #fff;
+  padding: 3px 10px;
+  cursor: pointer;
+  text-transform: none;
+}
+.novel-prose-editor-host .cm-search button:hover {
+  border-color: #1677ff;
+  color: #1677ff;
+}
+.novel-prose-editor-host .cm-search label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #66758b;
+}
+.novel-prose-editor-host .cm-searchMatch {
+  background: rgba(250, 173, 20, 0.35);
+}
+.novel-prose-editor-host .cm-searchMatch-selected {
+  background: rgba(22, 119, 255, 0.4);
+}
+
 /* Delivery chip click popover */
 .novel-delivery-chip-interactive.ant-tag {
   cursor: pointer;
