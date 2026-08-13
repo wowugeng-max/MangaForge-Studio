@@ -107,6 +107,30 @@ function DeliveryInfoChip({
 }
 
 export function WorkspaceDeliveryStatusChips(props: Record<string, any>) {
+  // Summary mode collapses the chip wall into one entry chip; full detail stays one click away.
+  if (props.mode === 'summary') {
+    return (
+      <Popover
+        trigger="click"
+        placement="topLeft"
+        destroyTooltipOnHide
+        overlayClassName="novel-delivery-chips-summary-popover"
+        content={(
+          <div className="novel-delivery-chips-summary-panel">
+            {DeliveryChipsBody(props)}
+          </div>
+        )}
+      >
+        <Tag className="novel-delivery-chips-summary novel-delivery-chip-interactive" bordered={false} role="button" tabIndex={0}>
+          交稿明细{props.deliverySummary?.statusLabel ? ` · ${props.deliverySummary.statusLabel}` : ''}
+        </Tag>
+      </Popover>
+    )
+  }
+  return DeliveryChipsBody(props)
+}
+
+function DeliveryChipsBody(props: Record<string, any>) {
   const { deliverySummary, ipSceneIntakeTooltip, onOpenStoryAssets } = props
 
   const characterPov = deliverySummary.characterPov

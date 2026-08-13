@@ -74,6 +74,7 @@ export function WorkspaceDeliveryStatusStrip(props: Record<string, any>) {
               </div>
 
               <WorkspaceDeliveryStatusChips
+                mode="summary"
                 deliverySummary={deliverySummary}
                 ipSceneIntakeTooltip={ipSceneIntakeTooltip}
                 onOpenStoryAssets={onOpenStoryAssets}

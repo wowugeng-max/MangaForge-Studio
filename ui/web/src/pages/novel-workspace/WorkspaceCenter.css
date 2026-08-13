@@ -929,6 +929,17 @@
   width: 100%;
 }
 
+.novel-delivery-chips-summary {
+  cursor: pointer;
+  user-select: none;
+}
+
+.novel-delivery-chips-summary-panel {
+  max-width: 520px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
 .novel-delivery-status-chips .ant-tag {
   margin-inline-end: 0 !important;
   max-width: 100%;
