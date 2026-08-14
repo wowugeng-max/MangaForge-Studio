@@ -334,6 +334,9 @@ describe('automatic chapter task lifecycle', () => {
       'stage:quality_recheck',
       'stage:humanize',
       'stage:humanize',
+      // Writing-skill passes reuse the humanize stage: one per default-enabled skill.
+      'stage:humanize',
+      'stage:humanize',
       'stage:quality_recheck',
       'stage:readability_review',
       'stage:story_state_sync',
