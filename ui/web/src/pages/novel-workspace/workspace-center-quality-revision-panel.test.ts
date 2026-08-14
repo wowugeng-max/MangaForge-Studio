@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { ohStoryChapterTextHash } from './oh-story-chapter-text-hash'
 import * as qualityPanelModule from './workspace-center-quality-revision-panel'
 import { WorkspaceChapterHandoffStrip } from './workspace-center-chapter-handoff-strip'
 import { WorkspaceDeliveryStatusStrip } from './workspace-center-delivery-status-strip'
@@ -60,7 +61,25 @@ function revisionTask(overrides: Record<string, unknown> = {}) {
   }
 }
 
-function renderPanel(chapterId: number, task: Record<string, unknown> | null) {
+function ohStoryReview(chapterId: number, reportText = '=== 故事审查报告（solo）===\n本章冲突成立。') {
+  return {
+    id: chapterId * 100,
+    review_type: 'oh_story_review',
+    status: 'success',
+    created_at: '2026-08-14T12:44:33.000Z',
+    payload: {
+      chapter_id: chapterId,
+      chapter_no: chapterId,
+      report_text: reportText,
+    },
+  }
+}
+
+function renderPanel(
+  chapterId: number,
+  task: Record<string, unknown> | null,
+  extra: Record<string, unknown> = {},
+) {
   return renderToStaticMarkup(React.createElement(WorkspaceCenterQualityRevisionPanel as any, {
     activeChapter: activeChapter(chapterId),
     proseQualityReports: [qualityReport(chapterId)],
@@ -70,6 +89,7 @@ function renderPanel(chapterId: number, task: Record<string, unknown> | null) {
     onCancelEditorRevision: () => {},
     onRetryEditorRevision: () => {},
     onLoadEditorRevisionDiagnostics: () => Promise.resolve({}),
+    ...extra,
   }))
 }
 
@@ -207,6 +227,7 @@ describe('reportChapterId', () => {
   test('reads chapter id from normal quality report payloads', () => {
     expect(reportChapterId({ payload: { chapter_id: 7 } })).toBe(7)
     expect(reportChapterId({ payload: JSON.stringify({ context_package: { chapter_target: { id: 9 } } }) })).toBe(9)
+    expect(reportChapterId({ chapter_id: 61, payload: {} })).toBe(61)
   })
 
   test('falls back to the truncated preview chapter target for legacy compacted reports', () => {
@@ -228,7 +249,7 @@ describe('current chapter editor revision status', () => {
     expect(html).toContain('运行中')
     expect(html).not.toContain('ant-progress')
     expect(html).toContain('取消修订')
-    expect(buttonMarkup(html, '按报告修订')).toContain('disabled=""')
+    expect(html).not.toContain('按报告修订')
   })
 
   test('does not lock revision when the active chapter no longer matches the task', () => {
@@ -236,7 +257,6 @@ describe('current chapter editor revision status', () => {
 
     expect(html).not.toContain('novel-editor-revision-status-strip')
     expect(html).not.toContain('取消修订')
-    expect(buttonMarkup(html, '按报告修订')).not.toContain('disabled=""')
   })
 
   test('keeps the cancel-requested status label visible beside the spinner', () => {
@@ -253,8 +273,10 @@ describe('current chapter editor revision status', () => {
     const matchingHtml = renderWorkspaceCenter(7, revisionTask())
     const otherChapterHtml = renderWorkspaceCenter(8, revisionTask())
 
-    expect(buttonMarkup(matchingHtml, '一键修订')).toContain('disabled=""')
-    expect(buttonMarkup(otherChapterHtml, '一键修订')).not.toContain('disabled=""')
+    expect(matchingHtml).not.toContain('一键修订')
+    expect(otherChapterHtml).not.toContain('一键修订')
+    expect(buttonMarkup(matchingHtml, '同步故事状态')).toBeTruthy()
+    expect(buttonMarkup(otherChapterHtml, '同步故事状态')).toBeTruthy()
   })
 
   test('routes the header revision action through the shared delivery guard', async () => {
@@ -313,12 +335,6 @@ describe('current chapter editor revision status', () => {
 
     expect(workspaceSource).toContain('revisionActionDisabled={revisionActionDisabled}')
     expect(supportSource.match(/revisionActionDisabled=\{revisionActionDisabled\}/g)?.length).toBe(2)
-  })
-
-  test('fails closed inside the quality panel revision function', async () => {
-    const source = await Bun.file(new URL('./workspace-center-quality-revision-panel.tsx', import.meta.url)).text()
-
-    expect(source).toContain('if (!canRevise || revisionActive || !latest || !onApplyEditorRevision) return')
   })
 
   test('prevents duplicate per-run revision actions and releases pending state', async () => {
@@ -425,12 +441,129 @@ describe('current chapter editor revision status', () => {
 })
 
 describe('oh-story quality panel actions', () => {
-  test('shows review and deslop actions plus a reference-score caption', () => {
+  test('shows review and deslop actions without the old quality-score caption', () => {
     const html = renderPanel(7, null)
 
     expect(html).toContain('oh-story 审稿')
+    expect(html).toContain('按建议改稿')
     expect(html).toContain('oh-story 去AI')
-    expect(html).toContain('参考，不自动改稿')
-    expect(html).toContain('一键修订')
+    expect(html).not.toContain('参考，不自动改稿')
+    expect(html).not.toContain('一键修订')
+    expect(html).not.toContain('按报告修订')
+    expect(html).not.toContain('立即质检')
+    expect(html).not.toContain('复检当前版本')
+    expect(html).not.toContain('重新质检')
+    expect(html).not.toContain('生成编辑报告')
+    expect(html).not.toContain('补动作')
+    expect(html).not.toContain('一键补材料')
+    expect(html).not.toContain('先点「立即质检」')
+  })
+
+  test('ignores MangaForge prose_quality scores and issues', () => {
+    const html = renderPanel(7, null, {
+      proseQualityReports: [qualityReport(7)],
+    })
+
+    expect(html).not.toContain('86分')
+    expect(html).not.toContain('尚未质检')
+    expect(html).not.toContain('质检问题')
+    expect(html).not.toContain('还没有参考分')
+    expect(html).toContain('尚未审稿')
+    expect(html).toContain('还没有 oh-story 审稿')
+  })
+
+  test('renders the latest oh-story review report for the current chapter', () => {
+    const html = renderPanel(7, null, {
+      ohStoryReviews: [
+        ohStoryReview(8, '=== 故事审查报告（solo）===\n别章报告。'),
+        ohStoryReview(7, '=== 故事审查报告（solo）===\n本章冲突成立。'),
+      ],
+    })
+
+    expect(html).toContain('正文已改')
+    expect(html).toContain('=== 故事审查报告（solo）===')
+    expect(html).toContain('本章冲突成立。')
+    expect(html).not.toContain('别章报告。')
+    expect(html).not.toContain('86分')
+    expect(html).not.toContain('质检问题')
+  })
+
+  test('shows a loading hint when the oh-story review exists but report_text is not hydrated yet', () => {
+    const html = renderPanel(7, null, {
+      ohStoryReviews: [{
+        id: 700,
+        review_type: 'oh_story_review',
+        chapter_id: 7,
+        created_at: '2026-08-14T12:44:33.000Z',
+        payload_bytes: 8000,
+      }],
+    })
+
+    expect(html).toContain('审稿加载中')
+    expect(html).toContain('正在加载审稿全文')
+    expect(html).not.toContain('正文已改')
+    expect(html).not.toContain('再跑一次')
+  })
+
+  test('shows apply action and hash-based review status', () => {
+    const text = '第7章正文'
+    const html = renderPanel(7, null, {
+      ohStoryReviews: [{
+        id: 700,
+        review_type: 'oh_story_review',
+        created_at: '2026-08-14T12:44:33.000Z',
+        payload: {
+          chapter_id: 7,
+          report_text: '=== 故事审查报告（solo）===\n本章冲突成立。',
+          chapter_text_hash: ohStoryChapterTextHash(text),
+        },
+      }],
+    })
+    expect(html).toContain('按建议改稿')
+    expect(html).toContain('已审稿')
+    expect(html).not.toContain('正文已改')
+    expect(html).not.toContain('一键修订')
+  })
+
+  test('ohStoryBusySummary follows the confirmed C labels', () => {
+    expect(qualityPanelModule.ohStoryBusySummary('review', 12)).toBe('审稿中 · 12s')
+    expect(qualityPanelModule.ohStoryBusySummary('apply', 3)).toBe('改稿中 · 3s')
+    expect(qualityPanelModule.ohStoryBusySummary('deslop', 0)).toBe('去AI中 · 0s')
+  })
+
+  test('spins the running oh-story button, disables the others, and shows elapsed time', () => {
+    const html = renderPanel(7, null, { ohStoryAction: 'deslop', ohStoryElapsedSec: 12 })
+
+    expect(html).toContain('去AI中 · 12s')
+    expect(buttonMarkup(html, 'oh-story 去AI')).toContain('ant-btn-loading')
+    expect(buttonMarkup(html, 'oh-story 审稿')).toContain('disabled=""')
+    expect(buttonMarkup(html, '按建议改稿')).toContain('disabled=""')
+    expect(buttonMarkup(html, 'oh-story 去AI')).not.toContain('disabled=""')
+  })
+
+  test('marks a hashless or mismatched review as 正文已改', () => {
+    const html = renderPanel(7, null, {
+      ohStoryReviews: [ohStoryReview(7)],
+    })
+    expect(html).toContain('正文已改')
+    expect(html).not.toContain('>已审稿<')
+  })
+
+  test('workspace apply action posts /novel/oh-story/core/apply', async () => {
+    const source = await Bun.file(new URL('./shell/workspace-repair-task-handlers.tsx', import.meta.url)).text()
+    expect(source).toContain("runOhStoryCoreAction('apply')")
+    expect(source).toContain('/novel/oh-story/core/${action}')
+    expect(source).toContain('OH_STORY_APPLY_NO_REVIEW')
+    expect(source).toContain('先对本稿重新审稿')
+  })
+
+  test('stops wiring old quality and revision launches in the writing shell', async () => {
+    const body = await Bun.file(new URL('./shell/workspace-body.tsx', import.meta.url)).text()
+    const controls = await Bun.file(new URL('./workspace-center-editor-controls.tsx', import.meta.url)).text()
+    expect(body).not.toContain('onRefreshProseQuality=')
+    expect(body).not.toContain('onApplyEditorRevision=')
+    expect(controls).not.toContain('写后复检')
+    expect(controls).not.toContain('交稿质检')
+    expect(controls).not.toContain('编辑报告')
   })
 })

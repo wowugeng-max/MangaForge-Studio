@@ -70,10 +70,12 @@ export type NovelWorkspaceAreaViewProps = {
   proseEditorRef: any
   proseQualityLoading: any
   proseQualityReports: any
+  ohStoryReviews?: any
   editorRevisionReports: any
   applyEditorRevision: any
   ohStoryReview?: any
   ohStoryDeslop?: any
+  ohStoryApply?: any
   refreshActiveProseQuality: any
   repairActiveDeslopGate: any
   repairChapterPreflightMaterials: any
@@ -188,10 +190,12 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     proseEditorRef,
     proseQualityLoading,
     proseQualityReports,
+    ohStoryReviews,
     editorRevisionReports,
     applyEditorRevision,
     ohStoryReview,
     ohStoryDeslop,
+    ohStoryApply,
     refreshActiveProseQuality,
     repairActiveDeslopGate,
     repairChapterPreflightMaterials,
@@ -351,6 +355,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
           setRightPanelTab?.('proseQuality')
         }}
         proseQualityReports={proseQualityReports}
+        ohStoryReviews={ohStoryReviews}
         editorRevisionReports={editorRevisionReports}
         editorRevisionTask={editorRevisionTask}
         proseQualityLoading={proseQualityLoading}
@@ -361,6 +366,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         }}
         onApplyEditorRevision={applyEditorRevision}
         onOhStoryReview={ohStoryReview}
+        onOhStoryApply={ohStoryApply}
         onOhStoryDeslop={ohStoryDeslop}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}

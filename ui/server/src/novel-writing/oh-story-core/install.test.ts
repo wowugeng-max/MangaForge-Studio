@@ -48,6 +48,10 @@ function coreArchive(prefix: string, reviewBody = '# story-review') {
     { name: `${prefix}/skills/story-long-write/SKILL.md`, content: '# story-long-write' },
     { name: `${prefix}/skills/story-review/references/quality-checklist.md`, content: '开头有钩子' },
     { name: `${prefix}/skills/story-review/scripts/run.sh`, content: 'echo should-not-extract' },
+    { name: `${prefix}/skills/story-deslop/scripts/check-ai-patterns.js`, content: 'module.exports = 1' },
+    { name: `${prefix}/skills/story-deslop/scripts/check-degeneration.js`, content: 'module.exports = 2' },
+    { name: `${prefix}/skills/story-deslop/scripts/normalize-punctuation.js`, content: 'module.exports = 3' },
+    { name: `${prefix}/.agents/skills`, content: '', unixPermissions: 0xa000 },
   ])
 }
 
@@ -73,6 +77,30 @@ test('installs locked oh-story skills from a fixture zip and skips scripts', asy
   const root = ohStoryCoreRoot(workspace)
   await expect(access(join(root, 'skills', 'story-review', 'scripts'))).rejects.toThrow()
   await expect(access(join(root, 'skills', 'story-review', 'scripts', 'run.sh'))).rejects.toThrow()
+  await access(join(root, 'skills', 'story-deslop', 'scripts', 'check-ai-patterns.js'))
+  await access(join(root, 'skills', 'story-deslop', 'scripts', 'check-degeneration.js'))
+  await access(join(root, 'skills', 'story-deslop', 'scripts', 'normalize-punctuation.js'))
+})
+
+test('same revision re-extracts when deslop scripts are missing', async () => {
+  const workspace = await mkdtemp(join(tmpdir(), 'oh-story-install-scripts-'))
+  const bare = await zipBytes([
+    { name: 'oh-story-claudecode-abc/skills/story-review/SKILL.md', content: '# story-review' },
+    { name: 'oh-story-claudecode-abc/skills/story-deslop/SKILL.md', content: '# story-deslop' },
+    { name: 'oh-story-claudecode-abc/skills/story-long-write/SKILL.md', content: '# story-long-write' },
+  ])
+  const withScripts = await coreArchive('oh-story-claudecode-abc')
+  const calls: string[] = []
+  const fetchImpl = githubFetch({ [archiveUrl(SHA_A)]: bare }, SHA_A, calls)
+
+  await installOhStoryCoreSuite(workspace, { fetchImpl, now: NOW_A })
+  const root = ohStoryCoreRoot(workspace)
+  await expect(access(join(root, 'skills', 'story-deslop', 'scripts', 'check-ai-patterns.js'))).rejects.toThrow()
+
+  const refill = githubFetch({ [archiveUrl(SHA_A)]: withScripts }, SHA_A, calls)
+  await installOhStoryCoreSuite(workspace, { fetchImpl: refill, now: NOW_B })
+  await access(join(root, 'skills', 'story-deslop', 'scripts', 'check-ai-patterns.js'))
+  expect(calls.filter((url) => url.includes('codeload.github.com'))).toHaveLength(2)
 })
 
 test('same-revision reinstall is idempotent and keeps installed_at', async () => {

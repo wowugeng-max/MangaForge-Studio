@@ -18,7 +18,7 @@ afterEach(() => {
   message.error = originalMessageError
 })
 
-function repairHandlerFixture() {
+function repairHandlerFixture(overrides: Partial<RepairTaskHandlerDeps> = {}) {
   const apiPost = mock(async () => ({
     status: 202,
     data: {
@@ -80,6 +80,7 @@ function repairHandlerFixture() {
     setSelectedProject: noop,
     setTaskCenterOpen,
     sortedChapters: [],
+    ...overrides,
   }
   return {
     handlers: createRepairTaskHandlers(deps),
@@ -736,5 +737,79 @@ describe('commercial writing workspace UI shell monotest shim', () => {
     expect(deps.closeRepairTaskAfterRevision).not.toHaveBeenCalled()
     expect(deps.acknowledgeLinkedTaskClosure).not.toHaveBeenCalled()
     expect(state.completedKeys.size).toBe(0)
+  })
+})
+
+describe('oh-story core actions use the selected text model', () => {
+  test('deslop posts the workspace model_id instead of falling back to the image favorite', async () => {
+    const fixture = repairHandlerFixture()
+    await fixture.handlers.ohStoryDeslop()
+    expect(fixture.apiPost).toHaveBeenCalledWith('/novel/oh-story/core/deslop', {
+      project_id: 3,
+      chapter_id: 11,
+      model_id: 7,
+    })
+  })
+
+  test('apply posts when the latest review exists but hash is not hydrated yet', async () => {
+    const fixture = repairHandlerFixture({
+      activeChapter: { id: 11, chapter_no: 1, title: '起雾', chapter_text: '楚弦咽气的时候。' },
+      reviews: [{
+        id: 9,
+        review_type: 'oh_story_review',
+        created_at: '2026-08-14T13:00:00.000Z',
+        chapter_id: 11,
+        payload: { chapter_id: 11 },
+      }],
+    })
+    await fixture.handlers.ohStoryApply()
+    expect(fixture.apiPost).toHaveBeenCalledWith('/novel/oh-story/core/apply', {
+      project_id: 3,
+      chapter_id: 11,
+      model_id: 7,
+    })
+  })
+
+  test('apply 404 tells the user the writing API needs a restart', async () => {
+    const fixture = repairHandlerFixture({
+      activeChapter: { id: 11, chapter_no: 1, title: '起雾', chapter_text: '楚弦咽气的时候。' },
+      reviews: [{
+        id: 9,
+        review_type: 'oh_story_review',
+        created_at: '2026-08-14T13:00:00.000Z',
+        chapter_id: 11,
+        payload: { chapter_id: 11 },
+      }],
+    })
+    fixture.apiPost.mockImplementation(async () => {
+      const error: any = new Error('Request failed with status code 404')
+      error.response = { status: 404, data: {} }
+      throw error
+    })
+    await fixture.handlers.ohStoryApply()
+    expect(fixture.error).toHaveBeenCalledWith('当前写作服务还没有按建议改稿接口，请重启 API 后再试')
+  })
+
+  test('apply rewrite-too-much toast tells the user not to full-rewrite', async () => {
+    const fixture = repairHandlerFixture({
+      activeChapter: { id: 11, chapter_no: 1, title: '起雾', chapter_text: '楚弦咽气的时候。' },
+      reviews: [{
+        id: 9,
+        review_type: 'oh_story_review',
+        created_at: '2026-08-14T13:00:00.000Z',
+        chapter_id: 11,
+        payload: { chapter_id: 11 },
+      }],
+    })
+    fixture.apiPost.mockImplementation(async () => {
+      const error: any = new Error('这次改动太大，像整章重写。请再试一次')
+      error.response = {
+        status: 409,
+        data: { code: 'OH_STORY_APPLY_REWROTE_TOO_MUCH', error: '这次改动太大，像整章重写。请再试一次' },
+      }
+      throw error
+    })
+    await fixture.handlers.ohStoryApply()
+    expect(fixture.warning).toHaveBeenCalledWith('这次改动太大，像整章重写。请再试一次')
   })
 })

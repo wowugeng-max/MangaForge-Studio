@@ -26,7 +26,9 @@ describe('chapter workflow presenter', () => {
       acceptanceStatus: 'needs_quality_check',
     })
     expect(model.phase).toBe('written_unchecked')
-    expect(model.primaryAction.key).toBe('refresh_current_quality')
+    expect(model.primaryAction.key).toBe('sync_story_state')
+    expect(model.primaryAction.label).toBe('同步故事状态')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('refresh_current_quality')
     expect(model.panelToOpen).toBe('quality')
   })
 
@@ -39,8 +41,9 @@ describe('chapter workflow presenter', () => {
     })
     expect(model.phase).toBe('written_unchecked')
     expect(model.phaseLabel).toBe('可复检提升')
-    expect(model.reasonText).toContain('可继续复检提高正文质量')
-    expect(model.primaryAction.key).toBe('refresh_current_quality')
+    expect(model.primaryAction.key).toBe('accept_chapter_and_continue')
+    expect(model.primaryAction.label).toBe('写下一章')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('refresh_current_quality')
     // 正文 + 状态同步 completed; 复检 current
     expect(model.stepsDone).toEqual([true, false, false, true, false])
     expect(model.stepIndex).toBe(1)
@@ -66,7 +69,10 @@ describe('chapter workflow presenter', () => {
       storyStateSynced: true,
     })
     expect(model.phase).toBe('needs_revision')
-    expect(model.primaryAction.key).toBe('apply_editor_revision')
+    expect(model.primaryAction.key).toBe('accept_chapter_and_continue')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('apply_editor_revision')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('create_editor_report')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('refresh_current_quality')
     expect(model.stepsDone[0]).toBe(true)
     expect(model.stepsDone[1]).toBe(true)
     expect(model.stepsDone[2]).toBe(false)

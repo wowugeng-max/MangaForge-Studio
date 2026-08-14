@@ -3,13 +3,13 @@ import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
 import { SkillPathError, validateSkillPackArchiveEntry } from '../../skills/path-safety'
 import { parseWritingSkillGitHubUrl, resolveWritingSkillHeadRevision } from '../writing-skills/install-github'
-import { loadOhStoryCoreSuite, ohStoryCoreRoot } from './store'
+import { hasStoryDeslopScripts, loadOhStoryCoreSuite, ohStoryCoreRoot } from './store'
 import { OH_STORY_CORE_SKILL_IDS, OH_STORY_CORE_SOURCE_URL } from './types'
 
 export const MAX_OH_STORY_CORE_ARCHIVE_BYTES = 64 * 1024 * 1024
 export const MAX_OH_STORY_CORE_EXTRACTED_BYTES = 16 * 1024 * 1024
 
-const SKIPPED_SKILL_FOLDERS = new Set(['scripts', 'tests', 'demo'])
+const SKIPPED_SKILL_FOLDERS = new Set(['tests', 'demo'])
 const LOCKED_SKILL_IDS = new Set<string>(OH_STORY_CORE_SKILL_IDS)
 
 export type InstallOhStoryCoreSuiteOptions = {
@@ -34,9 +34,16 @@ function isAllowedExtractPath(relativePath: string): boolean {
   if (parts[0] !== 'skills' || !LOCKED_SKILL_IDS.has(parts[1] || '')) return false
   if (parts.some((part) => SKIPPED_SKILL_FOLDERS.has(part))) return false
   if (parts.length === 3 && parts[2] === 'SKILL.md') return true
-  return parts.length === 4
+  if (
+    parts.length === 4
     && parts[2] === 'references'
     && /\.md$/i.test(parts[3])
+    && !parts[3].includes('\\')
+  ) return true
+  return parts[1] === 'story-deslop'
+    && parts.length === 4
+    && parts[2] === 'scripts'
+    && /\.js$/i.test(parts[3])
     && !parts[3].includes('\\')
 }
 
@@ -112,13 +119,13 @@ async function extractOhStoryCoreArchive(bytes: Uint8Array): Promise<ExtractedFi
   const seen = new Set<string>()
   for (const item of relativeEntries) {
     const selected = Boolean(item.name) && item.type === 'file' && isAllowedExtractPath(item.name)
+    if (!selected) continue
     try {
-      validateSkillPackArchiveEntry(item.original, item.type, selected ? item.sizeHint : 0)
+      validateSkillPackArchiveEntry(item.original, item.type, item.sizeHint)
     } catch (error) {
       if (error instanceof SkillPathError && error.code === 'SKILL_ARCHIVE_SYMLINK') throw error
       throw new Error(`Unsafe oh-story archive entry: ${item.original}`, { cause: error })
     }
-    if (!selected) continue
     if (seen.has(item.name)) throw new Error(`Duplicate oh-story archive entry: ${item.name}`)
     seen.add(item.name)
     picked.push({ path: item.name, entry: item.entry })
@@ -202,7 +209,7 @@ export async function installOhStoryCoreSuite(
   const source = parseWritingSkillGitHubUrl(OH_STORY_CORE_SOURCE_URL)
   const revision = await resolveWritingSkillHeadRevision(source, fetchImpl)
   const existing = loadOhStoryCoreSuite(workspace)
-  if (existing?.revision === revision) return
+  if (existing?.revision === revision && hasStoryDeslopScripts(workspace)) return
 
   const archiveUrl = `https://codeload.github.com/${source.owner}/${source.repo}/zip/${revision}`
   let archiveResponse: Response

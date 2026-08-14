@@ -24,8 +24,13 @@ test('deslop prompt includes SKILL.md and does not inject outline-conflict lectu
     references: [],
     chapterText: '命运仿佛在和他开玩笑。',
     projectTitle: '怪谈世界',
+    scriptFindings: '[{"severity":"blocking","type":"em-dash"}]',
   })
   expect(prompt).toContain('能删先删')
+  expect(prompt).toContain('### 润色后全文')
+  expect(prompt).toContain('文件模式')
+  expect(prompt).toContain('【脚本预检】')
+  expect(prompt).toContain('em-dash')
   expect(prompt).not.toContain('【总合同】')
   expect(prompt).not.toContain('定地图→定阵营→定角色')
 })

@@ -80,6 +80,21 @@ function readReferences(root: string, id: string): Array<{ file: string; text: s
   return references
 }
 
+export const OH_STORY_DESLOP_REQUIRED_SCRIPTS = [
+  'check-ai-patterns.js',
+  'check-degeneration.js',
+  'normalize-punctuation.js',
+] as const
+
+export function storyDeslopScriptsDir(workspace: string) {
+  return join(ohStoryCoreRoot(workspace), 'skills', 'story-deslop', 'scripts')
+}
+
+export function hasStoryDeslopScripts(workspace: string): boolean {
+  const dir = storyDeslopScriptsDir(workspace)
+  return OH_STORY_DESLOP_REQUIRED_SCRIPTS.every((file) => regularFileSize(join(dir, file)) !== null)
+}
+
 export function loadOhStoryCoreSuite(workspace: string): OhStoryCoreSuite | null {
   const root = ohStoryCoreRoot(workspace)
   if (!isRegularDirectory(root)) return null

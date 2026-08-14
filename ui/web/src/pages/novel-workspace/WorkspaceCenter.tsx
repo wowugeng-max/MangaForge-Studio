@@ -144,6 +144,7 @@ export function WorkspaceCenter({
   onOpenVersionHistory,
   onFocusQualityPanel,
   proseQualityReports = [],
+  ohStoryReviews = [],
   editorRevisionReports = [],
   editorRevisionTask = null,
   proseQualityLoading = false,
@@ -151,6 +152,7 @@ export function WorkspaceCenter({
   onRepairPreflightGaps,
   onApplyEditorRevision,
   onOhStoryReview,
+  onOhStoryApply,
   onOhStoryDeslop,
   onCancelEditorRevision,
   onRetryEditorRevision,
@@ -225,6 +227,7 @@ export function WorkspaceCenter({
   onOpenVersionHistory?: () => void
   onFocusQualityPanel?: () => void
   proseQualityReports?: any[]
+  ohStoryReviews?: any[]
   editorRevisionReports?: any[]
   editorRevisionTask?: EditorRevisionTask | null
   proseQualityLoading?: boolean
@@ -232,6 +235,7 @@ export function WorkspaceCenter({
   onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   onOhStoryReview?: () => void | Promise<void>
+  onOhStoryApply?: () => void | Promise<void>
   onOhStoryDeslop?: () => void | Promise<void>
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
@@ -882,7 +886,7 @@ export function WorkspaceCenter({
 
           <WorkspaceCenterQualityRevisionPanel
             activeChapter={activeChapter}
-            proseQualityReports={proseQualityReports}
+            ohStoryReviews={ohStoryReviews}
             editorRevisionReports={editorRevisionReports}
             editorRevisionTask={editorRevisionTask}
             proseQualityLoading={proseQualityLoading}
@@ -891,6 +895,7 @@ export function WorkspaceCenter({
             onRepairPreflightGaps={onRepairPreflightGaps}
             onApplyEditorRevision={onApplyEditorRevision}
             onOhStoryReview={onOhStoryReview}
+            onOhStoryApply={onOhStoryApply}
             onOhStoryDeslop={onOhStoryDeslop}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}

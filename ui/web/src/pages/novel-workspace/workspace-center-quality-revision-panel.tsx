@@ -1,16 +1,12 @@
 import React from 'react'
-import { Button, Input, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { ohStoryChapterTextHash } from './oh-story-chapter-text-hash'
 import {
-  buildRevisionUsageMap,
-  issueLabel,
-  issueSeverity,
   parseReviewPayload,
   resolveQualityReportView,
-  reviewMatchesCurrentText,
-  scoreColor,
   timeValue,
 } from './reference-panel-helpers'
-import { chapterWordCount, displayValue } from './utils'
+import { chapterWordCount } from './utils'
 import {
   isActiveEditorRevisionTask,
   type EditorRevisionTask,
@@ -18,40 +14,15 @@ import {
 import { editorRevisionPhaseLabel } from './task-center/drawer-run-summary-editor-revision'
 import { buildEditorRevisionProgress } from './editor-revision-progress'
 
-const { Text, Paragraph } = Typography
+const { Text } = Typography
 
 const QUALITY_PANEL_OPEN_KEY = 'novel_quality_panel_open'
 
-const REVISION_CHIPS = [
-  { mode: 'expand_action', label: '补动作' },
-  { mode: 'cut_description', label: '砍描写' },
-  { mode: 'tighten_pacing', label: '提节奏' },
-  { mode: 'add_consequence', label: '补后果' },
-] as const
+export type OhStoryCoreBusyAction = 'review' | 'deslop' | 'apply'
 
-const CUSTOM_REVISION_PRESETS = [
-  {
-    key: 'clear_english',
-    label: '清英文夹杂',
-    prompt: '删除或改写正文中所有英文单词、英文粘连词、拼音碎片和夹杂拉丁字母，统一改为自然简体中文；必要专有名词可保留中文括注，不得保留 and/but/the 等英文碎片。',
-  },
-  {
-    key: 'opening_handoff',
-    label: '强接开篇',
-    prompt: '开篇前 300-500 字必须直接接住上一章章末钩子/危机/欠账，禁止先写环境空镜、平行戏或已兑现冲突回放。',
-  },
-  {
-    key: 'cut_replay',
-    label: '去进度回放',
-    prompt: '删除已兑现冲突、已结束事件的重复回放，改写为基于当前新进度的推进与结果。',
-  },
-] as const
-
-const CRAFT_METRIC_LABELS: Record<string, string> = {
-  action_detail_score: '动作细节',
-  combat_process_score: '战斗过程',
-  event_density_score: '事件密度',
-  description_overuse_score: '描写过量',
+export function ohStoryBusySummary(action: OhStoryCoreBusyAction, elapsedSec: number) {
+  const label = action === 'review' ? '审稿中' : action === 'deslop' ? '去AI中' : '改稿中'
+  return `${label} · ${Math.max(0, Math.floor(Number(elapsedSec) || 0))}s`
 }
 
 type EditorRevisionTaskActionKey = 'cancel' | 'retry' | 'continue'
@@ -96,6 +67,7 @@ export function reportChapterId(report: any) {
     payload.chapter_id
     || payload.context_package?.chapter_target?.id
     || payload.chapter_target?.id
+    || report?.chapter_id
     // Legacy truncated reports (pre 2026-07-14 compaction) only keep chapter_id inside the
     // preview text; reuse the ReferencePanel fallback so both panels agree on the chapter.
     || resolveQualityReportView(report).chapterTarget?.id
@@ -103,41 +75,9 @@ export function reportChapterId(report: any) {
   )
 }
 
-function asTextList(value: any): string[] {
-  if (!value) return []
-  if (Array.isArray(value)) {
-    return value.map(item => {
-      if (typeof item === 'string') return item.trim()
-      return String(item?.description || item?.message || item?.label || item?.fix || item?.text || displayValue(item) || '').trim()
-    }).filter(Boolean)
-  }
-  if (typeof value === 'string') {
-    return value.split(/[；;\n]/).map(item => item.trim()).filter(Boolean)
-  }
-  return []
-}
-
-function QualityRow({
-  status,
-  label,
-  detail,
-  meta,
-}: {
-  status?: 'pass' | 'warn' | 'fail' | 'info'
-  label: string
-  detail?: string
-  meta?: string
-}) {
-  return (
-    <div className={`novel-quality-row is-${status || 'info'}`}>
-      <div className="novel-quality-row-main">
-        {status ? <span className="novel-quality-row-status">{status === 'pass' ? '通过' : status === 'fail' ? '失败' : status === 'warn' ? '关注' : '信息'}</span> : null}
-        <span className="novel-quality-row-label">{label}</span>
-        {meta ? <span className="novel-quality-row-meta">{meta}</span> : null}
-      </div>
-      {detail ? <div className="novel-quality-row-detail">{detail}</div> : null}
-    </div>
-  )
+export function ohStoryReportText(report: any): string {
+  const payload = parseReviewPayload(report)
+  return String(payload.report_text || report?.summary || '').trim()
 }
 
 function EditorRevisionStatusStrip({
@@ -300,23 +240,19 @@ function EditorRevisionStatusStrip({
 
 export function WorkspaceCenterQualityRevisionPanel({
   activeChapter,
-  proseQualityReports = [],
-  editorRevisionReports = [],
+  ohStoryReviews = [],
   editorRevisionTask = null,
-  proseQualityLoading = false,
-  editorReportLoading = false,
-  onRefreshProseQuality,
-  onRepairPreflightGaps,
-  onApplyEditorRevision,
   onOhStoryReview,
+  onOhStoryApply,
   onOhStoryDeslop,
+  ohStoryAction = null,
+  ohStoryElapsedSec,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
-  onCreateEditorReport,
-  onOpenSideQuality,
 }: {
   activeChapter: any | null
+  ohStoryReviews?: any[]
   proseQualityReports?: any[]
   editorRevisionReports?: any[]
   editorRevisionTask?: EditorRevisionTask | null
@@ -326,7 +262,10 @@ export function WorkspaceCenterQualityRevisionPanel({
   onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   onOhStoryReview?: () => void | Promise<void>
+  onOhStoryApply?: () => void | Promise<void>
   onOhStoryDeslop?: () => void | Promise<void>
+  ohStoryAction?: OhStoryCoreBusyAction | null
+  ohStoryElapsedSec?: number
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -336,7 +275,6 @@ export function WorkspaceCenterQualityRevisionPanel({
   const wordCount = chapterWordCount(activeChapter)
   const chapterId = Number(activeChapter?.id || 0)
   const hasProse = Boolean(chapterId && wordCount > 0)
-  // Collapsed by default; needsWork auto-expands below and the choice persists across sessions.
   const [open, setOpen] = React.useState(() => {
     try {
       return localStorage.getItem(QUALITY_PANEL_OPEN_KEY) === '1'
@@ -352,108 +290,71 @@ export function WorkspaceCenterQualityRevisionPanel({
       // localStorage unavailable (private mode/tests) — state stays in memory.
     }
   }
-  const [customRevisionPrompt, setCustomRevisionPrompt] = React.useState('')
-  const [repairingPreflight, setRepairingPreflight] = React.useState(false)
   const currentEditorRevisionTask = editorRevisionTask?.chapter_id === chapterId ? editorRevisionTask : null
   const revisionActive = Boolean(currentEditorRevisionTask && isActiveEditorRevisionTask(currentEditorRevisionTask))
 
-  const chapterReports = React.useMemo(() => {
+  const chapterReviews = React.useMemo(() => {
     if (!chapterId) return [] as any[]
-    return (proseQualityReports || [])
+    return (ohStoryReviews || [])
       .filter(report => reportChapterId(report) === chapterId)
       .slice()
       .sort((a, b) => timeValue(b.created_at) - timeValue(a.created_at))
-  }, [proseQualityReports, chapterId])
+  }, [ohStoryReviews, chapterId])
 
-  const latest = chapterReports[0] || null
-  const view = latest ? resolveQualityReportView(latest) : null
-  const revisionUsageMap = React.useMemo(
-    () => buildRevisionUsageMap(editorRevisionReports || []),
-    [editorRevisionReports],
-  )
-  const usedByRevisions = latest ? (revisionUsageMap.get(Number(latest.id)) || []) : []
-  const matchesCurrent = latest ? reviewMatchesCurrentText(latest, activeChapter) : false
-  const reportTime = timeValue(latest?.created_at)
-  const chapterTime = timeValue(activeChapter?.updated_at)
-  const isStale = Boolean(
+  const latest = chapterReviews[0] || null
+  const reportText = latest ? ohStoryReportText(latest) : ''
+  const storedHash = String(parseReviewPayload(latest).chapter_text_hash || '')
+  const hydrated = Boolean(reportText || storedHash)
+  const matchesCurrent = Boolean(
     latest
-    && !matchesCurrent
-    && chapterTime
-    && reportTime
-    && reportTime < chapterTime,
+    && storedHash
+    && storedHash === ohStoryChapterTextHash(String(activeChapter?.chapter_text || '')),
   )
-  const score = Number(view?.score || 0)
-  const issues = Array.isArray(view?.issues) ? view!.issues : []
-  const checks = Array.isArray(view?.checks) ? view!.checks : []
-  const warnings = Array.isArray(view?.warnings) ? view!.warnings : []
-  const pipeline = Array.isArray(view?.pipeline) ? view!.pipeline : []
-  const craftMetrics = view?.craftMetrics && typeof view.craftMetrics === 'object' ? view.craftMetrics : {}
-  const focusedModes = Array.isArray(view?.focusedModes) ? view!.focusedModes : []
-  const review = view?.review || {}
-  const payload = view?.payload || {}
-  const previousChapter = view?.previousChapter || null
-  const revisionDirectives = asTextList(review?.revision_directives || review?.revisionDirectives)
-  const summaryText = String(latest?.summary || review?.summary || '').trim()
-  const dimensions = (review?.dimensions && typeof review.dimensions === 'object')
-    ? review.dimensions
-    : (payload?.dimensions && typeof payload.dimensions === 'object' ? payload.dimensions : {})
-  const findings = Array.isArray(review?.findings) ? review.findings : []
-
-  const needsWork = Boolean(
-    !latest
-    || isStale
-    || latest?.status === 'warn'
-    || (score > 0 && score < 78)
-    || issues.length > 0
-    || revisionDirectives.length > 0,
-  )
+  const isStale = Boolean(latest && hydrated && !matchesCurrent)
+  const hasReview = Boolean(latest && reportText)
+  const [localOhStoryAction, setLocalOhStoryAction] = React.useState<OhStoryCoreBusyAction | null>(null)
+  const [ohStoryNowMs, setOhStoryNowMs] = React.useState(() => Date.now())
+  const ohStoryStartedAtRef = React.useRef<number | null>(null)
+  const busyAction = ohStoryAction ?? localOhStoryAction
 
   React.useEffect(() => {
-    if (needsWork) setOpen(true)
-  }, [needsWork, chapterId, latest?.id])
+    if (hasReview) setOpen(true)
+  }, [hasReview, chapterId, latest?.id])
+  React.useEffect(() => {
+    if (!busyAction || ohStoryElapsedSec != null) return
+    const timer = setInterval(() => setOhStoryNowMs(Date.now()), 1_000)
+    return () => clearInterval(timer)
+  }, [busyAction, ohStoryElapsedSec])
 
   if (!hasProse) return null
 
-  const canRevise = Boolean(latest && onApplyEditorRevision && !isStale && usedByRevisions.length === 0 && !revisionActive)
-  const trimmedCustomPrompt = customRevisionPrompt.trim()
-  const withCustomPrompt = (options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => ({
-    ...options,
-    prompt: String(options.prompt || trimmedCustomPrompt || '').trim() || undefined,
-  })
-  const applyRevision = (options: { revisionMode?: string; prompt?: string; skipConfirm?: boolean } = {}) => {
-    if (!canRevise || revisionActive || !latest || !onApplyEditorRevision) return
-    onApplyEditorRevision(latest, withCustomPrompt(options))
+  const busyElapsedSec = ohStoryElapsedSec != null
+    ? ohStoryElapsedSec
+    : ohStoryStartedAtRef.current
+      ? Math.floor((ohStoryNowMs - ohStoryStartedAtRef.current) / 1000)
+      : 0
+  const runOhStoryAction = (action: OhStoryCoreBusyAction, handler?: () => void | Promise<void>) => {
+    if (busyAction) return
+    ohStoryStartedAtRef.current = Date.now()
+    setOhStoryNowMs(Date.now())
+    setLocalOhStoryAction(action)
+    void Promise.resolve(handler?.()).finally(() => {
+      setLocalOhStoryAction(null)
+      ohStoryStartedAtRef.current = null
+    })
   }
 
-
   const summaryBits = [
+    busyAction ? ohStoryBusySummary(busyAction, busyElapsedSec) : '',
     revisionActive && currentEditorRevisionTask
       ? `修订中·${editorRevisionPhaseLabel(currentEditorRevisionTask.phase)}`
       : '',
-    latest ? `${score || '-'}分` : '尚未质检',
-    isStale ? '旧报告' : '',
-    latest?.status === 'warn' ? '需检查' : latest ? (score >= 78 ? '可过关' : '待提升') : '',
-    issues.length ? `${issues.length} 项问题` : (latest ? '无列出问题' : ''),
-    checks.length ? `${checks.length} 项预检` : '',
-    revisionDirectives.length ? `${revisionDirectives.length} 条修订指令` : '',
-    usedByRevisions.length ? '已生成修订' : '',
+    !latest ? '尚未审稿' : !hydrated ? '审稿加载中' : matchesCurrent ? '已审稿' : '正文已改',
   ].filter(Boolean)
-
-  const busy = Boolean(proseQualityLoading || editorReportLoading)
-  const craftRows = Object.entries(craftMetrics)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => ({
-      key,
-      label: CRAFT_METRIC_LABELS[key] || key,
-      value: String(value),
-    }))
-  const dimensionRows = Object.entries(dimensions)
-    .filter(([, value]) => value !== undefined && value !== null && value !== '')
-    .map(([key, value]) => ({ key, label: key, value: String(value) }))
 
   return (
     <details
-      className={`novel-quality-revision-panel${needsWork ? ' is-attention' : ''}`}
+      className={`novel-quality-revision-panel${hasReview ? '' : ' is-attention'}`}
       open={open}
       onToggle={(event) => persistOpen((event.target as HTMLDetailsElement).open)}
     >
@@ -465,47 +366,38 @@ export function WorkspaceCenterQualityRevisionPanel({
               <span key={bit} className="novel-quality-revision-pill">{bit}</span>
             ))}
           </span>
-          <span className="novel-quality-revision-score-caption novel-quality-revision-hint">参考，不自动改稿</span>
         </span>
         <span className="novel-quality-revision-summary-action" style={{ gap: 6 }}>
           <Button
             size="small"
+            loading={busyAction === 'review'}
+            disabled={Boolean(busyAction) && busyAction !== 'review'}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
-              void onOhStoryReview?.()
+              runOhStoryAction('review', onOhStoryReview)
             }}
           >oh-story 审稿</Button>
           <Button
             size="small"
+            loading={busyAction === 'apply'}
+            disabled={Boolean(busyAction) && busyAction !== 'apply'}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
-              void onOhStoryDeslop?.()
+              runOhStoryAction('apply', onOhStoryApply)
+            }}
+          >按建议改稿</Button>
+          <Button
+            size="small"
+            loading={busyAction === 'deslop'}
+            disabled={Boolean(busyAction) && busyAction !== 'deslop'}
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              runOhStoryAction('deslop', onOhStoryDeslop)
             }}
           >oh-story 去AI</Button>
-          {canRevise ? (
-            <Button
-              size="small"
-              type="primary"
-              disabled={revisionActive}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                applyRevision({})
-              }}
-            >一键修订</Button>
-          ) : onRefreshProseQuality ? (
-            <Button
-              size="small"
-              loading={proseQualityLoading}
-              onClick={(event) => {
-                event.preventDefault()
-                event.stopPropagation()
-                onRefreshProseQuality()
-              }}
-            >{latest ? (isStale ? '重新质检' : '复检') : '质检'}</Button>
-          ) : null}
         </span>
       </summary>
 
@@ -518,336 +410,32 @@ export function WorkspaceCenterQualityRevisionPanel({
             onLoadDiagnostics={onLoadEditorRevisionDiagnostics}
           />
         ) : null}
-        <div className="novel-quality-revision-actions">
-          <Space wrap size={[6, 6]}>
-            <Button
-              size="small"
-              type="primary"
-              loading={proseQualityLoading}
-              onClick={() => onRefreshProseQuality?.()}
-            >
-              {latest ? (isStale ? '复检当前版本' : '重新质检') : '立即质检'}
-            </Button>
-            <Button
-              size="small"
-              disabled={!canRevise}
-              loading={editorReportLoading}
-              onClick={() => applyRevision()}
-            >
-              {usedByRevisions.length ? '已用于修订' : isStale ? '旧报告不可修订' : (trimmedCustomPrompt ? '按报告+自定义修订' : '按报告修订')}
-            </Button>
-            {onCreateEditorReport ? (
-              <Button size="small" loading={editorReportLoading} onClick={() => onCreateEditorReport?.()}>
-                生成编辑报告
-              </Button>
-            ) : null}
-            {onOpenSideQuality ? (
-              <Button size="small" type="link" onClick={() => onOpenSideQuality?.()}>
-                历史记录
-              </Button>
-            ) : null}
-          </Space>
-        </div>
 
         {!latest ? (
           <Text type="secondary" className="novel-quality-revision-empty">
-            当前章已有正文，但还没有质检结果。先点「立即质检」，再按问题修订。
+            还没有 oh-story 审稿。点「oh-story 审稿」生成本章报告。
           </Text>
         ) : (
           <>
             <div className="novel-quality-revision-meta">
               <Space wrap size={[4, 4]}>
-                <Tag color={scoreColor(score)} bordered={false}>{score || '-'} 分</Tag>
-                <Tag color={latest.status === 'warn' ? 'gold' : 'green'} bordered={false}>
-                  {latest.status === 'warn' ? '需检查' : '通过'}
-                </Tag>
-                {review?.needs_revision || review?.needsRevision ? <Tag color="gold" bordered={false}>建议修订</Tag> : null}
-                {isStale ? <Tag color="red" bordered={false}>旧报告</Tag> : <Tag color="blue" bordered={false}>对应当前正文</Tag>}
-                {usedByRevisions.length > 0 ? <Tag color="purple" bordered={false}>已生成修订稿</Tag> : null}
-                {payload.source === 'post_revision' ? <Tag color="blue" bordered={false}>修订后复检</Tag> : null}
-                {view?.preflight?.ready ? <Tag color="green" bordered={false}>上下文完整</Tag> : <Tag color="gold" bordered={false}>上下文缺口</Tag>}
+                <Tag color="blue" bordered={false}>oh-story 审稿</Tag>
+                {!hydrated ? <Tag bordered={false}>审稿加载中</Tag> : isStale ? <Tag color="gold" bordered={false}>正文已改</Tag> : <Tag color="green" bordered={false}>对应当前正文</Tag>}
                 <Text type="secondary" style={{ fontSize: 11 }}>{latest.created_at}</Text>
               </Space>
               {isStale ? (
-                <Text type="danger" className="novel-quality-revision-hint">
-                  这份报告早于当前正文，请先复检当前版本再修订。
+                <Text type="warning" className="novel-quality-revision-hint">
+                  正文在这次审稿之后改过，报告可能对不上当前稿。
                 </Text>
-              ) : null}
-              {usedByRevisions.length > 0 ? (
-                <Text className="novel-quality-revision-hint">
-                  已用于生成修订稿：{usedByRevisions.map((item: any) => `#${item.report.id}`).join('、')}
-                </Text>
-              ) : null}
-              {summaryText ? (
-                <Paragraph className="novel-quality-revision-summary-text">{summaryText}</Paragraph>
               ) : null}
             </div>
-
-            {canRevise && !busy ? (
-              <>
-                <div className="novel-quality-revision-chips">
-                  <div className="novel-quality-section-title">定向修订</div>
-                  <Space wrap size={[4, 4]}>
-                    {REVISION_CHIPS.map(chip => (
-                      <Button
-                        key={chip.mode}
-                        size="small"
-                        className="novel-quality-revision-chip novel-btn-crystal novel-btn-crystal-display"
-                        onClick={() => applyRevision({ revisionMode: chip.mode })}
-                      >
-                        {chip.label}
-                      </Button>
-                    ))}
-                  </Space>
-                </div>
-
-                <div className="novel-quality-revision-custom">
-                  <div className="novel-quality-section-title">自定义修订指令</div>
-                  <Text type="secondary" className="novel-quality-revision-hint">
-                    质检漏检时，可写强制改法；会优先并入修订提示词，并仍覆盖报告必修项。
-                  </Text>
-                  <Space wrap size={[4, 4]} className="novel-quality-revision-custom-presets">
-                    {CUSTOM_REVISION_PRESETS.map(preset => (
-                      <Button
-                        key={preset.key}
-                        size="small"
-                        className="novel-quality-revision-chip novel-btn-crystal novel-btn-crystal-display"
-                        onClick={() => setCustomRevisionPrompt(preset.prompt)}
-                      >
-                        {preset.label}
-                      </Button>
-                    ))}
-                    {trimmedCustomPrompt ? (
-                      <Button size="small" type="link" onClick={() => setCustomRevisionPrompt('')}>
-                        清空
-                      </Button>
-                    ) : null}
-                  </Space>
-                  <Input.TextArea
-                    value={customRevisionPrompt}
-                    onChange={(event) => setCustomRevisionPrompt(event.target.value)}
-                    placeholder="例如：删除正文中所有英文夹杂，统一改成自然中文"
-                    autoSize={{ minRows: 2, maxRows: 4 }}
-                    maxLength={500}
-                    showCount
-                  />
-                </div>
-              </>
-            ) : null}
-
-            {dimensionRows.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">维度评分</div>
-                <div className="novel-quality-row-list">
-                  {dimensionRows.map(row => (
-                    <QualityRow key={row.key} status="info" label={row.label} meta={`${row.value} 分`} />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {craftRows.length > 0 || focusedModes.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">工艺指标</div>
-                <div className="novel-quality-row-list">
-                  {craftRows.map(row => (
-                    <QualityRow
-                      key={row.key}
-                      status={row.key.includes('overuse') && Number(row.value) > 60 ? 'warn' : 'info'}
-                      label={row.label}
-                      meta={row.value}
-                    />
-                  ))}
-                  {focusedModes.map((mode: string) => (
-                    <QualityRow key={`mode-${mode}`} status="info" label="建议修订模式" detail={mode} />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {checks.length > 0 && !checks.some((check: any) => typeof check?.ok === 'boolean') ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">预检清单（{checks.length}）</div>
-                <Text type="secondary" className="novel-quality-revision-hint">
-                  这份是旧版报告，没有记录预检通过状态；点「复检当前版本」重新生成即可看到真实缺口。
-                </Text>
-              </section>
-            ) : checks.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title novel-quality-section-title-with-action">
-                  <span>预检清单（{checks.length}）</span>
-                  {onRepairPreflightGaps && checks.some((check: any) => !check?.ok) ? (
-                    <Button
-                      size="small"
-                      loading={repairingPreflight}
-                      disabled={revisionActive}
-                      onClick={async () => {
-                        setRepairingPreflight(true)
-                        try {
-                          await onRepairPreflightGaps()
-                        } finally {
-                          setRepairingPreflight(false)
-                        }
-                      }}
-                    >一键补材料</Button>
-                  ) : null}
-                </div>
-                {checks.some((check: any) => !check?.ok) ? (
-                  <Text type="secondary" className="novel-quality-revision-hint">
-                    预检缺口是章节材料（场景卡/钩子/世界观/角色卡等）不足，修订正文不会消掉它们；点「一键补材料」自动补齐后再复检。
-                  </Text>
-                ) : null}
-                <div className="novel-quality-row-list">
-                  {checks.map((check: any, index: number) => {
-                    const ok = Boolean(check?.ok)
-                    const label = String(check?.label || check?.key || `预检 ${index + 1}`)
-                    const detail = [check?.fix, check?.evidence, check?.detail].filter(Boolean).map(String).join(' · ')
-                    return (
-                      <QualityRow
-                        key={`${check?.key || label}-${index}`}
-                        status={ok ? 'pass' : (String(check?.severity || '') === 'high' ? 'fail' : 'warn')}
-                        label={label}
-                        detail={detail || undefined}
-                        meta={ok ? '已备' : '缺口'}
-                      />
-                    )
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            {warnings.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">上下文缺口（{warnings.length}）</div>
-                <div className="novel-quality-row-list">
-                  {warnings.map((warning: any, index: number) => (
-                    <QualityRow
-                      key={`warn-${index}`}
-                      status="warn"
-                      label={typeof warning === 'string' ? warning : displayValue(warning)}
-                    />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {issues.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">质检问题（{issues.length}）</div>
-                <div className="novel-quality-row-list">
-                  {issues.map((issue: any, index: number) => {
-                    const severity = issueSeverity(issue)
-                    const status = severity === 'critical' || severity === 'high' ? 'fail' : severity === 'low' ? 'info' : 'warn'
-                    const title = issueLabel(issue)
-                    const type = typeof issue === 'object' ? String(issue?.type || issue?.key || '') : ''
-                    const fix = typeof issue === 'object' ? String(issue?.fix || issue?.required_change || issue?.suggestion || '') : ''
-                    const evidence = typeof issue === 'object' ? String(issue?.evidence || '') : ''
-                    const detailParts = [
-                      type ? `类型：${type}` : '',
-                      evidence ? `证据：${evidence}` : '',
-                      fix ? `改法：${fix}` : '',
-                    ].filter(Boolean)
-                    return (
-                      <QualityRow
-                        key={`issue-${index}`}
-                        status={status as any}
-                        label={title}
-                        meta={severity}
-                        detail={detailParts.join('\n') || undefined}
-                      />
-                    )
-                  })}
-                </div>
-              </section>
+            {reportText ? (
+              <pre className="novel-oh-story-review-report">{reportText}</pre>
             ) : (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">质检问题</div>
-                <Text type="secondary" className="novel-quality-revision-empty">最近一次质检没有列出明确问题条目。</Text>
-              </section>
+              <Text type="secondary" className="novel-quality-revision-empty">
+                正在加载审稿全文…
+              </Text>
             )}
-
-            {findings.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">诊断发现（{findings.length}）</div>
-                <div className="novel-quality-row-list">
-                  {findings.map((finding: any, index: number) => {
-                    const severity = String(finding?.severity || 'info')
-                    const status = /S1|critical|high/i.test(severity) ? 'fail' : /S2|medium|warn/i.test(severity) ? 'warn' : 'info'
-                    const label = String(finding?.key || finding?.dimension || `发现 ${index + 1}`)
-                    const detail = [
-                      finding?.evidence ? `证据：${finding.evidence}` : '',
-                      finding?.required_change ? `改法：${finding.required_change}` : '',
-                      finding?.acceptance_test ? `复检：${finding.acceptance_test}` : '',
-                    ].filter(Boolean).join('\n')
-                    return (
-                      <QualityRow
-                        key={`finding-${index}`}
-                        status={status as any}
-                        label={label}
-                        meta={severity}
-                        detail={detail || undefined}
-                      />
-                    )
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            {revisionDirectives.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">修订指令（{revisionDirectives.length}）</div>
-                <div className="novel-quality-row-list">
-                  {revisionDirectives.map((directive, index) => (
-                    <QualityRow
-                      key={`directive-${index}`}
-                      status="warn"
-                      label={`指令 ${index + 1}`}
-                      detail={directive}
-                    />
-                  ))}
-                </div>
-              </section>
-            ) : null}
-
-            {pipeline.length > 0 ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">生成流水线（{pipeline.length}）</div>
-                <div className="novel-quality-row-list">
-                  {pipeline.map((stage: any, index: number) => {
-                    const statusRaw = String(stage?.status || '')
-                    const status = statusRaw === 'success' || statusRaw === 'ok'
-                      ? 'pass'
-                      : statusRaw === 'failed' || statusRaw === 'error'
-                        ? 'fail'
-                        : statusRaw === 'warn'
-                          ? 'warn'
-                          : 'info'
-                    return (
-                      <QualityRow
-                        key={`${stage?.key || stage?.label || index}`}
-                        status={status as any}
-                        label={String(stage?.label || stage?.key || `阶段 ${index + 1}`)}
-                        detail={String(stage?.detail || stage?.message || '') || undefined}
-                        meta={statusRaw || undefined}
-                      />
-                    )
-                  })}
-                </div>
-              </section>
-            ) : null}
-
-            {previousChapter ? (
-              <section className="novel-quality-section">
-                <div className="novel-quality-section-title">前章衔接</div>
-                <div className="novel-quality-row-list">
-                  <QualityRow
-                    status="info"
-                    label={`第${previousChapter.chapter_no || '-'}章《${displayValue(previousChapter.title) || '未命名'}》`}
-                    detail={`章末钩子：${displayValue(previousChapter.ending_hook) || '未记录'}`}
-                  />
-                </div>
-              </section>
-            ) : null}
           </>
         )}
       </div>

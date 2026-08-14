@@ -229,8 +229,6 @@ export function NovelWorkspaceBody(props: NovelWorkspaceBodyProps) {
             onEdit={(kind, item) => openEditor(kind, item)}
             onOpenCreativeCards={() => setCreativeCardsOpen(true)}
             onOpenStoryStateEditor={openStoryStateEditor}
-            onApplyEditorRevision={applyEditorRevision}
-            onRefreshProseQuality={() => refreshActiveProseQuality('manual_refresh')}
             onRollbackVersion={rollbackChapterVersion}
             onOpenVersionDetail={setChapterVersionDetail}
           />

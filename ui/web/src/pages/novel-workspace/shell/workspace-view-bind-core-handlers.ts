@@ -340,6 +340,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     applyEditorRevision,
     ohStoryReview,
     ohStoryDeslop,
+    ohStoryApply,
   } = createRepairTaskHandlers({
     activeChapter,
     apiClient,
@@ -734,6 +735,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     applyEditorRevision,
     ohStoryReview,
     ohStoryDeslop,
+    ohStoryApply,
     extractStyleSampleCandidates,
     fillDefaultStyleSampleBank,
     fillWritingBibleForm,

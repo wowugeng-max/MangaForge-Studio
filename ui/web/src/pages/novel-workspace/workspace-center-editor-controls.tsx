@@ -136,12 +136,9 @@ export function WorkspaceCenterSecondaryActionMenu({
   recommendedBadge,
   diagnosticsLoading,
   generatingSceneCards,
-  editorReportLoading,
   onOpenGenerationDiagnostics,
   onGenerateSceneCards,
   onEditActiveChapter,
-  onOpenQualityCard,
-  onCreateEditorReport,
 }: {
   commandClass: (key?: NovelWritingRecommendedActionKey, extra?: string) => string
   recommendedBadge: (phase: 'prep' | 'write' | 'review' | string) => React.ReactNode
@@ -151,8 +148,8 @@ export function WorkspaceCenterSecondaryActionMenu({
   onOpenGenerationDiagnostics: () => void
   onGenerateSceneCards: () => void
   onEditActiveChapter: () => void
-  onOpenQualityCard: () => void
-  onCreateEditorReport: () => void
+  onOpenQualityCard?: () => void
+  onCreateEditorReport?: () => void
 }) {
   return (
     <div className="novel-editor-action-popover novel-editor-secondary-actions">
@@ -164,14 +161,6 @@ export function WorkspaceCenterSecondaryActionMenu({
         <Button size="small" className={commandClass('diagnostics')} loading={diagnosticsLoading} onClick={onOpenGenerationDiagnostics}>诊断</Button>
         <Button size="small" className={commandClass('scene_cards')} icon={<FileTextOutlined />} loading={generatingSceneCards} onClick={onGenerateSceneCards}>场景卡</Button>
         <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} onClick={onEditActiveChapter} icon={<EditOutlined />}>元数据</Button>
-      </div>
-      <div className="novel-editor-action-group novel-editor-action-group-review">
-        <div className="novel-editor-action-group-heading">
-          <Text className="novel-editor-action-group-label">写后复检</Text>
-          {recommendedBadge('review')}
-        </div>
-        <Button size="small" className={commandClass('quality_card')} onClick={onOpenQualityCard}>交稿质检</Button>
-        <Button size="small" className={commandClass(undefined, 'novel-editor-muted-command')} loading={editorReportLoading} onClick={onCreateEditorReport}>编辑报告</Button>
       </div>
     </div>
   )

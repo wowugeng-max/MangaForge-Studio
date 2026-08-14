@@ -1,9 +1,11 @@
 import type { Express } from 'express'
 import { executeNovelAgent } from '../llm'
-import { createNovelReview, getNovelChapter, updateNovelChapter } from '../novel'
+import { createNovelReview, getNovelChapter, listNovelReviewsByType, updateNovelChapter } from '../novel'
 import { installOhStoryCoreSuite } from '../novel-writing/oh-story-core/install'
+import { latestOhStoryReviewForChapter } from '../novel-writing/oh-story-core/review-match'
 import { runOhStoryCoreAction, type OhStoryCoreAction } from '../novel-writing/oh-story-core/runner'
 import { loadOhStoryCoreSuite } from '../novel-writing/oh-story-core/store'
+import { getStageModelId } from './novel-production/model-policy'
 
 export type OhStoryCoreSuiteView = {
   revision: string
@@ -21,10 +23,27 @@ export type OhStoryCoreRoutesDeps = {
     project: any
     chapter: any
     action: OhStoryCoreAction
+    modelId?: number
   }) => Promise<any>
   executeAgent?: (...args: any[]) => Promise<any>
   saveReview?: (row: Record<string, any>) => Promise<any>
   updateChapterText?: (row: Record<string, any>) => Promise<any>
+  findLatestOhStoryReview?: (input: {
+    workspace: string
+    projectId: number
+    chapterId: number
+  }) => Promise<any | null>
+}
+
+export function readOhStoryCoreAgentResult(result: any): { content: string } {
+  if (result?.error) {
+    throw Object.assign(new Error(String(result.error)), { code: 'OH_STORY_CORE_EMPTY_OUTPUT' })
+  }
+  const content = String(result?.content ?? result?.text ?? '').trim()
+  if (!content) {
+    throw Object.assign(new Error('oh-story core returned empty output'), { code: 'OH_STORY_CORE_EMPTY_OUTPUT' })
+  }
+  return { content }
 }
 
 export async function executeOhStoryCoreAgent(
@@ -36,7 +55,7 @@ export async function executeOhStoryCoreAgent(
   options?: Record<string, any>,
 ) {
   const result = await executeNovelAgent(agentId, project, context, options)
-  return { content: String(result?.content ?? '') }
+  return readOhStoryCoreAgentResult(result)
 }
 
 function skillIds(skills: OhStoryCoreSuiteView['skills']): string[] {
@@ -57,9 +76,14 @@ function resolveDeps(deps: OhStoryCoreRoutesDeps) {
     await installOhStoryCoreSuite(workspace)
     return loadOhStoryCoreSuite(workspace)
   })
+  const findLatestOhStoryReview = deps.findLatestOhStoryReview || (async ({ workspace, projectId, chapterId }) => {
+    const reviews = await listNovelReviewsByType(workspace, projectId, 'oh_story_review')
+    return latestOhStoryReviewForChapter(reviews, chapterId)
+  })
   const runAction = deps.runAction || ((input) => runOhStoryCoreAction({
     ...input,
     executeAgent: deps.executeAgent || executeOhStoryCoreAgent,
+    findLatestOhStoryReview,
     saveReview: deps.saveReview || ((row) => createNovelReview(input.workspace, {
       ...row,
       payload: typeof row.payload === 'string' ? row.payload : JSON.stringify(row.payload ?? {}),
@@ -68,7 +92,7 @@ function resolveDeps(deps: OhStoryCoreRoutesDeps) {
       input.workspace,
       Number(row.chapter_id || row.id),
       { chapter_text: String(row.chapter_text || '') },
-      { versionSource: 'oh_story_deslop' },
+      { versionSource: String(row.source || 'oh_story_deslop') },
     )),
   }))
   return { getWorkspace, getProject, getChapter, loadSuite, installSuite, runAction }
@@ -115,7 +139,9 @@ export function registerOhStoryCoreRoutes(app: Express, deps: OhStoryCoreRoutesD
       if (!chapter) {
         return res.status(404).json({ error: 'chapter not found', code: 'CHAPTER_NOT_FOUND' })
       }
-      const result = await resolved.runAction({ workspace, project, chapter, action })
+      const requestedModelId = Number(req.body?.model_id || 0) || undefined
+      const modelId = getStageModelId(project, action === 'review' ? 'review' : 'revise', requestedModelId)
+      const result = await resolved.runAction({ workspace, project, chapter, action, modelId })
       res.json({ ok: true, ...result })
     } catch (error: any) {
       const code = errorCode(error)
@@ -125,10 +151,20 @@ export function registerOhStoryCoreRoutes(app: Express, deps: OhStoryCoreRoutesD
       if (code === 'CHAPTER_NOT_FOUND') {
         return res.status(404).json({ error: String(error?.message || error), code })
       }
-      res.status(500).json({ error: String(error?.message || error) })
+      if (code === 'OH_STORY_APPLY_NO_REVIEW' || code === 'OH_STORY_APPLY_STALE_REVIEW') {
+        return res.status(409).json({ error: '先对本稿重新审稿', code })
+      }
+      if (code === 'OH_STORY_APPLY_REWROTE_TOO_MUCH') {
+        return res.status(409).json({ error: '这次改动太大，像整章重写。请再试一次', code })
+      }
+      if (code === 'OH_STORY_CORE_EMPTY_OUTPUT' || code === 'OH_STORY_CORE_NOT_PROSE') {
+        return res.status(500).json({ error: '这次没有改出正文', code })
+      }
+      res.status(500).json({ error: String(error?.message || error), ...(code ? { code } : {}) })
     }
   }
 
   app.post('/api/novel/oh-story/core/review', handleAction('review'))
   app.post('/api/novel/oh-story/core/deslop', handleAction('deslop'))
+  app.post('/api/novel/oh-story/core/apply', handleAction('apply'))
 }

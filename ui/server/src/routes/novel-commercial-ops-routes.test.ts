@@ -145,6 +145,7 @@ describe('commercial ops utility route registration', () => {
       'POST /api/novel/oh-story/core/install',
       'POST /api/novel/oh-story/core/review',
       'POST /api/novel/oh-story/core/deslop',
+      'POST /api/novel/oh-story/core/apply',
     ])
     expect(new Set(registrations).size).toBe(registrations.length)
     expect(registrations[ohStoryRoutes.length]).toBe('GET /api/novel/projects/:id/ending-reserve')

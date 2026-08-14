@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { registerOhStoryCoreRoutes } from './novel-oh-story-core-routes'
+import { readOhStoryCoreAgentResult, registerOhStoryCoreRoutes } from './novel-oh-story-core-routes'
 
 function routeHarness(deps: Record<string, any> = {}) {
   const handlers = new Map<string, any>()
@@ -124,6 +124,21 @@ describe('oh-story core routes', () => {
     expect(res.body.code).toBe('OH_STORY_CORE_NOT_INSTALLED')
   })
 
+  test('POST review forwards model_id so the text backend is used', async () => {
+    const calls: any[] = []
+    const { handlers } = routeHarness({
+      runAction: async (input: any) => {
+        calls.push(input)
+        return { changed: false, review_id: 9 }
+      },
+    })
+    const res = await callRoute(handlers.get('POST /api/novel/oh-story/core/review'), {
+      body: { project_id: 3, chapter_id: 61, model_id: 281 },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(calls[0].modelId).toBe(281)
+  })
+
   test('POST deslop calls runAction with action deslop', async () => {
     const calls: any[] = []
     const { handlers } = routeHarness({
@@ -140,6 +155,59 @@ describe('oh-story core routes', () => {
     expect(res.body.changed).toBe(true)
   })
 
+  test('POST apply calls runAction with action apply', async () => {
+    const calls: any[] = []
+    const { handlers } = routeHarness({
+      runAction: async (input: any) => {
+        calls.push(input)
+        return { changed: true, chapter_text: '楚弦把烟按进了烟灰缸。' }
+      },
+    })
+    const res = await callRoute(handlers.get('POST /api/novel/oh-story/core/apply'), {
+      body: { project_id: 3, chapter_id: 61, model_id: 281 },
+    })
+    expect(calls[0].action).toBe('apply')
+    expect(calls[0].modelId).toBe(281)
+    expect(res.statusCode).toBe(200)
+    expect(res.body.changed).toBe(true)
+  })
+
+  test('POST apply maps missing or stale review to 409', async () => {
+    for (const code of ['OH_STORY_APPLY_NO_REVIEW', 'OH_STORY_APPLY_STALE_REVIEW']) {
+      const { handlers } = routeHarness({
+        runAction: async () => {
+          throw Object.assign(new Error(code), { code })
+        },
+      })
+      const res = await callRoute(handlers.get('POST /api/novel/oh-story/core/apply'), chapterBody)
+      expect(res.statusCode).toBe(409)
+      expect(res.body.code).toBe(code)
+      expect(res.body.error).toBe('先对本稿重新审稿')
+    }
+  })
+
+  test('POST apply maps a full-chapter rewrite to 409', async () => {
+    const { handlers } = routeHarness({
+      runAction: async () => {
+        throw Object.assign(new Error('这次改动太大，像整章重写。请再试一次'), {
+          code: 'OH_STORY_APPLY_REWROTE_TOO_MUCH',
+        })
+      },
+    })
+    const res = await callRoute(handlers.get('POST /api/novel/oh-story/core/apply'), chapterBody)
+    expect(res.statusCode).toBe(409)
+    expect(res.body.code).toBe('OH_STORY_APPLY_REWROTE_TOO_MUCH')
+    expect(res.body.error).toBe('这次改动太大，像整章重写。请再试一次')
+  })
+
+  test('readOhStoryCoreAgentResult throws when the provider returned an error or empty body', () => {
+    expect(() => readOhStoryCoreAgentResult({ content: '', error: 'Provider request failed 403' })).toThrow(/403/)
+    expect(() => readOhStoryCoreAgentResult({ content: '' })).toThrow(/empty/i)
+    expect(readOhStoryCoreAgentResult({ content: '他点了根烟，没说话。' })).toEqual({
+      content: '他点了根烟，没说话。',
+    })
+  })
+
   test('does not register analyze, scan, or cover routes', () => {
     const { handlers } = routeHarness()
     const paths = [...handlers.keys()]
@@ -148,6 +216,7 @@ describe('oh-story core routes', () => {
       'POST /api/novel/oh-story/core/install',
       'POST /api/novel/oh-story/core/review',
       'POST /api/novel/oh-story/core/deslop',
+      'POST /api/novel/oh-story/core/apply',
     ])
     expect(paths.join('\n')).not.toMatch(/analyze|scan|cover/)
   })

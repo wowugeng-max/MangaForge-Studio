@@ -14,6 +14,11 @@ import {
 import {
   chapterHasProse,
 } from '../utils'
+import {
+  latestOhStoryReviewForChapter,
+  ohStoryReviewMatchesChapterText,
+  parseOhStoryReviewPayload,
+} from '../oh-story-review-match'
 
 export type RepairTaskHandlerDeps = {
   activeChapter: any
@@ -650,22 +655,39 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
 
   const ohStoryCoreErrorCode = (error: any) => String(error?.response?.data?.code || error?.code || '')
 
-  const runOhStoryCoreAction = async (action: 'review' | 'deslop') => {
+  const runOhStoryCoreAction = async (action: 'review' | 'deslop' | 'apply') => {
     const chapterId = Number(activeChapter?.id || 0)
     if (!chapterId) return message.warning('请先选择章节')
     if (!projectId) return message.warning('请先选择项目')
+    if (!selectedModelId) return message.warning('请先选择模型')
     if (!await flushPendingSave()) return
-    const label = action === 'review' ? 'oh-story 审稿' : 'oh-story 去AI'
+    if (action === 'apply') {
+      const latest = latestOhStoryReviewForChapter(
+        (reviews || []).filter((item: any) => item.review_type === 'oh_story_review'),
+        Number(activeChapter?.id || 0),
+      )
+      if (!latest) {
+        message.warning('先对本稿重新审稿')
+        return
+      }
+      const hash = String(parseOhStoryReviewPayload(latest).chapter_text_hash || '')
+      if (hash && !ohStoryReviewMatchesChapterText(latest, String(activeChapter?.chapter_text || ''))) {
+        message.warning('先对本稿重新审稿')
+        return
+      }
+    }
+    const label = action === 'review' ? 'oh-story 审稿' : action === 'deslop' ? 'oh-story 去AI' : '按建议改稿'
     setProseQualityLoading(true)
     try {
       const postAction = () => apiClient.post(`/novel/oh-story/core/${action}`, {
         project_id: projectId,
         chapter_id: chapterId,
+        model_id: selectedModelId,
       })
       try {
         await postAction()
       } catch (error: any) {
-        if (ohStoryCoreErrorCode(error) !== 'OH_STORY_CORE_NOT_INSTALLED') throw error
+        if (action === 'apply' || ohStoryCoreErrorCode(error) !== 'OH_STORY_CORE_NOT_INSTALLED') throw error
         message.info('正在安装 oh-story 核心套件…')
         await apiClient.post('/novel/oh-story/core/install')
         await postAction()
@@ -673,8 +695,27 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
       await loadProjectModules()
       message.success(`${label}完成`)
     } catch (error: any) {
-      if (ohStoryCoreErrorCode(error) === 'OH_STORY_CORE_NOT_INSTALLED') {
+      const code = ohStoryCoreErrorCode(error)
+      if (code === 'OH_STORY_APPLY_NO_REVIEW' || code === 'OH_STORY_APPLY_STALE_REVIEW') {
+        message.warning('先对本稿重新审稿')
+        return
+      }
+      if (code === 'OH_STORY_APPLY_REWROTE_TOO_MUCH') {
+        message.warning('这次改动太大，像整章重写。请再试一次')
+        return
+      }
+      if (code === 'OH_STORY_CORE_EMPTY_OUTPUT' || code === 'OH_STORY_CORE_NOT_PROSE') {
+        message.error('这次没有改出正文')
+        return
+      }
+      if (code === 'OH_STORY_CORE_NOT_INSTALLED') {
         message.error('先安装 oh-story 核心套件')
+        return
+      }
+      if (Number(error?.response?.status) === 404 && !code) {
+        message.error(action === 'apply'
+          ? '当前写作服务还没有按建议改稿接口，请重启 API 后再试'
+          : `${label}接口不存在，请重启 API 后再试`)
         return
       }
       message.error(error?.response?.data?.error || error?.message || `${label}失败`)
@@ -685,6 +726,7 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
 
   const ohStoryReview = () => runOhStoryCoreAction('review')
   const ohStoryDeslop = () => runOhStoryCoreAction('deslop')
+  const ohStoryApply = () => runOhStoryCoreAction('apply')
 
   return {
     locateRepairTaskChapter,
@@ -704,5 +746,6 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     applyEditorRevision,
     ohStoryReview,
     ohStoryDeslop,
+    ohStoryApply,
   }
 }

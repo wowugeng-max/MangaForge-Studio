@@ -591,6 +591,7 @@ export function useNovelWorkspaceBaseModel() {
   }, [projectId, runRecords.length, reviews.length, sortedChapters.length])
 
   const proseQualityReports = useMemo(() => filterReviewsByType(reviews, 'prose_quality'), [reviews])
+  const ohStoryReviews = useMemo(() => filterReviewsByType(reviews, 'oh_story_review'), [reviews])
   const editorReports = useMemo(() => filterReviewsByType(reviews, 'editor_report'), [reviews])
   const editorRevisionReports = useMemo(() => filterReviewsByType(reviews, 'editor_revision'), [reviews])
   const bookReviews = useMemo(() => filterReviewsByType(reviews, 'book_review'), [reviews])
@@ -1137,6 +1138,7 @@ export function useNovelWorkspaceBaseModel() {
     proseProgress,
     proseQualityLoading,
     proseQualityReports,
+    ohStoryReviews,
     qualityBenchmarkOpen,
     recentFatigueRollingPlanIntent,
     referenceConfigOpen,

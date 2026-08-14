@@ -87,6 +87,13 @@ function storySynced(input: ChapterWorkflowInput) {
   return input.storyStateSynced === true
 }
 
+function remainingClosedLoopPrimary(input: ChapterWorkflowInput): ChapterWorkflowAction {
+  if (!storySynced(input)) {
+    return { key: 'sync_story_state', label: '同步故事状态', kind: 'primary' }
+  }
+  return { key: 'accept_chapter_and_continue', label: '写下一章', kind: 'primary' }
+}
+
 /** Fact-based step completion — not a rigid linear cascade. */
 export function buildWorkflowSteps(input: ChapterWorkflowInput = {}, phase?: ChapterWorkflowPhase) {
   const resolved = phase || resolveChapterWorkflowPhase(input)
@@ -196,9 +203,9 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
     return {
       ...base,
       reasonText: synced
-        ? '正文已具备，故事状态已同步。可继续复检提高正文质量。'
-        : '正文已具备，但还没完成复检。先复检，再决定修订或同步状态。',
-      primaryAction: { key: 'refresh_current_quality', label: '复检', kind: 'primary' },
+        ? '正文已具备，故事状态已同步。质检修订请用下方 oh-story。'
+        : '正文已具备。先同步故事状态，质检修订请用下方 oh-story。',
+      primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'generate', label: '重写', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
@@ -211,16 +218,12 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
     return {
       ...base,
       reasonText: storySynced(input)
-        ? '复检发现问题。故事状态已同步，可按报告修订继续提高正文质量。'
-        : '复检发现问题。按报告修订后再复检，避免带着已知问题进入下一章。',
-      primaryAction: {
-        key: input.revisionAvailable ? 'apply_editor_revision' : 'create_editor_report',
-        label: input.revisionAvailable ? '一键修订' : '生成修订报告',
-        kind: 'primary',
-      },
+        ? '旧质检仍标了待修订。改稿请用下方 oh-story，或进入下一章。'
+        : '旧质检仍标了待修订。先同步故事状态，改稿请用下方 oh-story。',
+      primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'view_quality', label: '查看问题', kind: 'default' },
-        { key: 'refresh_current_quality', label: '再次复检', kind: 'ghost' },
+        { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
       panelToOpen: 'quality',
     }

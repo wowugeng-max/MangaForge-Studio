@@ -4350,9 +4350,22 @@
   padding: 8px 12px 12px;
   display: grid;
   gap: 10px;
-  max-height: min(52vh, 460px);
+  max-height: min(68vh, 640px);
   overflow: auto;
   overscroll-behavior: contain;
+}
+.novel-oh-story-review-report {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #eadfce;
+  border-radius: 8px;
+  background: #fbf7f0;
+  color: #3d3428;
+  font-size: 12.5px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 .novel-quality-revision-meta {
   display: grid;
