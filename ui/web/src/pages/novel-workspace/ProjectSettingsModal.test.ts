@@ -16,6 +16,7 @@ import {
   isStoryStateMaxTokensValid,
   normalizeProjectEditorRevisionTimeout,
   normalizeProjectStoryStateMaxTokens,
+  writingSkillInstallErrorMessage,
 } from './ProjectSettingsModal'
 
 type PanelDependencyList = readonly unknown[] | undefined
@@ -215,6 +216,18 @@ describe('project settings editor revision timeout', () => {
     expect(() => buildEditorRevisionConfigPayload(420, 999)).toThrow('invalid story state max tokens')
   })
 
+  test('explains writing-skill install failures instead of showing the raw error code', () => {
+    expect(writingSkillInstallErrorMessage({
+      response: { data: { error_code: 'SKILL_MD_MISSING', error: 'Repository root has no SKILL.md' } },
+    })).toContain('仓库里没有可用的 SKILL.md')
+    expect(writingSkillInstallErrorMessage({
+      response: { data: { error_code: 'SKILL_MD_MISSING' } },
+    })).toContain('最多四层子目录')
+    expect(writingSkillInstallErrorMessage({
+      response: { data: { error_code: 'DOWNLOAD_FAILED', error: 'Archive download failed: 404' } },
+    })).toContain('无法下载该 GitHub 仓库')
+  })
+
   test('wires project settings into the top-bar menu and dedicated endpoints', () => {
     const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
     const topbar = readFileSync(join(import.meta.dir, 'shell/workspace-topbar.tsx'), 'utf8')
@@ -231,12 +244,34 @@ describe('project settings editor revision timeout', () => {
     expect(modal).toContain('> 64_000')
     expect(modal).toContain('/writing-skills-config')
     expect(modal).toContain('去 AI 味写作 skill')
-    expect(modal).toContain('WRITING_SKILL_CATALOG')
+    expect(modal).toContain('BUILTIN_WRITING_SKILL_CATALOG')
     expect(modal).toContain('skill.label')
     expect(modal).toContain('fiction_humanizer_mode')
     expect(modal).toContain('精修')
     expect(modal).toContain('重写')
     expect(modal).toContain('onWritingSkillsSaved?.(')
+    expect(modal).toContain('/writing-skills/catalog')
+    expect(modal).toContain('normalizeWritingSkillCatalog')
+    expect(modal).toContain('filterWritingSkillCatalog')
+    expect(modal).toContain('filteredWritingSkills.map(skill =>')
+    expect(modal).toContain('aria-label="过滤写作 skill"')
+    expect(modal).toContain('aria-label="写作 skill 列表"')
+    expect(modal).toContain('overflowY')
+    expect(modal).toContain('skill.supports_mode')
+    expect(modal).toContain('skill.builtin')
+    expect(modal).toContain('skill.revision.slice(0, 7)')
+    expect(modal).toContain('Popconfirm')
+    expect(modal).toContain('卸载')
+    expect(modal).toContain('从 GitHub 安装')
+    expect(modal).toContain('/novel/writing-skills/install')
+    expect(modal).toContain('/novel/writing-skills/${')
+    expect(modal).toContain('writingSkillInstallErrorMessage')
+    expect(modal).toContain('仓库里没有可用的 SKILL.md')
+    expect(modal).toContain('catalogWriteSeq')
+    expect(modal).toContain('onWritingSkillsCatalogChange')
+    expect(modal).toContain('catalogFresh && catalogResponse != null')
+    expect(modal).toContain('disabled={loading || installing}')
+    expect(topbar).toContain('onWritingSkillsCatalogChange={setWritingSkillsCatalog}')
   })
 
   test('adds a project-level writing skill model select saved through the same PUT', () => {

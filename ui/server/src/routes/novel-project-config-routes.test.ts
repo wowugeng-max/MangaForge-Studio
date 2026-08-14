@@ -410,4 +410,47 @@ describe('writing skills project config routes', () => {
     expect(absent.body.config.model_id).toBe(317)
     expect((stored?.reference_config as any)?.writing_skills?.model_id).toBe(317)
   })
+
+  test('writing-skills-config includes installed packs with default off and persists their toggles', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const { mkdir, writeFile } = await import('node:fs/promises')
+    const packDir = join(workspace, '.mangaforge', 'writing-skill-packs', 'my-style-pack')
+    await mkdir(packDir, { recursive: true })
+    await writeFile(join(packDir, 'SKILL.md'), '---\nname: 我的文风包\n---\n# My Style')
+    await writeFile(join(packDir, 'pack.json'), JSON.stringify({
+      id: 'my-style-pack',
+      source_url: 'https://github.com/acme/My-Style-Pack',
+      owner: 'acme',
+      repo: 'My-Style-Pack',
+      revision: 'a'.repeat(40),
+      installed_at: '2026-08-14T00:00:00.000Z',
+      name: '我的文风包',
+      description: '',
+    }))
+    const { invalidateInstalledWritingSkillPackCache } = await import('../novel-writing/writing-skills/installed-store')
+    invalidateInstalledWritingSkillPackCache()
+
+    const project = await createNovelProject(workspace, { title: 'installed-skills', reference_config: {} })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+
+    const before = await callRoute(
+      handlers.get('GET /api/novel/projects/:id/writing-skills-config'),
+      { params: { id: String(project.id) } },
+    )
+    expect(before.body.config.enabled['my-style-pack']).toBe(false)
+
+    const saved = await callRoute(
+      handlers.get('PUT /api/novel/projects/:id/writing-skills-config'),
+      { params: { id: String(project.id) }, body: { config: { enabled: { 'my-style-pack': true } } } },
+    )
+    expect(saved.body.config.enabled['my-style-pack']).toBe(true)
+
+    const after = await callRoute(
+      handlers.get('GET /api/novel/projects/:id/writing-skills-config'),
+      { params: { id: String(project.id) } },
+    )
+    expect(after.body.config.enabled['my-style-pack']).toBe(true)
+  })
 })

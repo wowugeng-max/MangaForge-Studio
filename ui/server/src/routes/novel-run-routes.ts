@@ -17,6 +17,7 @@ import {
   updateNovelRunTasksStatus,
 } from '../novel'
 import { parseJsonLikePayload } from './novel-route-utils'
+import { getInstalledWritingSkillNameMap } from '../novel-writing/writing-skills'
 import { buildPublicEditorRevisionRun } from './novel-editor/revision-run-view'
 import { buildPublicRevisionReview } from './novel-editor/revision-review-view'
 import {
@@ -129,13 +130,17 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
         if (!summaries.some(run => run.run_type === 'editor_revision')) return res.json(summaries)
         const fullRuns = await listNovelRuns(workspace, projectId)
         const fullById = new Map(fullRuns.map(run => [run.id, run]))
+        const installedSkillNames = await getInstalledWritingSkillNameMap(workspace)
         return res.json(summaries.map(run => run.run_type === 'editor_revision'
-          ? buildPublicEditorRevisionRun(fullById.get(run.id) || run as any)
+          ? buildPublicEditorRevisionRun(fullById.get(run.id) || run as any, { installedSkillNames })
           : run))
       }
       const runs = await listNovelRuns(workspace, projectId)
+      const installedSkillNames = runs.some(run => run.run_type === 'editor_revision')
+        ? await getInstalledWritingSkillNameMap(workspace)
+        : {}
       return res.json(runs.map(run => run.run_type === 'editor_revision'
-        ? buildPublicEditorRevisionRun(run)
+        ? buildPublicEditorRevisionRun(run, { installedSkillNames })
         : run))
     } catch (error) {
       res.status(500).json({ error: String(error) })
@@ -146,9 +151,14 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
     try {
       const projectId = requireProjectId(req, res)
       if (projectId === null) return
-      const run = await getNovelRun(ctx.getWorkspace(), Number(req.params.id), projectId)
+      const workspace = ctx.getWorkspace()
+      const run = await getNovelRun(workspace, Number(req.params.id), projectId)
       if (!run) return res.status(404).json({ error: 'run not found' })
-      res.json(run.run_type === 'editor_revision' ? buildPublicEditorRevisionRun(run) : run)
+      res.json(run.run_type === 'editor_revision'
+        ? buildPublicEditorRevisionRun(run, {
+            installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+          })
+        : run)
     } catch (error) {
       res.status(500).json({ error: String(error) })
     }
@@ -191,9 +201,12 @@ export function registerNovelRunRoutes(app: Express, ctx: RunRoutesContext) {
           ? { ...project.reference_config.run_queue_worker, status: 'stale', phase: '后端进程已重启，可点击恢复 worker' }
           : project.reference_config?.run_queue_worker)
         || { status: 'idle' }
+      const installedSkillNames = runs.some(run => run.run_type === 'editor_revision')
+        ? await getInstalledWritingSkillNameMap(activeWorkspace)
+        : {}
       const normalizeRun = (run: any) => {
         if (run.run_type === 'editor_revision') {
-          const publicRun = buildPublicEditorRevisionRun(run)
+          const publicRun = buildPublicEditorRevisionRun(run, { installedSkillNames })
           return {
             ...publicRun,
             type_label: '单章修订',

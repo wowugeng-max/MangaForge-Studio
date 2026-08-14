@@ -4,6 +4,7 @@ import {
   ensureWebnovelParagraphBreaks,
   normalizeHumanizePostprocessForStorage,
   normalizeProseForStorage,
+  normalizeWritingSkillHumanizeForStorage,
   resolveChapterProseVersionSource,
 } from './chapter-prose-storage-patch'
 import { CHAPTER_GENERATION_STAGE_RECEIPT_AUTHORITY } from '../novel-writing-service/generation-source/types'
@@ -799,5 +800,15 @@ describe('chapter prose storage patch builders', () => {
     expect(patch.raw_payload.chapter_progress_ledger.version).toBe('chapter_progress_ledger_v1')
     expect(patch.raw_payload.chapter_progress_ledger.delivered_beats.length).toBeGreaterThan(0)
     expect(patch.raw_payload.chapterProgressLedger).toEqual(patch.raw_payload.chapter_progress_ledger)
+  })
+
+  test('keeps installed writing-skill ids as bounded strings in the persisted report', () => {
+    const normalized = normalizeWritingSkillHumanizeForStorage({
+      version: 'writing_skill_humanize_v2',
+      enabled_ids: ['fiction-humanizer-zh', 'my-style-pack'],
+      passes: [{ id: 'my-style-pack', accepted: true, before_chars: 100, after_chars: 120, chunk_count: 1 }],
+    })
+    expect(normalized?.enabled_ids).toEqual(['fiction-humanizer-zh', 'my-style-pack'])
+    expect(normalized?.passes?.[0]).toMatchObject({ id: 'my-style-pack', accepted: true })
   })
 })

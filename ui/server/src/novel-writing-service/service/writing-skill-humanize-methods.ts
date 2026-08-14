@@ -2,8 +2,14 @@ import {
   acceptWritingSkillCandidate,
   chunkWritingSkillChapter,
   compileWritingSkillPassPrompt,
+  isBuiltinWritingSkillId,
+  listInstalledWritingSkillPacks,
+  loadInstalledWritingSkillPrompt,
   pickWritingSkillsOverride,
+  resolveWritingSkillStageLabel,
   resolveWritingSkillsEnabled,
+  type InstalledWritingSkillPack,
+  type InstalledWritingSkillPrompt,
   type WritingSkillHumanizeReport,
   type WritingSkillId,
   type WritingSkillPassReport,
@@ -85,6 +91,7 @@ export function createWritingSkillHumanizeMethods(deps: {
     wordTarget: any
     modelId?: number
     skillModelId?: number
+    installedPrompt?: InstalledWritingSkillPrompt
     options: any
   }): Promise<string> => {
     const {
@@ -111,6 +118,7 @@ export function createWritingSkillHumanizeMethods(deps: {
       project,
       contextPackage,
       chunk,
+      installed: input.installedPrompt,
     })
     const result = await executeChapterStage({
       execution: options.chapterTaskExecution,
@@ -151,9 +159,16 @@ export function createWritingSkillHumanizeMethods(deps: {
     options: any = {},
   ) => {
     const source = String(sourceText || '')
+    let installedPacks: InstalledWritingSkillPack[] = []
+    try {
+      installedPacks = await listInstalledWritingSkillPacks(activeWorkspace)
+    } catch {
+      installedPacks = []
+    }
     const resolved = resolveWritingSkillsEnabled({
       project,
       override: pickWritingSkillsOverride(options),
+      installed: installedPacks,
     })
     if (!resolved.ids.length) {
       return {
@@ -176,7 +191,38 @@ export function createWritingSkillHumanizeMethods(deps: {
 
     for (const [passIndex, id] of resolved.ids.entries()) {
       throwIfAborted(options)
-      await options.onSkillProgress?.(id, { index: passIndex + 1, total: resolved.ids.length })
+      let installedPrompt: InstalledWritingSkillPrompt | undefined
+      if (!isBuiltinWritingSkillId(id)) {
+        const pack = installedPacks.find(item => item.id === id)
+        let loadError: unknown
+        try {
+          installedPrompt = pack ? loadInstalledWritingSkillPrompt(pack) : undefined
+        } catch (error) {
+          loadError = error
+        }
+        // Unreadable after resolve admitted it (uninstalled mid-run, bounds
+        // exceeded, missing files): record an honest failed pass and continue.
+        if (!installedPrompt) {
+          const message = String((loadError as any)?.message || loadError || '')
+          const beforeChars = countProseChars(currentText)
+          passes.push({
+            id,
+            accepted: false,
+            reason: message.startsWith('writing_skill_pack_bounds_exceeded')
+              ? redactAndBoundCredentialText(message, 240)
+              : 'writing_skill_pack_unreadable',
+            before_chars: beforeChars,
+            after_chars: beforeChars,
+            chunk_count: 0,
+          })
+          continue
+        }
+      }
+      await options.onSkillProgress?.(id, {
+        index: passIndex + 1,
+        total: resolved.ids.length,
+        label: resolveWritingSkillStageLabel(id, installedPacks),
+      })
       const passInput = currentText
       const beforeChars = countProseChars(passInput)
       const chunks = chunkWritingSkillChapter(passInput)
@@ -193,6 +239,7 @@ export function createWritingSkillHumanizeMethods(deps: {
             wordTarget,
             modelId,
             skillModelId: resolved.model_id,
+            installedPrompt,
             options,
           })
           if (!chunkText) throw new Error('writing_skill_empty_candidate')

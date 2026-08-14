@@ -26,6 +26,7 @@ import { registerNovelSettingRoutes } from './novel-setting-routes'
 import { getQualityGate, getStoryState } from './novel-route-utils'
 import { registerNovelTruthRoutes } from './novel-truth-routes'
 import { createNovelWritingService } from './novel-writing-service'
+import { registerNovelWritingSkillRoutes } from './novel-writing-skill-routes'
 import type { McpRuntime } from '../mcp/runtime'
 import { ChapterSourceLeaseRegistry } from '../novel-writing-service/generation-source/chapter-source-lease'
 import { createChapterAuthorityFence } from '../novel-writing-service/generation-source/create-generation-source'
@@ -115,6 +116,8 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     mcpRuntime: options.mcpRuntime,
     chapterSourceLeases,
   })
+
+  registerNovelWritingSkillRoutes(app, { getWorkspace })
 
   registerNovelReferenceRoutes(app, {
     getWorkspace,

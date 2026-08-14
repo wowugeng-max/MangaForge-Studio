@@ -13,10 +13,12 @@ import type {
   WorkspaceArea,
 } from './shell/workspace-types'
 import {
+  BUILTIN_WRITING_SKILL_CATALOG,
   DEFAULT_FICTION_HUMANIZER_MODE,
   DEFAULT_WRITING_SKILLS_ENABLED,
   writingSkillsPayload,
   type FictionHumanizerMode,
+  type WritingSkillCatalogItem,
   type WritingSkillEnabledMap,
 } from './writingSkillsModel'
 import {
@@ -76,6 +78,7 @@ export function useNovelProjectWorkspaceUiState() {
   const [chapterWordTargetMode, setChapterWordTargetMode] = useState<ChapterWordTargetMode>('standard')
   const [chapterTargetWordCount, setChapterTargetWordCount] = useState(3000)
   const [writingSkillsEnabled, setWritingSkillsEnabled] = useState<WritingSkillEnabledMap>(DEFAULT_WRITING_SKILLS_ENABLED)
+  const [writingSkillsCatalog, setWritingSkillsCatalog] = useState<WritingSkillCatalogItem[]>(BUILTIN_WRITING_SKILL_CATALOG)
   const [fictionHumanizerMode, setFictionHumanizerMode] = useState<FictionHumanizerMode>(DEFAULT_FICTION_HUMANIZER_MODE)
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<ChapterOwnedData | null>(null)
   const diagnosticsRequestRef = useRef(0)
@@ -246,6 +249,7 @@ export function useNovelProjectWorkspaceUiState() {
     chapterWordTargetMode, setChapterWordTargetMode,
     chapterTargetWordCount, setChapterTargetWordCount,
     writingSkillsEnabled, setWritingSkillsEnabled,
+    writingSkillsCatalog, setWritingSkillsCatalog,
     fictionHumanizerMode, setFictionHumanizerMode,
     activeChapterDiagnostics, setActiveChapterDiagnostics,
     diagnosticsRequestRef,

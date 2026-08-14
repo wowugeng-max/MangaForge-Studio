@@ -128,6 +128,7 @@ export function WorkspaceCenter({
   onGenerationTargetWordCountChange,
   writingSkillsEnabled,
   onWritingSkillsEnabledChange,
+  writingSkillsCatalog,
   fictionHumanizerMode,
   onFictionHumanizerModeChange,
   writingRecommendation,
@@ -206,6 +207,7 @@ export function WorkspaceCenter({
   onGenerationTargetWordCountChange?: (count: number) => void
   writingSkillsEnabled?: import('./writingSkillsModel').WritingSkillEnabledMap
   onWritingSkillsEnabledChange?: (enabled: import('./writingSkillsModel').WritingSkillEnabledMap) => void
+  writingSkillsCatalog?: import('./writingSkillsModel').WritingSkillCatalogItem[]
   fictionHumanizerMode?: import('./writingSkillsModel').FictionHumanizerMode
   onFictionHumanizerModeChange?: (mode: import('./writingSkillsModel').FictionHumanizerMode) => void
   writingRecommendation?: NovelWritingRecommendation
@@ -418,6 +420,7 @@ export function WorkspaceCenter({
         onWritingSkillsEnabledChange={onWritingSkillsEnabledChange}
         fictionHumanizerMode={fictionHumanizerMode}
         onFictionHumanizerModeChange={onFictionHumanizerModeChange}
+        writingSkillsCatalog={writingSkillsCatalog}
       />
     </div>
   )

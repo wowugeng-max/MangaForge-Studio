@@ -3,6 +3,16 @@ import { compileWritingSkillPassPrompt } from './compile-pass-prompt'
 
 const SOURCE = '林序把门带上，沿着走廊继续往前。'
 
+const INSTALLED_PROMPT = {
+  id: 'my-style-pack',
+  name: '我的文风包',
+  skill_markdown: '# My Style\n只改语气，不改剧情。',
+  references: [
+    { file: 'a.md', text: '参考甲' },
+    { file: 'b.md', text: '参考乙' },
+  ],
+}
+
 describe('compileWritingSkillPassPrompt', () => {
   test('polish prompt includes full skill, three fixed refs, and no 轻改 default', () => {
     const prompt = compileWritingSkillPassPrompt({
@@ -69,5 +79,29 @@ describe('compileWritingSkillPassPrompt', () => {
     })
     expect(prompt).toContain('这是第 2/2 段')
     expect(prompt).toContain('前后文已锁定')
+  })
+
+  test('installed skills compile through the generic path with full SKILL.md and all references', () => {
+    const prompt = compileWritingSkillPassPrompt({
+      skillId: 'my-style-pack',
+      sourceText: SOURCE,
+      installed: INSTALLED_PROMPT,
+    })
+    expect(prompt).toContain('我的文风包')
+    expect(prompt).toContain('# My Style')
+    expect(prompt).toContain('【参考 · a.md】')
+    expect(prompt).toContain('【参考 · b.md】')
+    expect(prompt.indexOf('【参考 · a.md】')).toBeLessThan(prompt.indexOf('【参考 · b.md】'))
+    expect(prompt).toContain('只输出改写后正文')
+    expect(prompt).toContain(SOURCE)
+    expect(prompt).not.toContain('档位：')
+    expect(prompt).not.toContain('【小说安全套 · humanizer-zh】')
+  })
+
+  test('installed skills without a loaded payload throw instead of silently compiling', () => {
+    expect(() => compileWritingSkillPassPrompt({
+      skillId: 'my-style-pack',
+      sourceText: SOURCE,
+    })).toThrow('missing installed skill payload')
   })
 })

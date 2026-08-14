@@ -17,7 +17,7 @@ import { revisionTextHash } from './revision-candidate-admission'
 import {
   WRITING_SKILL_IDS,
   WRITING_SKILL_STAGE_LABEL,
-  type WritingSkillId,
+  type BuiltinWritingSkillId,
 } from '../../novel-writing/writing-skills'
 
 const EDITOR_REVISION_STATUSES = [
@@ -455,13 +455,24 @@ function safeChapterGenerationSource(value: unknown): PublicEditorRevisionRun['c
   }
 }
 
-const MAX_SKILL_PROGRESS_COUNT = 5
+const INSTALLED_SKILL_PROGRESS_ID = /^[a-z0-9][a-z0-9-]{0,63}$/
+const MAX_SKILL_PROGRESS_COUNT = 16
+const MAX_SKILL_PROGRESS_LABEL = 60
 
-function safeSkillProgress(value: unknown): NonNullable<PublicEditorRevisionRun['skill_progress']> | null {
+export type EditorRevisionRunViewOptions = {
+  installedSkillNames?: Record<string, string>
+}
+
+function safeSkillProgress(
+  value: unknown,
+  options?: EditorRevisionRunViewOptions,
+): NonNullable<PublicEditorRevisionRun['skill_progress']> | null {
   const progress = parseJsonObject(value)
   if (!progress) return null
   const skillId = progress.skill_id
-  if (typeof skillId !== 'string' || !(WRITING_SKILL_IDS as readonly string[]).includes(skillId)) return null
+  if (typeof skillId !== 'string') return null
+  const builtin = (WRITING_SKILL_IDS as readonly string[]).includes(skillId)
+  if (!builtin && !INSTALLED_SKILL_PROGRESS_ID.test(skillId)) return null
   const index = finiteInteger(progress.index)
   const total = finiteInteger(progress.total)
   if (index === null || total === null
@@ -470,11 +481,16 @@ function safeSkillProgress(value: unknown): NonNullable<PublicEditorRevisionRun[
     || index > total) return null
   const startedAt = safeString(progress.started_at, 80)
   const startedDate = new Date(startedAt)
+  // The stored label is never trusted: builtins use the fixed stage label and
+  // installed ids use the server-side pack name (bounded id when unknown).
+  const label = builtin
+    ? WRITING_SKILL_STAGE_LABEL[skillId as BuiltinWritingSkillId]
+    : safeString(options?.installedSkillNames?.[skillId] || skillId, MAX_SKILL_PROGRESS_LABEL)
   return {
     skill_id: skillId,
     index,
     total,
-    label: WRITING_SKILL_STAGE_LABEL[skillId as WritingSkillId],
+    label,
     ...(startedAt && Number.isFinite(startedDate.getTime()) ? { started_at: startedDate.toISOString() } : {}),
   }
 }
@@ -537,7 +553,10 @@ function malformedView(run: NovelRunRecord): PublicEditorRevisionRun {
   }
 }
 
-export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorRevisionRun {
+export function buildPublicEditorRevisionRun(
+  run: NovelRunRecord,
+  options?: EditorRevisionRunViewOptions,
+): PublicEditorRevisionRun {
   const status = parseRunStatus(run.status)
   const input = parseRunInput(run.input_ref)
   if (run.run_type !== 'editor_revision'
@@ -560,7 +579,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     phase,
     safePhaseState(phase, checkpoint.phases[phase]),
   ])) as PublicEditorRevisionRun['phases']
-  const skillProgress = active ? safeSkillProgress(checkpoint.skill_progress) : null
+  const skillProgress = active ? safeSkillProgress(checkpoint.skill_progress, options) : null
   const convergence = safeDeliveryRiskConvergence(checkpoint.delivery_risk_convergence)
   if (convergence) {
     phases.record_continuity_warning = {
@@ -620,8 +639,11 @@ function safeRejectedCandidate(value: unknown): Record<string, unknown> | null {
   return evidence || null
 }
 
-export function buildEditorRevisionDiagnostics(run: NovelRunRecord): Record<string, unknown> {
-  const publicView = buildPublicEditorRevisionRun(run)
+export function buildEditorRevisionDiagnostics(
+  run: NovelRunRecord,
+  options?: EditorRevisionRunViewOptions,
+): Record<string, unknown> {
+  const publicView = buildPublicEditorRevisionRun(run, options)
   const status = parseRunStatus(run.status)
   const input = parseRunInput(run.input_ref)
   const checkpoint = status && input ? parseCheckpoint(run, status) : null

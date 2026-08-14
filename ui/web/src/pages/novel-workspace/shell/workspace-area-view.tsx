@@ -21,6 +21,7 @@ export type NovelWorkspaceAreaViewProps = {
   chapterWordTargetMode: any
   writingSkillsEnabled: any
   setWritingSkillsEnabled: any
+  writingSkillsCatalog: any
   fictionHumanizerMode: any
   setFictionHumanizerMode: any
   characters: any
@@ -136,6 +137,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     chapterWordTargetMode,
     writingSkillsEnabled,
     setWritingSkillsEnabled,
+    writingSkillsCatalog,
     fictionHumanizerMode,
     setFictionHumanizerMode,
     characters,
@@ -323,6 +325,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         onGenerationTargetWordCountChange={setChapterTargetWordCount}
         writingSkillsEnabled={writingSkillsEnabled}
         onWritingSkillsEnabledChange={setWritingSkillsEnabled}
+        writingSkillsCatalog={writingSkillsCatalog}
         fictionHumanizerMode={fictionHumanizerMode}
         onFictionHumanizerModeChange={setFictionHumanizerMode}
         writingRecommendation={writingRecommendation}

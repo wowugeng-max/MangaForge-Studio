@@ -30,6 +30,7 @@ import {
 import type { WorkspaceArea } from './workspace-types'
 import type {
   FictionHumanizerMode,
+  WritingSkillCatalogItem,
   WritingSkillEnabledMap,
 } from '../writingSkillsModel'
 
@@ -60,6 +61,7 @@ export type NovelWorkspaceTopBarProps = {
   setTaskCenterOpen: (open: boolean) => void
   setWorkspaceArea: (area: any) => void
   setWritingSkillsEnabled: (enabled: WritingSkillEnabledMap) => void
+  setWritingSkillsCatalog: (catalog: WritingSkillCatalogItem[]) => void
   workspaceArea: any
   workspaceAreaTabs: Array<{ key: any; label: any; icon?: any }>
 }
@@ -97,6 +99,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     setTaskCenterOpen,
     setWorkspaceArea,
     setWritingSkillsEnabled,
+    setWritingSkillsCatalog,
     workspaceArea,
     workspaceAreaTabs,
   } = props
@@ -266,6 +269,7 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
           setWritingSkillsEnabled(next.enabled)
           setFictionHumanizerMode(next.fiction_humanizer_mode)
         }}
+        onWritingSkillsCatalogChange={setWritingSkillsCatalog}
       />
     </>
   )

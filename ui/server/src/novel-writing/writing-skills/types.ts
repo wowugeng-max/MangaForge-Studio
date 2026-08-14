@@ -4,16 +4,22 @@ export const WRITING_SKILL_IDS = [
   'humanizer-zh',
 ] as const
 
-export type WritingSkillId = typeof WRITING_SKILL_IDS[number]
+export type BuiltinWritingSkillId = typeof WRITING_SKILL_IDS[number]
 
-export type WritingSkillEnabledMap = Record<WritingSkillId, boolean>
+// Widened for installed marketplace packs. Builtin special-case logic must
+// key on BuiltinWritingSkillId literals, never on this alias.
+export type WritingSkillId = string
+
+export type WritingSkillEnabledMap = Record<string, boolean>
 
 export type WritingSkillDefinition = {
-  id: WritingSkillId
+  id: BuiltinWritingSkillId
   label: string
   description: string
   defaultEnabled: boolean
 }
+
+export type WritingSkillsInstalledInput = ReadonlyArray<{ id: string; installed_at?: string }>
 
 export type FictionHumanizerMode = 'polish' | 'rewrite'
 
@@ -30,6 +36,7 @@ export type WritingSkillsResolveInput = {
     }
   } | null
   override?: WritingSkillsConfig | Record<string, unknown> | null
+  installed?: WritingSkillsInstalledInput
 }
 
 export type ResolvedWritingSkills = {

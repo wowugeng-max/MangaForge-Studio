@@ -24,6 +24,7 @@ export function buildNovelWorkspaceTopBarProps(deps: Record<string, any>) {
     setTaskCenterOpen,
     setWorkspaceArea,
     setWritingSkillsEnabled,
+    setWritingSkillsCatalog,
     workspaceArea,
     workspaceAreaTabs,
   } = deps
@@ -52,6 +53,7 @@ export function buildNovelWorkspaceTopBarProps(deps: Record<string, any>) {
     setTaskCenterOpen: setTaskCenterOpen,
     setWorkspaceArea: setWorkspaceArea,
     setWritingSkillsEnabled: setWritingSkillsEnabled,
+    setWritingSkillsCatalog: setWritingSkillsCatalog,
     workspaceArea: workspaceArea,
     workspaceAreaTabs: workspaceAreaTabs,
   }

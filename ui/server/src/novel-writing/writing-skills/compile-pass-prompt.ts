@@ -1,4 +1,6 @@
+import type { InstalledWritingSkillPrompt } from './load-installed'
 import { loadVendorSkillMarkdown } from './load-vendor'
+import { isBuiltinWritingSkillId } from './registry'
 import type { FictionHumanizerMode, WritingSkillId } from './types'
 
 const SHARED_FICTION_CONTRACT = [
@@ -38,29 +40,58 @@ function modeLines(mode: FictionHumanizerMode): string[] {
   ]
 }
 
-export function compileWritingSkillPassPrompt(input: {
+type CompileWritingSkillPassPromptInput = {
   skillId: WritingSkillId
   mode?: FictionHumanizerMode
   sourceText: string
   project?: any
   contextPackage?: any
   chunk?: { index: number; total: number }
-}): string {
+  installed?: InstalledWritingSkillPrompt
+}
+
+function chunkLine(chunk?: { index: number; total: number }): string {
+  return chunk && chunk.total > 1
+    ? `这是第 ${chunk.index + 1}/${chunk.total} 段，前后文已锁定，不要改本章未给出的情节。`
+    : ''
+}
+
+function compileInstalledSkillPassPrompt(input: CompileWritingSkillPassPromptInput): string {
+  const installed = input.installed
+  if (!installed || installed.id !== input.skillId) {
+    throw new Error(`missing installed skill payload for ${input.skillId}`)
+  }
+  const title = input.project?.title ? `项目：${input.project.title}` : ''
+  const parts = [
+    `任务：按写作 skill「${installed.name}」（${installed.id}）对小说正文做改写。只输出改写后正文。`,
+    title,
+    ...SHARED_FICTION_CONTRACT,
+    chunkLine(input.chunk),
+    '【SKILL.md】',
+    installed.skill_markdown,
+  ]
+  for (const reference of installed.references) {
+    parts.push(`【参考 · ${reference.file}】`, reference.text)
+  }
+  parts.push('【原文】', String(input.sourceText || '').trim())
+  return parts.filter(Boolean).join('\n')
+}
+
+export function compileWritingSkillPassPrompt(input: CompileWritingSkillPassPromptInput): string {
+  const skillId = input.skillId
+  if (!isBuiltinWritingSkillId(skillId)) return compileInstalledSkillPassPrompt(input)
   const mode = input.mode === 'rewrite' ? 'rewrite' : 'polish'
   const title = input.project?.title ? `项目：${input.project.title}` : ''
-  const chunk = input.chunk && input.chunk.total > 1
-    ? `这是第 ${input.chunk.index + 1}/${input.chunk.total} 段，前后文已锁定，不要改本章未给出的情节。`
-    : ''
   const parts = [
-    `任务：按 ${input.skillId} 对小说正文做去 AI 味改写。只输出改写后正文。`,
+    `任务：按 ${skillId} 对小说正文做去 AI 味改写。只输出改写后正文。`,
     title,
-    input.skillId === 'fiction-humanizer-zh' ? modeLines(mode).join('') : '',
+    skillId === 'fiction-humanizer-zh' ? modeLines(mode).join('') : '',
     ...SHARED_FICTION_CONTRACT,
-    chunk,
+    chunkLine(input.chunk),
     '【SKILL.md】',
-    loadVendorSkillMarkdown(input.skillId),
+    loadVendorSkillMarkdown(skillId),
   ]
-  if (input.skillId === 'fiction-humanizer-zh') {
+  if (skillId === 'fiction-humanizer-zh') {
     for (const file of ['ai-fiction-patterns.md', 'scene-rewrite.md', 'chapter-checklist.md']) {
       parts.push(`【参考 · ${file}】`, loadVendorSkillMarkdown('fiction-humanizer-zh', file))
     }
@@ -68,7 +99,7 @@ export function compileWritingSkillPassPrompt(input: {
       parts.push('【参考 · genre-notes.md】', loadVendorSkillMarkdown('fiction-humanizer-zh', 'genre-notes.md'))
     }
   }
-  if (input.skillId === 'humanizer-zh') parts.push(...HUMANIZER_ZH_FICTION_SAFETY)
+  if (skillId === 'humanizer-zh') parts.push(...HUMANIZER_ZH_FICTION_SAFETY)
   parts.push('【原文】', String(input.sourceText || '').trim())
   return parts.filter(Boolean).join('\n')
 }

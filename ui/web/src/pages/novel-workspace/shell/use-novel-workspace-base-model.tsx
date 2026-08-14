@@ -24,6 +24,7 @@ import {
   useNovelProjectWorkspaceUiState,
 } from '../useNovelProjectWorkspaceUiState'
 import {
+  normalizeWritingSkillCatalog,
   resolveWritingSkillsEnabled,
 } from '../writingSkillsModel'
 import {
@@ -367,6 +368,7 @@ export function useNovelWorkspaceBaseModel() {
     chapterWordTargetMode, setChapterWordTargetMode,
     chapterTargetWordCount, setChapterTargetWordCount,
     writingSkillsEnabled, setWritingSkillsEnabled,
+    writingSkillsCatalog, setWritingSkillsCatalog,
     fictionHumanizerMode, setFictionHumanizerMode,
     activeChapterDiagnostics, setActiveChapterDiagnostics,
     diagnosticsRequestRef,
@@ -481,12 +483,33 @@ export function useNovelWorkspaceBaseModel() {
     chapterSortMode,
   })
   useEffect(() => {
-    const resolved = resolveWritingSkillsEnabled({ project: selectedProject })
-    setWritingSkillsEnabled(resolved.enabled)
-    setFictionHumanizerMode(resolved.fiction_humanizer_mode)
+    let active = true
+    apiClient.get('/novel/writing-skills/catalog')
+      .then(response => { if (active) setWritingSkillsCatalog(normalizeWritingSkillCatalog(response.data)) })
+      .catch(() => { /* keep current catalog; initial state is already builtins */ })
+    return () => { active = false }
+  }, [selectedProject?.id, setWritingSkillsCatalog])
+  const writingSkillsProjectIdRef = useRef<unknown>(undefined)
+  useEffect(() => {
+    const resolved = resolveWritingSkillsEnabled({ project: selectedProject, catalog: writingSkillsCatalog })
+    const projectChanged = writingSkillsProjectIdRef.current !== selectedProject?.id
+    writingSkillsProjectIdRef.current = selectedProject?.id
+    if (projectChanged) {
+      setWritingSkillsEnabled(resolved.enabled)
+      setFictionHumanizerMode(resolved.fiction_humanizer_mode)
+      return
+    }
+    setWritingSkillsEnabled(current => {
+      const merged = { ...resolved.enabled }
+      for (const id of Object.keys(current)) {
+        if (id in resolved.enabled) merged[id] = current[id]
+      }
+      return merged
+    })
   }, [
     selectedProject?.id,
     selectedProject?.reference_config?.writing_skills,
+    writingSkillsCatalog,
     setFictionHumanizerMode,
     setWritingSkillsEnabled,
   ])
@@ -1007,6 +1030,7 @@ export function useNovelWorkspaceBaseModel() {
     chapterStatusFilter,
     chapterTargetWordCount,
     writingSkillsEnabled,
+    writingSkillsCatalog,
     fictionHumanizerMode,
     chapterTreeData,
     chapterVersionDetail,
@@ -1158,6 +1182,7 @@ export function useNovelWorkspaceBaseModel() {
     setChapterVersionDetail,
     setChapterWordTargetMode,
     setWritingSkillsEnabled,
+    setWritingSkillsCatalog,
     setFictionHumanizerMode,
     setChapters,
     setCommercialToolsOpen,

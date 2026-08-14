@@ -10,6 +10,7 @@ import {
   resolveEditorRevisionRuntimeConfig,
 } from '../novel/editor-revision-runtime-config'
 import {
+  listInstalledWritingSkillPacks,
   normalizeWritingSkillsEnabled,
   resolveWritingSkillsEnabled,
 } from '../novel-writing/writing-skills'
@@ -94,7 +95,8 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
       const activeWorkspace = ctx.getWorkspace()
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
-      const resolved = resolveWritingSkillsEnabled({ project })
+      const installed = await listInstalledWritingSkillPacks(activeWorkspace)
+      const resolved = resolveWritingSkillsEnabled({ project, installed })
       res.json({
         ok: true,
         config: {
@@ -114,7 +116,8 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
       const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
       if (!project) return res.status(404).json({ error: 'project not found' })
       const requestConfig = req.body?.config || req.body || {}
-      const enabled = normalizeWritingSkillsEnabled(requestConfig.enabled ?? requestConfig)
+      const installed = await listInstalledWritingSkillPacks(activeWorkspace)
+      const enabled = normalizeWritingSkillsEnabled(requestConfig.enabled ?? requestConfig, installed)
       const requestModelId = requestConfig.model_id
       const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
         projectId: project.id,
@@ -123,6 +126,7 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
           const fictionHumanizerMode = resolveWritingSkillsEnabled({
             project: { reference_config: currentConfig },
             override: requestConfig,
+            installed,
           }).fiction_humanizer_mode
           const writingSkills: Record<string, unknown> = {
             ...(currentConfig.writing_skills || {}),
@@ -144,6 +148,7 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
               fiction_humanizer_mode: fictionHumanizerMode,
               model_id: resolveWritingSkillsEnabled({
                 project: { reference_config: { writing_skills: writingSkills } },
+                installed,
               }).model_id ?? null,
             },
           }

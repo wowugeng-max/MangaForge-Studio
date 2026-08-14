@@ -1,16 +1,16 @@
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import type { WritingSkillId } from './types'
+import type { BuiltinWritingSkillId } from './types'
 
 const VENDOR_ROOT = join(import.meta.dir, 'vendor')
 
-const SKILL_DIR: Record<WritingSkillId, string> = {
+const SKILL_DIR: Record<BuiltinWritingSkillId, string> = {
   'fiction-humanizer-zh': 'fiction-humanizer-zh',
   'remove-ai-flavor': 'remove-ai-flavor',
   'humanizer-zh': 'humanizer-zh',
 }
 
-const REFERENCE_FILES: Record<WritingSkillId, readonly string[]> = {
+const REFERENCE_FILES: Record<BuiltinWritingSkillId, readonly string[]> = {
   'fiction-humanizer-zh': [
     'ai-fiction-patterns.md',
     'scene-rewrite.md',
@@ -21,7 +21,7 @@ const REFERENCE_FILES: Record<WritingSkillId, readonly string[]> = {
   'humanizer-zh': [],
 }
 
-function resolveVendorRelativePath(id: WritingSkillId, referenceFile?: string): string {
+function resolveVendorRelativePath(id: BuiltinWritingSkillId, referenceFile?: string): string {
   const dir = SKILL_DIR[id]
   if (!referenceFile) {
     return join(dir, 'SKILL.md')
@@ -45,7 +45,7 @@ export function stripVendorSkillMarkdown(raw: string): string {
   return text.replace(/\n{3,}/g, '\n\n').trim()
 }
 
-export function loadVendorSkillMarkdown(id: WritingSkillId, referenceFile?: string): string {
+export function loadVendorSkillMarkdown(id: BuiltinWritingSkillId, referenceFile?: string): string {
   const rel = resolveVendorRelativePath(id, referenceFile)
   const raw = readFileSync(join(VENDOR_ROOT, rel), 'utf8')
   return stripVendorSkillMarkdown(raw)

@@ -13,6 +13,7 @@ import {
   retryEditorRevisionRun,
 } from '../../novel'
 import { countProseChars } from '../../novel-writing/word-target'
+import { getInstalledWritingSkillNameMap } from '../../novel-writing/writing-skills'
 import { asArray, getNovelPayload, parseJsonLikePayload } from '../novel-route-utils'
 import {
   type EditorRoutesContext,
@@ -348,9 +349,12 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
     try {
       const projectId = requireActionProjectId(req, res)
       if (!projectId) return
-      const run = await getEditorRevisionRun(ctx.getWorkspace(), projectId, Number(req.params.runId))
+      const workspace = ctx.getWorkspace()
+      const run = await getEditorRevisionRun(workspace, projectId, Number(req.params.runId))
       if (!run) return res.status(404).json({ error: 'editor revision not found' })
-      return res.json(buildPublicEditorRevisionRun(run))
+      return res.json(buildPublicEditorRevisionRun(run, {
+        installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+      }))
     } catch (error: any) {
       return respondRevisionError(res, error)
     }
@@ -360,9 +364,15 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
     try {
       const projectId = requireActionProjectId(req, res)
       if (!projectId) return
-      const run = await getEditorRevisionRun(ctx.getWorkspace(), projectId, Number(req.params.runId))
+      const workspace = ctx.getWorkspace()
+      const run = await getEditorRevisionRun(workspace, projectId, Number(req.params.runId))
       if (!run) return res.status(404).json({ error: 'editor revision not found' })
-      return res.json({ ok: true, diagnostics: buildEditorRevisionDiagnostics(run) })
+      return res.json({
+        ok: true,
+        diagnostics: buildEditorRevisionDiagnostics(run, {
+          installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+        }),
+      })
     } catch (error: any) {
       return respondRevisionError(res, error)
     }
@@ -384,7 +394,13 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
       }
       const updated = await requestEditorRevisionCancel(workspace, projectId, runId)
       ctx.editorRevisionWorker.cancel(runId)
-      return res.json({ ok: true, action: 'cancel', run: buildPublicEditorRevisionRun(updated) })
+      return res.json({
+        ok: true,
+        action: 'cancel',
+        run: buildPublicEditorRevisionRun(updated, {
+          installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+        }),
+      })
     } catch (error: any) {
       return respondRevisionError(res, error)
     }
@@ -399,7 +415,12 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
       const existing = await getEditorRevisionRun(workspace, projectId, runId)
       if (!existing) return res.status(404).json({ error: 'editor revision not found' })
       const updated = await markEditorRevisionLinkedTaskClosure(workspace, projectId, runId)
-      return res.json({ ok: true, run: buildPublicEditorRevisionRun(updated) })
+      return res.json({
+        ok: true,
+        run: buildPublicEditorRevisionRun(updated, {
+          installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+        }),
+      })
     } catch (error: any) {
       return respondRevisionError(res, error)
     }
@@ -439,7 +460,13 @@ export function registerNovelEditorRevisionRoutes(app: Express, ctx: EditorRevis
       } catch {
         // The durable queued row remains discoverable by worker recovery.
       }
-      return res.json({ ok: true, action, run: buildPublicEditorRevisionRun(updated) })
+      return res.json({
+        ok: true,
+        action,
+        run: buildPublicEditorRevisionRun(updated, {
+          installedSkillNames: await getInstalledWritingSkillNameMap(workspace),
+        }),
+      })
     } catch (error: any) {
       return respondRevisionError(res, error)
     }

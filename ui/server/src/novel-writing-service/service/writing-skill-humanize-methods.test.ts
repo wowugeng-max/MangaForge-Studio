@@ -1,4 +1,8 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { invalidateInstalledWritingSkillPackCache } from '../../novel-writing/writing-skills/installed-store'
 import { createWritingSkillHumanizeMethods } from './writing-skill-humanize-methods'
 
 const SOURCE = `${'林序把门带上，沿着走廊继续往前。纸条边角硌着手指。'.repeat(120)}`
@@ -23,6 +27,31 @@ const standardTarget = {
   chapter_target: {
     word_target: { mode: 'standard', target: 4200, min: 3780, max: 4620 },
   },
+}
+
+async function installFixturePack(workspace: string, overrides: {
+  id?: string
+  name?: string
+  installedAt?: string
+  skillBody?: string
+} = {}) {
+  const id = overrides.id || 'my-style-pack'
+  const dir = join(workspace, '.mangaforge', 'writing-skill-packs', id)
+  await mkdir(join(dir, 'references'), { recursive: true })
+  const name = overrides.name || '我的文风包'
+  await writeFile(join(dir, 'SKILL.md'), `---\nname: ${name}\n---\n${overrides.skillBody || '# My Style\n只改语气，不改剧情。'}`)
+  await writeFile(join(dir, 'references', 'a.md'), '参考甲')
+  await writeFile(join(dir, 'pack.json'), JSON.stringify({
+    id,
+    source_url: 'https://github.com/acme/My-Style-Pack',
+    owner: 'acme',
+    repo: 'My-Style-Pack',
+    revision: 'a'.repeat(40),
+    installed_at: overrides.installedAt || '2026-08-14T00:00:00.000Z',
+    name,
+    description: '换文风',
+  }))
+  invalidateInstalledWritingSkillPackCache()
 }
 
 describe('writing skill humanize methods', () => {
@@ -115,7 +144,11 @@ describe('writing skill humanize methods', () => {
       },
     )
 
-    await Promise.resolve()
+    // The runner lists installed packs (fs I/O) before the first progress
+    // event, so wait for the progress callback instead of one microtask.
+    while (!order.includes('progress-start')) {
+      await new Promise(resolve => setTimeout(resolve, 1))
+    }
     const beforeRelease = [...order]
     releaseProgress()
     await run
@@ -144,8 +177,8 @@ describe('writing skill humanize methods', () => {
       },
     )
     expect(progressCalls).toEqual([
-      ['fiction-humanizer-zh', { index: 1, total: 2 }],
-      ['remove-ai-flavor', { index: 2, total: 2 }],
+      ['fiction-humanizer-zh', { index: 1, total: 2, label: '写作skill · 小说去AI味' }],
+      ['remove-ai-flavor', { index: 2, total: 2, label: '写作skill · 去句壳' }],
     ])
   })
 
@@ -326,6 +359,154 @@ describe('writing skill humanize methods', () => {
     )
     expect(modelIds).toEqual(['42', '42'])
     expect(result.report.model_id).toBeUndefined()
+  })
+
+  test('runs an installed pack after the builtins with the generic prompt and pack-name label', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'wsk-runner-'))
+    await installFixturePack(workspace)
+    const { methods, calls } = makeMethods(task => (task.includes('# My Style') ? PASS_B : PASS_A))
+    const progress: Array<[string, string | undefined]> = []
+    const result = await methods.runWritingSkillHumanizePass(
+      workspace,
+      {
+        reference_config: {
+          writing_skills: {
+            enabled: {
+              'remove-ai-flavor': false,
+              'humanizer-zh': false,
+              'my-style-pack': true,
+            },
+          },
+        },
+      },
+      standardTarget,
+      SOURCE,
+      undefined,
+      {
+        onSkillProgress: async (id: string, meta?: { label?: string }) => {
+          progress.push([id, meta?.label])
+        },
+      },
+    )
+    expect(calls).toHaveLength(2)
+    expect(calls[1]).toContain('# My Style')
+    expect(calls[1]).toContain('【参考 · a.md】')
+    expect(calls[1]).not.toContain('name: 我的文风包')
+    expect(progress).toEqual([
+      ['fiction-humanizer-zh', '写作skill · 小说去AI味'],
+      ['my-style-pack', '写作skill · 我的文风包'],
+    ])
+    expect(result.final_text).toBe(PASS_B)
+    expect(result.report.enabled_ids).toEqual(['fiction-humanizer-zh', 'my-style-pack'])
+    expect(result.report.passes.map(pass => pass.id)).toEqual(['fiction-humanizer-zh', 'my-style-pack'])
+  })
+
+  test('records a failed pass and continues when an installed pack becomes unreadable at pass time', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'wsk-runner-'))
+    await installFixturePack(workspace)
+    await installFixturePack(workspace, {
+      id: 'other-pack',
+      name: '另一个包',
+      installedAt: '2026-08-14T01:00:00.000Z',
+      skillBody: '# Other Style\n只调节节奏。',
+    })
+    const { methods, calls } = makeMethods(async task => {
+      if (task.includes('# Other Style')) return PASS_B
+      // Uninstall my-style-pack while the first builtin pass is still executing,
+      // after resolve already admitted it.
+      await rm(join(workspace, '.mangaforge', 'writing-skill-packs', 'my-style-pack'), { recursive: true, force: true })
+      return PASS_A
+    })
+    const result = await methods.runWritingSkillHumanizePass(
+      workspace,
+      {
+        reference_config: {
+          writing_skills: {
+            enabled: {
+              'remove-ai-flavor': false,
+              'humanizer-zh': false,
+              'my-style-pack': true,
+              'other-pack': true,
+            },
+          },
+        },
+      },
+      standardTarget,
+      SOURCE,
+    )
+    expect(calls).toHaveLength(2) // builtin + other-pack; my-style-pack never reached the LLM
+    expect(result.report.passes.map(pass => [pass.id, pass.accepted])).toEqual([
+      ['fiction-humanizer-zh', true],
+      ['my-style-pack', false],
+      ['other-pack', true],
+    ])
+    const failed = result.report.passes[1]
+    expect(failed.reason).toBe('writing_skill_pack_unreadable')
+    expect(failed.chunk_count).toBe(0)
+    expect(failed.after_chars).toBe(failed.before_chars)
+    expect(result.final_text).toBe(PASS_B)
+    expect(result.report.accepted).toBe(true)
+    expect(result.report.changed).toBe(true)
+    expect(result.report.enabled_ids).toEqual(['fiction-humanizer-zh', 'my-style-pack', 'other-pack'])
+  })
+
+  test('records the bounded bounds error when an installed pack grows past limits at pass time', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'wsk-runner-'))
+    await installFixturePack(workspace)
+    const { methods, calls } = makeMethods(async () => {
+      // Grow SKILL.md past the 256KiB bound after resolve admitted the pack.
+      await writeFile(
+        join(workspace, '.mangaforge', 'writing-skill-packs', 'my-style-pack', 'SKILL.md'),
+        'x'.repeat(256 * 1024 + 1),
+      )
+      return PASS_A
+    })
+    const result = await methods.runWritingSkillHumanizePass(
+      workspace,
+      {
+        reference_config: {
+          writing_skills: {
+            enabled: {
+              'remove-ai-flavor': false,
+              'humanizer-zh': false,
+              'my-style-pack': true,
+            },
+          },
+        },
+      },
+      standardTarget,
+      SOURCE,
+    )
+    expect(calls).toHaveLength(1)
+    const failed = result.report.passes[1]
+    expect(failed).toMatchObject({ id: 'my-style-pack', accepted: false, chunk_count: 0 })
+    expect(String(failed.reason)).toContain('writing_skill_pack_bounds_exceeded')
+    expect(String(failed.reason).length).toBeLessThanOrEqual(240)
+    expect(result.final_text).toBe(PASS_A)
+    expect(result.report.accepted).toBe(true)
+  })
+
+  test('skips an installed pack whose files disappeared before the pass started', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'wsk-runner-'))
+    const { methods, calls } = makeMethods(() => PASS_A)
+    const result = await methods.runWritingSkillHumanizePass(
+      workspace,
+      {
+        reference_config: {
+          writing_skills: {
+            enabled: {
+              'remove-ai-flavor': false,
+              'humanizer-zh': false,
+              'my-style-pack': true, // stale project config; nothing on disk
+            },
+          },
+        },
+      },
+      standardTarget,
+      SOURCE,
+    )
+    expect(calls).toHaveLength(1) // only fiction-humanizer-zh ran
+    expect(result.report.enabled_ids).toEqual(['fiction-humanizer-zh'])
   })
 
   test('does not roll back an accepted rewrite when fingerprint fails', async () => {

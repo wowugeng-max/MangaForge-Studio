@@ -17,7 +17,7 @@
 1. **内置不可卸载**：内置 skill 有专属逻辑（精修/重写模式、humanizer 安全套、灵魂泄漏门闩），只能启用/停用；只有 GitHub 安装包可卸载。
 2. **工作区全局安装**：安装包对全工作区可见；启用开关仍是项目级（`project.reference_config.writing_skills.enabled`，key 为 skill id）。
 3. **固定顺序**：内置按现有固定序在前，安装包按 `installed_at` 升序排在后。不做手动排序。
-4. **来源格式**：仅 `https://github.com/{owner}/{repo}`（可带 `.git`），仓库根目录必须有 `SKILL.md`，可选 `references/*.md`。锁定安装时的 HEAD revision。
+4. **来源格式**：仅 `https://github.com/{owner}/{repo}`（可带 `.git`）。`SKILL.md` 可在仓库根或最多四层子目录（忽略 docs/scripts/examples 等）；可选同目录 `references/*.md`。合集仓库会安装全部匹配的 skill。锁定安装时的 HEAD revision。
 
 ## 磁盘布局（磁盘即注册表，无数据库表）
 
@@ -37,7 +37,7 @@
 ### 新模块（`ui/server/src/novel-writing/writing-skills/`）
 
 - `installed-store.ts`：扫描/读取已安装包。带内存缓存，按目录 mtime 失效。读取时执行边界校验（超限包跳过并在日志警告，不进目录）。
-- `install-github.ts`：安装流程——URL 校验（仅 github.com 公开仓库，无路径/查询/认证/端口）→ 通过 GitHub API（或 codeload 跳转兜底）解析 HEAD sha → 下载 `codeload.github.com/{owner}/{repo}/zip/{sha}` → 只提取根 `SKILL.md` 和 `references/*.md` → 原子落盘。路径穿越/符号链接拒绝。通用的路径安全校验优先复用 `ui/server/src/skills/path-safety.ts` 中已有的通用帮助函数（仅 import 帮助函数，安装器本体与画布完全分离；不把写作 skill 注册进画布安装器，反之亦然）。
+- `install-github.ts`：安装流程——URL 校验（仅 github.com 公开仓库，无路径/查询/认证/端口）→ 通过 GitHub API（或 codeload 跳转兜底）解析 HEAD sha → 下载 `codeload.github.com/{owner}/{repo}/zip/{sha}` → 提取根或嵌套 skill 目录的 `SKILL.md` 和同目录 `references/*.md`（合集则全部安装）→ 原子落盘。路径穿越/符号链接拒绝。通用的路径安全校验优先复用 `ui/server/src/skills/path-safety.ts` 中已有的通用帮助函数（仅 import 帮助函数，安装器本体与画布完全分离；不把写作 skill 注册进画布安装器，反之亦然）。
 - 同一仓库重复安装：revision 相同则幂等返回；revision 不同则整目录替换为新 revision（更新语义）。
 
 ### 大小与数量上限（对齐画布）

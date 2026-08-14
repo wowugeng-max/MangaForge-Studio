@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { Button, Divider, InputNumber, Modal, Select, Space, Switch, Typography, message } from 'antd'
+import React, { useEffect, useRef, useState } from 'react'
+import { Button, Divider, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Typography, message } from 'antd'
 import apiClient from '../../api/client'
 import { McpGenerationSourcePanel } from './McpGenerationSourcePanel'
 import { ChapterGenerationSourceControl } from './ChapterGenerationSourceControl'
@@ -8,13 +8,16 @@ import type {
   ChapterSourceOperationToken,
 } from './chapterGenerationSourceModel'
 import {
+  BUILTIN_WRITING_SKILL_CATALOG,
   DEFAULT_FICTION_HUMANIZER_MODE,
   DEFAULT_WRITING_SKILLS_ENABLED,
-  WRITING_SKILL_CATALOG,
+  filterWritingSkillCatalog,
+  normalizeWritingSkillCatalog,
   normalizeWritingSkillsModelId,
   resolveWritingSkillsEnabled,
   writingSkillsSettingsPayload,
   type FictionHumanizerMode,
+  type WritingSkillCatalogItem,
   type WritingSkillEnabledMap,
 } from './writingSkillsModel'
 
@@ -50,6 +53,18 @@ export function isStoryStateMaxTokensValid(value: unknown): value is number {
     && value <= MAX_STORY_STATE_MAX_TOKENS
 }
 
+export function writingSkillInstallErrorMessage(error: { response?: { data?: { error_code?: unknown; error?: unknown } } } | null | undefined) {
+  const code = String(error?.response?.data?.error_code || '')
+  if (code === 'SKILL_MD_MISSING') {
+    return '仓库里没有可用的 SKILL.md。会在根目录和最多四层子目录里查找（忽略 docs/scripts/examples 等）。'
+  }
+  if (code === 'INVALID_URL') return '只支持 https://github.com/{owner}/{repo} 公开仓库'
+  if (code === 'ID_CONFLICT_BUILTIN') return '不能覆盖内置写作 skill'
+  if (code === 'BOUNDS_EXCEEDED') return '安装包超出大小或文件数量上限'
+  if (code === 'DOWNLOAD_FAILED') return '无法下载该 GitHub 仓库，请确认仓库公开且地址正确'
+  return String(error?.response?.data?.error || '写作 skill 安装失败')
+}
+
 export function buildEditorRevisionConfigPayload(timeoutSeconds: unknown, storyStateMaxTokens: unknown) {
   if (!isEditorRevisionTimeoutValid(timeoutSeconds)) throw new Error('invalid editor revision timeout')
   if (!isStoryStateMaxTokensValid(storyStateMaxTokens)) throw new Error('invalid story state max tokens')
@@ -76,6 +91,7 @@ export function ProjectSettingsModal({
   sourcePending,
   onSourcePendingChange,
   onWritingSkillsSaved,
+  onWritingSkillsCatalogChange,
 }: {
   open: boolean
   projectId: number
@@ -94,12 +110,21 @@ export function ProjectSettingsModal({
     enabled: WritingSkillEnabledMap
     fiction_humanizer_mode: FictionHumanizerMode
   }) => void
+  onWritingSkillsCatalogChange?: (catalog: WritingSkillCatalogItem[]) => void
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
   const [storyStateMaxTokens, setStoryStateMaxTokens] = useState<number | null>(DEFAULT_STORY_STATE_MAX_TOKENS)
   const [writingSkillsEnabled, setWritingSkillsEnabled] = useState<WritingSkillEnabledMap>(DEFAULT_WRITING_SKILLS_ENABLED)
   const [fictionHumanizerMode, setFictionHumanizerMode] = useState<FictionHumanizerMode>(DEFAULT_FICTION_HUMANIZER_MODE)
   const [writingSkillsModelId, setWritingSkillsModelId] = useState<number | null>(null)
+  const [writingSkillCatalog, setWritingSkillCatalog] = useState<WritingSkillCatalogItem[]>(BUILTIN_WRITING_SKILL_CATALOG)
+  const catalogWriteSeq = useRef(0)
+  const catalogRef = useRef(writingSkillCatalog)
+  catalogRef.current = writingSkillCatalog
+  const [skillFilter, setSkillFilter] = useState('')
+  const [installUrl, setInstallUrl] = useState('')
+  const [installing, setInstalling] = useState(false)
+  const [uninstallingId, setUninstallingId] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -107,19 +132,30 @@ export function ProjectSettingsModal({
   useEffect(() => {
     if (!open || !projectId) return
     let active = true
+    const loadSeq = ++catalogWriteSeq.current
     setTimeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
     setStoryStateMaxTokens(DEFAULT_STORY_STATE_MAX_TOKENS)
     setWritingSkillsEnabled(DEFAULT_WRITING_SKILLS_ENABLED)
     setFictionHumanizerMode(DEFAULT_FICTION_HUMANIZER_MODE)
     setWritingSkillsModelId(null)
+    setSkillFilter('')
     setLoadFailed(false)
     setLoading(true)
     Promise.all([
       apiClient.get(`/novel/projects/${projectId}/editor-revision-config`),
       apiClient.get(`/novel/projects/${projectId}/writing-skills-config`),
+      apiClient.get('/novel/writing-skills/catalog').catch(() => null),
     ])
-      .then(([revision, skills]) => {
+      .then(([revision, skills, catalogResponse]) => {
         if (active) {
+          const catalogFresh = catalogWriteSeq.current === loadSeq
+          if (catalogFresh && catalogResponse != null) {
+            const catalog = normalizeWritingSkillCatalog(catalogResponse.data)
+            catalogRef.current = catalog
+            setWritingSkillCatalog(catalog)
+            onWritingSkillsCatalogChange?.(catalog)
+          }
+          const catalog = catalogRef.current
           setTimeoutSeconds(normalizeProjectEditorRevisionTimeout(
             revision.data?.config?.timeout_seconds,
           ))
@@ -128,6 +164,7 @@ export function ProjectSettingsModal({
           ))
           const resolvedWritingSkills = resolveWritingSkillsEnabled({
             override: skills.data?.config,
+            catalog,
           })
           setWritingSkillsEnabled(resolvedWritingSkills.enabled)
           setFictionHumanizerMode(resolvedWritingSkills.fiction_humanizer_mode)
@@ -147,6 +184,53 @@ export function ProjectSettingsModal({
       active = false
     }
   }, [open, projectId])
+
+  const refreshWritingSkillCatalog = async () => {
+    const seq = ++catalogWriteSeq.current
+    try {
+      const response = await apiClient.get('/novel/writing-skills/catalog')
+      if (catalogWriteSeq.current !== seq) return
+      const catalog = normalizeWritingSkillCatalog(response.data)
+      catalogRef.current = catalog
+      setWritingSkillCatalog(catalog)
+      onWritingSkillsCatalogChange?.(catalog)
+      return catalog
+    } catch {
+      if (catalogWriteSeq.current !== seq) return
+      message.error('写作 skill 目录刷新失败')
+    }
+  }
+
+  const installWritingSkill = async () => {
+    const url = installUrl.trim()
+    if (!url) return
+    setInstalling(true)
+    try {
+      await apiClient.post('/novel/writing-skills/install', { url })
+      setInstallUrl('')
+      await refreshWritingSkillCatalog()
+      message.success('写作 skill 安装成功')
+    } catch (error: any) {
+      message.error(writingSkillInstallErrorMessage(error))
+    } finally {
+      setInstalling(false)
+    }
+  }
+
+  const uninstallWritingSkill = async (id: string) => {
+    setUninstallingId(id)
+    try {
+      await apiClient.delete(`/novel/writing-skills/${id}`)
+      await refreshWritingSkillCatalog()
+      message.success('写作 skill 已卸载')
+    } catch (error: any) {
+      message.error(error?.response?.data?.error_code || '写作 skill 卸载失败')
+    } finally {
+      setUninstallingId('')
+    }
+  }
+
+  const filteredWritingSkills = filterWritingSkillCatalog(writingSkillCatalog, skillFilter)
 
   const save = async () => {
     if (
@@ -278,36 +362,74 @@ export function ProjectSettingsModal({
         <Text type="secondary">
           项目默认。生成时可在写作条临时覆盖；修订只读这里。
         </Text>
-        {WRITING_SKILL_CATALOG.map(skill => (
-          <Space key={skill.id} align="start">
-            <Switch
-              checked={writingSkillsEnabled[skill.id]}
-              aria-label={skill.label}
-              disabled={loading || loadFailed}
-              onChange={checked => setWritingSkillsEnabled(current => ({
-                ...current,
-                [skill.id]: checked,
-              }))}
-            />
-            {skill.id === 'fiction-humanizer-zh' && (
-              <Select
-                aria-label="小说去AI味档位"
-                value={fictionHumanizerMode}
-                options={[
-                  { value: 'polish', label: '精修' },
-                  { value: 'rewrite', label: '重写' },
-                ]}
-                disabled={!writingSkillsEnabled['fiction-humanizer-zh'] || loading || loadFailed}
-                onChange={setFictionHumanizerMode}
-                style={{ width: 88 }}
+        <Input
+          allowClear
+          aria-label="过滤写作 skill"
+          placeholder="按名称、id 或说明过滤"
+          value={skillFilter}
+          onChange={event => setSkillFilter(event.target.value)}
+        />
+        <div
+          aria-label="写作 skill 列表"
+          style={{
+            maxHeight: 320,
+            overflowY: 'auto',
+            paddingRight: 4,
+            border: '1px solid var(--ant-color-border, #d9d9d9)',
+            borderRadius: 8,
+          }}
+        >
+          {filteredWritingSkills.map(skill => (
+            <Space key={skill.id} align="start" style={{ display: 'flex', width: '100%', padding: '8px 10px' }}>
+              <Switch
+                checked={writingSkillsEnabled[skill.id] ?? false}
+                aria-label={skill.label}
+                disabled={loading || loadFailed}
+                onChange={checked => setWritingSkillsEnabled(current => ({
+                  ...current,
+                  [skill.id]: checked,
+                }))}
               />
-            )}
-            <Space direction="vertical" size={0}>
-              <Text>{skill.label}</Text>
-              <Text type="secondary">{skill.description}</Text>
+              {skill.supports_mode && (
+                <Select
+                  aria-label="小说去AI味档位"
+                  value={fictionHumanizerMode}
+                  options={[
+                    { value: 'polish', label: '精修' },
+                    { value: 'rewrite', label: '重写' },
+                  ]}
+                  disabled={!writingSkillsEnabled['fiction-humanizer-zh'] || loading || loadFailed}
+                  onChange={setFictionHumanizerMode}
+                  style={{ width: 88 }}
+                />
+              )}
+              <Space direction="vertical" size={0} style={{ flex: 1, minWidth: 0 }}>
+                <Space size={8} wrap>
+                  <Text>{skill.label}</Text>
+                  {!skill.builtin && skill.revision && (
+                    <Text type="secondary" code>{skill.revision.slice(0, 7)}</Text>
+                  )}
+                  {!skill.builtin && (
+                    <Popconfirm
+                      title={`卸载写作 skill「${skill.label}」？`}
+                      okText="卸载"
+                      cancelText="取消"
+                      onConfirm={() => uninstallWritingSkill(skill.id)}
+                    >
+                      <Button size="small" danger loading={uninstallingId === skill.id} disabled={loading}>卸载</Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+                <Text type="secondary">{skill.description}</Text>
+              </Space>
             </Space>
-          </Space>
-        ))}
+          ))}
+          {!filteredWritingSkills.length && (
+            <Text type="secondary" style={{ display: 'block', padding: '12px 10px' }}>
+              没有匹配的写作 skill
+            </Text>
+          )}
+        </div>
         <Space align="center" wrap>
           <Text>写作skill模型</Text>
           <Select
@@ -325,6 +447,17 @@ export function ProjectSettingsModal({
         <Text type="secondary">
           所有写作 skill 轮次共用该模型；跟随项目模型时使用修订阶段/项目首选模型。
         </Text>
+        <Space.Compact style={{ width: '100%' }}>
+          <Input
+            aria-label="从 GitHub 安装"
+            placeholder="https://github.com/{owner}/{repo} — 从 GitHub 安装写作 skill"
+            value={installUrl}
+            onChange={event => setInstallUrl(event.target.value)}
+            onPressEnter={installWritingSkill}
+            disabled={loading || installing}
+          />
+          <Button type="primary" loading={installing} disabled={loading || installing} onClick={installWritingSkill}>安装</Button>
+        </Space.Compact>
       </Space>
     </Modal>
   )

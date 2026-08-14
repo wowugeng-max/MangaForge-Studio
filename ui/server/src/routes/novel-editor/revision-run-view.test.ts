@@ -215,7 +215,7 @@ describe('editor revision public run view', () => {
   })
 
   test.each([
-    { name: 'unknown skill id', skill_progress: { skill_id: 'evil-skill', index: 1, total: 2 } },
+    { name: 'malformed skill id', skill_progress: { skill_id: 'Evil_Skill!', index: 1, total: 2 } },
     { name: 'absurd index', skill_progress: { skill_id: 'remove-ai-flavor', index: 99, total: 2 } },
     { name: 'non-integer index', skill_progress: { skill_id: 'remove-ai-flavor', index: 1.5, total: 2 } },
     { name: 'index above total', skill_progress: { skill_id: 'remove-ai-flavor', index: 3, total: 2 } },
@@ -231,6 +231,43 @@ describe('editor revision public run view', () => {
     const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
 
     expect('skill_progress' in view).toBe(false)
+  })
+
+  test('projects installed skill progress using the server-side pack name', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phases.generate_candidate = {
+      status: 'running',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.500Z',
+    }
+    ;(checkpoint as any).skill_progress = {
+      skill_id: 'my-style-pack',
+      index: 4,
+      total: 4,
+      label: 'EVIL_STORED_LABEL',
+    }
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint), {
+      installedSkillNames: { 'my-style-pack': '我的文风包' },
+    })
+    expect((view as any).skill_progress).toMatchObject({
+      skill_id: 'my-style-pack',
+      index: 4,
+      total: 4,
+      label: '我的文风包',
+    })
+    expect(JSON.stringify(view)).not.toContain('EVIL_STORED_LABEL')
+  })
+
+  test('falls back to the bounded id when the installed pack is unknown', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phases.generate_candidate = {
+      status: 'running',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.500Z',
+    }
+    ;(checkpoint as any).skill_progress = { skill_id: 'gone-pack', index: 1, total: 1 }
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
+    expect((view as any).skill_progress?.label).toBe('gone-pack')
   })
 
   test('omits skill progress once the run is no longer active', () => {

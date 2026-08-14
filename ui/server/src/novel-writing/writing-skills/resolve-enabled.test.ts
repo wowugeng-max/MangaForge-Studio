@@ -125,6 +125,51 @@ describe('writing skills model_id resolution', () => {
   })
 })
 
+const INSTALLED = [
+  { id: 'older-pack', installed_at: '2026-08-14T01:00:00.000Z' },
+  { id: 'my-style-pack', installed_at: '2026-08-14T02:00:00.000Z' },
+]
+
+test('installed packs default to disabled and keep installed_at order when enabled', () => {
+  const off = resolveWritingSkillsEnabled({ installed: INSTALLED })
+  expect(off.enabled['my-style-pack']).toBe(false)
+  expect(off.ids).toEqual(['fiction-humanizer-zh', 'remove-ai-flavor'])
+
+  const on = resolveWritingSkillsEnabled({
+    installed: INSTALLED,
+    project: {
+      reference_config: {
+        writing_skills: {
+          enabled: { 'my-style-pack': true, 'older-pack': true, 'humanizer-zh': true },
+        },
+      },
+    },
+  })
+  expect(on.ids).toEqual([
+    'fiction-humanizer-zh',
+    'remove-ai-flavor',
+    'humanizer-zh',
+    'older-pack',
+    'my-style-pack',
+  ])
+})
+
+test('silently filters stale ids that are no longer installed', () => {
+  const resolved = resolveWritingSkillsEnabled({
+    project: { reference_config: { writing_skills: { enabled: { 'uninstalled-pack': true } } } },
+  })
+  expect(resolved.ids).toEqual(['fiction-humanizer-zh', 'remove-ai-flavor'])
+  expect('uninstalled-pack' in resolved.enabled).toBe(false)
+})
+
+test('generation override can flip an installed pack on', () => {
+  const resolved = resolveWritingSkillsEnabled({
+    installed: INSTALLED,
+    override: { enabled: { 'my-style-pack': true } },
+  })
+  expect(resolved.ids).toEqual(['fiction-humanizer-zh', 'remove-ai-flavor', 'my-style-pack'])
+})
+
 test('generation override wins for mode without flipping omitted enabled keys', () => {
   const resolved = resolveWritingSkillsEnabled({
     project: {

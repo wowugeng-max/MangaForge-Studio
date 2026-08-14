@@ -2,14 +2,16 @@ import {
   DEFAULT_FICTION_HUMANIZER_MODE,
   DEFAULT_WRITING_SKILLS_ENABLED,
   WRITING_SKILL_IDS,
+  isBuiltinWritingSkillId,
   isFictionHumanizerMode,
-  isWritingSkillId,
+  isWritingSkillPackIdShape,
 } from './registry'
 import type {
   FictionHumanizerMode,
   ResolvedWritingSkills,
   WritingSkillEnabledMap,
   WritingSkillsConfig,
+  WritingSkillsInstalledInput,
   WritingSkillsResolveInput,
 } from './types'
 
@@ -38,13 +40,21 @@ function resolveMode(...layers: Array<unknown>): FictionHumanizerMode {
   return mode
 }
 
+function sortedInstalledIds(installed: WritingSkillsInstalledInput | undefined): string[] {
+  return [...(installed || [])]
+    .filter(pack => isWritingSkillPackIdShape(pack?.id) && !isBuiltinWritingSkillId(pack.id))
+    .sort((a, b) => String(a.installed_at || '').localeCompare(String(b.installed_at || '')) || a.id.localeCompare(b.id))
+    .map(pack => pack.id)
+}
+
 function mergeEnabledFlags(
   base: WritingSkillEnabledMap,
   incoming: Record<string, unknown> | null,
+  ids: readonly string[],
 ): WritingSkillEnabledMap {
   if (!incoming) return { ...base }
   const next = { ...base }
-  for (const id of WRITING_SKILL_IDS) {
+  for (const id of ids) {
     if (!Object.prototype.hasOwnProperty.call(incoming, id)) continue
     if (typeof incoming[id] !== 'boolean') continue
     next[id] = incoming[id]
@@ -65,17 +75,24 @@ function resolveProjectModelId(projectWritingSkills: unknown): number | undefine
 export function resolveWritingSkillsEnabled(
   input: WritingSkillsResolveInput = {},
 ): ResolvedWritingSkills {
+  const installedIds = sortedInstalledIds(input.installed)
+  const catalogIds: string[] = [...WRITING_SKILL_IDS, ...new Set(installedIds)]
+  const defaults: WritingSkillEnabledMap = {
+    ...DEFAULT_WRITING_SKILLS_ENABLED,
+    ...Object.fromEntries(installedIds.map(id => [id, false] as const)),
+  }
   const projectWritingSkills = input.project?.reference_config?.writing_skills
   const projectEnabled = asEnabledRecord(projectWritingSkills)
   const overrideEnabled = asEnabledRecord(input.override)
   const enabled = mergeEnabledFlags(
-    mergeEnabledFlags(DEFAULT_WRITING_SKILLS_ENABLED, projectEnabled),
+    mergeEnabledFlags(defaults, projectEnabled, catalogIds),
     overrideEnabled,
+    catalogIds,
   )
   const modelId = resolveProjectModelId(projectWritingSkills)
   return {
     enabled,
-    ids: WRITING_SKILL_IDS.filter(id => enabled[id] && isWritingSkillId(id)),
+    ids: catalogIds.filter(id => enabled[id]),
     fiction_humanizer_mode: resolveMode(projectWritingSkills, input.override),
     ...(modelId !== undefined ? { model_id: modelId } : {}),
   }
@@ -83,6 +100,12 @@ export function resolveWritingSkillsEnabled(
 
 export function normalizeWritingSkillsEnabled(
   value: unknown,
+  installed: WritingSkillsInstalledInput = [],
 ): WritingSkillEnabledMap {
-  return mergeEnabledFlags(DEFAULT_WRITING_SKILLS_ENABLED, asEnabledRecord(value))
+  const installedIds = sortedInstalledIds(installed)
+  const defaults: WritingSkillEnabledMap = {
+    ...DEFAULT_WRITING_SKILLS_ENABLED,
+    ...Object.fromEntries(installedIds.map(id => [id, false] as const)),
+  }
+  return mergeEnabledFlags(defaults, asEnabledRecord(value), [...WRITING_SKILL_IDS, ...installedIds])
 }

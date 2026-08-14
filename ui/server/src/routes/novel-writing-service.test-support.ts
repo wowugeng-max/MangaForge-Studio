@@ -80,6 +80,13 @@ export function classifyProsePipelineTask(agent: string, taskInput: string): Pro
       && line.startsWith('任务：按 ')
       && line.includes('对小说正文做去 AI 味改写')
     ) return 'writing_skill'
+    // Installed marketplace packs use the generic prompt shape from
+    // compileInstalledSkillPassPrompt: 任务：按写作 skill「name」（id）对小说正文做改写。
+    if (
+      agent === 'prose-agent'
+      && line.startsWith('任务：按写作 skill「')
+      && line.includes('对小说正文做改写')
+    ) return 'writing_skill'
     if (agent === 'review-agent' && line.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
   }
   return 'other'

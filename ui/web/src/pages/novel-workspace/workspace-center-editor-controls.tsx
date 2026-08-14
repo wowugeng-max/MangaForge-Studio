@@ -7,6 +7,7 @@ import {
   DEFAULT_WRITING_SKILLS_ENABLED,
   WRITING_SKILL_CATALOG,
   type FictionHumanizerMode,
+  type WritingSkillCatalogItem,
   type WritingSkillEnabledMap,
 } from './writingSkillsModel'
 
@@ -85,18 +86,21 @@ export function WorkspaceCenterWritingSkillsControl({
   onWritingSkillsEnabledChange,
   fictionHumanizerMode,
   onFictionHumanizerModeChange,
+  writingSkillsCatalog,
 }: {
   writingSkillsEnabled?: WritingSkillEnabledMap
   onWritingSkillsEnabledChange?: (enabled: WritingSkillEnabledMap) => void
   fictionHumanizerMode?: FictionHumanizerMode
   onFictionHumanizerModeChange?: (mode: FictionHumanizerMode) => void
+  writingSkillsCatalog?: WritingSkillCatalogItem[]
 }) {
+  const catalog = writingSkillsCatalog?.length ? writingSkillsCatalog : WRITING_SKILL_CATALOG
   const current = writingSkillsEnabled || DEFAULT_WRITING_SKILLS_ENABLED
   const mode = fictionHumanizerMode || DEFAULT_FICTION_HUMANIZER_MODE
   const modeDisabled = !current['fiction-humanizer-zh']
   return (
     <div className="novel-word-target-control novel-writing-skills-control" aria-label="去AI味写作skill">
-      {WRITING_SKILL_CATALOG.map(skill => (
+      {catalog.map(skill => (
         <Tooltip key={skill.id} title={skill.description}>
           <Button
             size="small"

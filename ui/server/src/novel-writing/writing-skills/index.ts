@@ -8,6 +8,20 @@ export {
   isWritingSkillId,
 } from './registry'
 export {
+  WRITING_SKILL_PACK_ID_RE,
+  WRITING_SKILL_PACK_LABEL_MAX,
+  buildWritingSkillCatalog,
+  isBuiltinWritingSkillId,
+  isWritingSkillPackIdShape,
+  resolveWritingSkillStageLabel,
+} from './registry'
+export type { WritingSkillCatalogEntry } from './registry'
+export type { BuiltinWritingSkillId, WritingSkillsInstalledInput } from './types'
+export { loadInstalledWritingSkillPrompt, stripInstalledSkillFrontmatter } from './load-installed'
+export type { InstalledWritingSkillPrompt } from './load-installed'
+export { listInstalledWritingSkillPacks, getInstalledWritingSkillNameMap, invalidateInstalledWritingSkillPackCache } from './installed-store'
+export type { InstalledWritingSkillPack } from './installed-store'
+export {
   normalizeWritingSkillsEnabled,
   pickWritingSkillsOverride,
   resolveWritingSkillsEnabled,

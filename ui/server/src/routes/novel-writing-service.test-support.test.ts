@@ -30,6 +30,17 @@ describe('novel writing service test-support task classification', () => {
 
     expect(classify?.('prose-agent', `任务：对高风险正文窗口做减负结构重写。${embeddedContract}`)).toBe('humanize')
     expect(classify?.('prose-agent', writingSkillPrompt)).toBe('writing_skill')
+    const installedSkillPrompt = `${compileWritingSkillPassPrompt({
+      skillId: 'my-style-pack',
+      sourceText: '林序把门带上。',
+      installed: {
+        id: 'my-style-pack',
+        name: '我的文风包',
+        skill_markdown: '# My Style\n只改语气，不改剧情。',
+        references: [],
+      },
+    })}${embeddedContract}`
+    expect(classify?.('prose-agent', installedSkillPrompt)).toBe('writing_skill')
     expect(classify?.('review-agent', `任务：独立审查小说正文。${embeddedContract}`)).toBe('quality_review')
     expect(classify?.('prose-agent', `任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')
     expect(classify?.('prose-agent', `【角色设定 · 资深网文作者】\n任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')

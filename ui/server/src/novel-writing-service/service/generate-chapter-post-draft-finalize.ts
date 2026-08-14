@@ -18,10 +18,7 @@ import {
   buildR76HumanizeDefaultOptions,
   R76_ZHUQUE_STACK_VERSION,
 } from '../../novel-writing/r76-zhuque-stack'
-import {
-  WRITING_SKILL_STAGE_LABEL,
-  type WritingSkillId,
-} from '../../novel-writing/writing-skills'
+import { resolveWritingSkillStageLabel } from '../../novel-writing/writing-skills'
 import { formatAdmissionError } from '../quality/admission-error'
 import { WRITING_SKILL_HUMANIZE_VERSION } from './writing-skill-humanize-methods'
 
@@ -183,12 +180,16 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
           ...llmControlOptions,
           writing_skills: options.writing_skills ?? options.writingSkills,
           writingSkills: options.writing_skills ?? options.writingSkills,
-          onSkillProgress: async (skillId: WritingSkillId, progress?: { index?: number; total?: number }) => {
+          onSkillProgress: async (skillId: string, progress?: { index?: number; total?: number; label?: string }) => {
             const skillIndex = Number(progress?.index)
             const skillTotal = Number(progress?.total)
             const hasCounter = Number.isInteger(skillIndex) && Number.isInteger(skillTotal)
               && skillIndex >= 1 && skillTotal >= 1
-            const baseLabel = WRITING_SKILL_STAGE_LABEL[skillId]
+            // resolveWritingSkillStageLabel never returns undefined: installed ids
+            // fall back to the runner-provided pack label or the bounded id.
+            const baseLabel = String(
+              progress?.label || resolveWritingSkillStageLabel(skillId),
+            ).slice(0, 60)
             await onStage('writing_skill_humanize', {
               status: 'running',
               skill_id: skillId,
