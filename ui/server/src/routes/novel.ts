@@ -71,6 +71,7 @@ export function registerNovelRoutes(app: Express, getWorkspace: () => string, op
     withChapterAuthorityFence,
     buildChapterContextPackage: writingService.buildChapterContextPackage,
     repairChapterMaterials: writingService.repairChapterMaterials,
+    autoRepairChapterPreflightGaps: writingService.autoRepairChapterPreflightGaps,
   })
 
   registerNovelTruthRoutes(app, {

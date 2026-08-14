@@ -46,6 +46,14 @@ type ChapterContextRoutesContext = {
     repairKeys?: string[]
     signal?: AbortSignal
   }) => Promise<any>
+  autoRepairChapterPreflightGaps?: (
+    activeWorkspace: string,
+    project: any,
+    chapter: any,
+    contextPackage: any,
+    modelId?: number,
+    options?: any,
+  ) => Promise<any>
   withChapterAuthorityFence: ChapterAuthorityFence
   executeNovelAgent?: typeof executeNovelAgent
 }
@@ -339,6 +347,83 @@ export function registerNovelChapterContextRoutes(app: Express, ctx: ChapterCont
         preflight: 'error' in refreshed ? null : refreshed.contextPackage.preflight,
         material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
       } }
+        },
+      })
+      if (outcome.status) return res.status(outcome.status).json(outcome.body)
+      return res.json(outcome.body)
+    } catch (error) {
+      const authorityProjection = projectChapterAuthorityRouteError(error)
+      if (authorityProjection) return res.status(authorityProjection.status).json(authorityProjection.body)
+      if (sourceDispatchBoundary === 'legacy') {
+        return res.status(500).json({ error: String(error) })
+      }
+      const projected = projectMaterialRepairRouteError(error)
+      if (projected) return res.status(projected.status).json(projected.body)
+      return res.status(500).json({ error: '材料补齐失败' })
+    }
+  })
+
+  // 质检面板"一键补材料"：补齐预检材料缺口（蓝图/冲突/章末钩子/场景卡/世界观/角色卡等）。
+  // 修订只重写正文不会动这些字段，必须走材料补齐才能消掉复检里的缺口。
+  app.post('/api/novel/chapters/:chapterId/preflight/auto-repair', async (req, res) => {
+    let sourceDispatchBoundary: 'legacy' | 'resolving' | 'mcp' = 'legacy'
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const projectId = Number(req.body.project_id || req.query.project_id || 0)
+      const chapterId = Number(req.params.chapterId)
+      const project = await ctx.getProject(activeWorkspace, projectId)
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      sourceDispatchBoundary = 'resolving'
+      const chapterGenerationSource = resolveChapterGenerationSource(project)
+      const expectedAuthorityFingerprint = resolveChapterAuthorityRequestFingerprint(req, project)
+      if (chapterGenerationSource.active === 'mcp') {
+        sourceDispatchBoundary = 'mcp'
+        const result = await ctx.repairChapterMaterials({
+          activeWorkspace,
+          projectId,
+          chapterId,
+          expectedAuthorityFingerprint,
+          repairKeys: normalizeMaterialRepairKeysFromBody(req.body),
+        })
+        return res.json({
+          ...result,
+          material_score: buildMaterialScore(result.context_package),
+        })
+      }
+      sourceDispatchBoundary = 'legacy'
+      const outcome: { status?: number; body: any } = await ctx.withChapterAuthorityFence({
+        activeWorkspace,
+        projectId,
+        expectedAuthorityFingerprint,
+        operation: async () => {
+          const [chapters, worldbuilding, characters, outlines, reviews] = await Promise.all([
+            listNovelChapters(activeWorkspace, projectId),
+            listNovelWorldbuilding(activeWorkspace, projectId),
+            listNovelCharacters(activeWorkspace, projectId),
+            listNovelOutlines(activeWorkspace, projectId),
+            listNovelReviews(activeWorkspace, projectId),
+          ])
+          const chapter = chapters.find(item => item.id === chapterId)
+          if (!chapter) return { status: 404, body: { error: 'chapter not found' } }
+          const contextPackage = await ctx.buildChapterContextPackage(activeWorkspace, project, chapter, chapters, worldbuilding, characters, outlines, reviews)
+          const modelId = Number(req.body?.model_id || 0) || undefined
+          const repairResult = await ctx.autoRepairChapterPreflightGaps!(
+            activeWorkspace,
+            project,
+            chapter,
+            contextPackage,
+            modelId,
+            { persist: true },
+          )
+          const refreshed = await loadChapterContext(ctx, projectId, chapterId)
+          return { body: {
+            ok: true,
+            applied: asArray(repairResult?.repaired),
+            errors: asArray(repairResult?.errors),
+            context_package: 'error' in refreshed ? null : refreshed.contextPackage,
+            preflight: 'error' in refreshed ? null : refreshed.contextPackage.preflight,
+            material_score: 'error' in refreshed ? null : buildMaterialScore(refreshed.contextPackage),
+          } }
         },
       })
       if (outcome.status) return res.status(outcome.status).json(outcome.body)

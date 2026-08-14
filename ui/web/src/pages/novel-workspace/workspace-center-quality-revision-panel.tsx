@@ -306,6 +306,7 @@ export function WorkspaceCenterQualityRevisionPanel({
   proseQualityLoading = false,
   editorReportLoading = false,
   onRefreshProseQuality,
+  onRepairPreflightGaps,
   onApplyEditorRevision,
   onCancelEditorRevision,
   onRetryEditorRevision,
@@ -320,6 +321,7 @@ export function WorkspaceCenterQualityRevisionPanel({
   proseQualityLoading?: boolean
   editorReportLoading?: boolean
   onRefreshProseQuality?: () => void
+  onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
@@ -347,6 +349,7 @@ export function WorkspaceCenterQualityRevisionPanel({
     }
   }
   const [customRevisionPrompt, setCustomRevisionPrompt] = React.useState('')
+  const [repairingPreflight, setRepairingPreflight] = React.useState(false)
   const currentEditorRevisionTask = editorRevisionTask?.chapter_id === chapterId ? editorRevisionTask : null
   const revisionActive = Boolean(currentEditorRevisionTask && isActiveEditorRevisionTask(currentEditorRevisionTask))
 
@@ -639,9 +642,38 @@ export function WorkspaceCenterQualityRevisionPanel({
               </section>
             ) : null}
 
-            {checks.length > 0 ? (
+            {checks.length > 0 && !checks.some((check: any) => typeof check?.ok === 'boolean') ? (
               <section className="novel-quality-section">
                 <div className="novel-quality-section-title">预检清单（{checks.length}）</div>
+                <Text type="secondary" className="novel-quality-revision-hint">
+                  这份是旧版报告，没有记录预检通过状态；点「复检当前版本」重新生成即可看到真实缺口。
+                </Text>
+              </section>
+            ) : checks.length > 0 ? (
+              <section className="novel-quality-section">
+                <div className="novel-quality-section-title novel-quality-section-title-with-action">
+                  <span>预检清单（{checks.length}）</span>
+                  {onRepairPreflightGaps && checks.some((check: any) => !check?.ok) ? (
+                    <Button
+                      size="small"
+                      loading={repairingPreflight}
+                      disabled={revisionActive}
+                      onClick={async () => {
+                        setRepairingPreflight(true)
+                        try {
+                          await onRepairPreflightGaps()
+                        } finally {
+                          setRepairingPreflight(false)
+                        }
+                      }}
+                    >一键补材料</Button>
+                  ) : null}
+                </div>
+                {checks.some((check: any) => !check?.ok) ? (
+                  <Text type="secondary" className="novel-quality-revision-hint">
+                    预检缺口是章节材料（场景卡/钩子/世界观/角色卡等）不足，修订正文不会消掉它们；点「一键补材料」自动补齐后再复检。
+                  </Text>
+                ) : null}
                 <div className="novel-quality-row-list">
                   {checks.map((check: any, index: number) => {
                     const ok = Boolean(check?.ok)

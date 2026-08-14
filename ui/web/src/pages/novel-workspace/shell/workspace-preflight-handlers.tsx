@@ -267,6 +267,64 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
     }
   }
 
+  // 质检面板"一键补材料"：补齐材料层预检缺口（蓝图/冲突/章末钩子/场景卡/世界观/角色卡）。
+  // 修订只重写正文，动不了这些字段，必须单独补材料。
+  const repairChapterPreflightMaterials = async (chapterId?: number) => {
+    const invocation = beginInvocation()
+    if (!invocation) return false
+    try {
+      const gate = invocation.gate
+      const targetChapterId = Number(chapterId || activeChapter?.id || 0)
+      if (!targetChapterId) {
+        message.warning('无法定位需要补材料的章节')
+        return false
+      }
+      if (!await flushPendingSave()) return false
+      if (!invocationIsCurrent(invocation)) return false
+
+      const messageKey = GENERATION_PREFLIGHT_REPAIR_MESSAGE_KEY
+      message.loading({ content: '正在补齐本章预检材料...', key: messageKey, duration: 0 })
+      try {
+        const res = await apiClient.post(`/novel/chapters/${targetChapterId}/preflight/auto-repair`, {
+          project_id: projectId,
+          ...(gate.active === 'mcp' ? {} : { model_id: gate.modelId }),
+        }, {
+          headers: { [CHAPTER_GENERATION_SOURCE_FINGERPRINT_HEADER]: invocation.sourceFingerprint },
+        })
+        if (!invocationIsCurrent(invocation)) return false
+        const applied = Array.isArray(res.data?.applied) ? res.data.applied : []
+        const errors = Array.isArray(res.data?.errors) ? res.data.errors : []
+        const reloadToken = await loadProjectModules()
+        if (!reloadTokenIsCurrent(reloadToken)) return false
+        if (!invocationIsCurrent(invocation, true)) return false
+        if (errors.length) {
+          message.warning({
+            content: `材料补齐完成 ${applied.length} 项，但有 ${errors.length} 项降级：${String(errors[0]).slice(0, 120)}`,
+            key: messageKey,
+            duration: 5,
+          })
+        } else {
+          message.success({
+            content: applied.length ? `已补齐 ${applied.length} 项预检材料，请复检确认` : '预检材料已刷新',
+            key: messageKey,
+            duration: 3,
+          })
+        }
+        return true
+      } catch (error: any) {
+        if (!invocationIsCurrent(invocation)) return false
+        message.error({
+          content: error?.response?.data?.error || error?.message || '补齐预检材料失败',
+          key: messageKey,
+          duration: 4,
+        })
+        return false
+      }
+    } finally {
+      releaseChapterInvocation(invocation.owner)
+    }
+  }
+
   const runGenerationPreflightRepairSpec = async (
     payload: any,
     spec: GenerationPreflightRepairActionSpec,
@@ -478,6 +536,7 @@ export function createPreflightHandlers(deps: PreflightHandlerDeps) {
   return {
     generationPreflightChecks,
     repairGenerationPreflightGaps,
+    repairChapterPreflightMaterials,
     runGenerationPreflightRepairSpec,
     buildGenerationPreflightRepairActions,
     renderGenerationPreflightRepairActions,

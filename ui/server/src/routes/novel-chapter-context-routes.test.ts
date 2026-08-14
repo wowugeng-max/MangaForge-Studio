@@ -934,5 +934,131 @@ describe('novel chapter context repair', () => {
   test('wires the writing material repair service into the chapter context routes', () => {
     const source = readFileSync(join(import.meta.dir, 'novel.ts'), 'utf8')
     expect(source).toContain('repairChapterMaterials: writingService.repairChapterMaterials')
+    expect(source).toContain('autoRepairChapterPreflightGaps: writingService.autoRepairChapterPreflightGaps')
+  })
+
+  test('preflight auto-repair runs the full persisted material repair on the model path', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mangaforge-preflight-auto-repair-model-'))
+    try {
+      const project = await createNovelProject(workspace, { title: '预检补材料模型路径' })
+      const chapter = await createNovelChapter(workspace, {
+        project_id: project.id,
+        chapter_no: 1,
+        title: '第一章',
+      })
+      const repairCalls: any[] = []
+      let mcpCalls = 0
+      const leases = new ChapterSourceLeaseRegistry()
+      const contextPackage = {
+        ...readyContextFixture(),
+        preflight: {
+          ready: false,
+          strict_ready: false,
+          checks: [
+            { key: 'worldbuilding', ok: false },
+            { key: 'ending_hook', ok: false },
+          ],
+          warnings: [],
+          blockers: [],
+        },
+      }
+      const { app, handlers } = createRouteHarness()
+      registerNovelChapterContextRoutes(app as any, {
+        getWorkspace: () => workspace,
+        getProject: getNovelProject,
+        withChapterAuthorityFence: createChapterAuthorityFence({
+          chapterSourceLeases: leases,
+          readProject: getNovelProject,
+        }),
+        buildChapterContextPackage: async () => contextPackage,
+        repairChapterMaterials: async () => {
+          mcpCalls += 1
+          throw new Error('model project must not dispatch MCP material repair')
+        },
+        autoRepairChapterPreflightGaps: async (...args: any[]) => {
+          repairCalls.push(args)
+          return {
+            ok: true,
+            repaired: [{ type: 'chapter_blueprint_updated' }, { type: 'worldbuilding_created' }],
+            errors: [],
+          }
+        },
+      } as any)
+
+      const response = await callRoute(
+        handlers.get('POST /api/novel/chapters/:chapterId/preflight/auto-repair'),
+        { params: { chapterId: String(chapter.id) }, query: {}, body: { project_id: project.id, model_id: 217 } },
+      )
+
+      expect(response.statusCode).toBe(200)
+      expect(response.body.ok).toBe(true)
+      expect(response.body.applied.map((item: any) => item.type))
+        .toEqual(['chapter_blueprint_updated', 'worldbuilding_created'])
+      expect(response.body.preflight).toBeTruthy()
+      expect(repairCalls).toHaveLength(1)
+      expect(repairCalls[0][4]).toBe(217)
+      expect(repairCalls[0][5]).toMatchObject({ persist: true })
+      expect(mcpCalls).toBe(0)
+      expect(leases.isActive(workspace, project.id)).toBe(false)
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
+  })
+
+  test('preflight auto-repair dispatches MCP repair with repair keys and no model material path', async () => {
+    const repairCalls: any[] = []
+    let modelRepairCalls = 0
+    let modelContextCalls = 0
+    const requestFingerprint = `sha256:${'a'.repeat(64)}`
+    const resultContext = readyContextFixture()
+    const { app, handlers } = createRouteHarness()
+    registerNovelChapterContextRoutes(app as any, {
+      getWorkspace: () => 'workspace',
+      getProject: async () => mcpProjectFixture(),
+      buildChapterContextPackage: async () => {
+        modelContextCalls += 1
+        throw new Error('MCP route must not load model material context')
+      },
+      repairChapterMaterials: async input => {
+        repairCalls.push(input)
+        return {
+          ok: true,
+          source: 'mcp',
+          applied: [{ type: 'chapter_patch_applied' }],
+          context_package: resultContext,
+          preflight: resultContext.preflight,
+        }
+      },
+      autoRepairChapterPreflightGaps: async () => {
+        modelRepairCalls += 1
+        throw new Error('MCP route must not run model preflight repair')
+      },
+    } as any)
+
+    const response = await callRoute(
+      handlers.get('POST /api/novel/chapters/:chapterId/preflight/auto-repair'),
+      {
+        params: { chapterId: '9' },
+        query: {},
+        headers: { 'x-chapter-generation-source-fingerprint': requestFingerprint },
+        body: { project_id: 5, repair_keys: ['worldbuilding', 'ending_hook'] },
+      },
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toMatchObject({
+      ok: true,
+      source: 'mcp',
+      material_score: { can_generate: true },
+    })
+    expect(repairCalls).toEqual([{
+      activeWorkspace: 'workspace',
+      projectId: 5,
+      chapterId: 9,
+      expectedAuthorityFingerprint: requestFingerprint,
+      repairKeys: ['worldbuilding', 'ending_hook'],
+    }])
+    expect(modelRepairCalls).toBe(0)
+    expect(modelContextCalls).toBe(0)
   })
 })

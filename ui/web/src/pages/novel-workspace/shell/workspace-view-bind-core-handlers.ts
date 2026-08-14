@@ -638,6 +638,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
   const {
     generationPreflightChecks,
     repairGenerationPreflightGaps,
+    repairChapterPreflightMaterials,
     runGenerationPreflightRepairSpec,
     buildGenerationPreflightRepairActions,
     renderGenerationPreflightRepairActions,
@@ -815,6 +816,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     renderGenerationPreflightRepairActions,
     renderPreflightModalContent,
     repairActiveDeslopGate,
+    repairChapterPreflightMaterials,
     repairContextAndGenerateCurrentChapter,
     repairGenerationPreflightGaps,
     repairWritingQueuePlan,
