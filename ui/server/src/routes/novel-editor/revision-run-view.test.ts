@@ -188,6 +188,69 @@ describe('editor revision public run view', () => {
     })
   })
 
+  test('projects active skill progress with a server-recomputed label', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phases.generate_candidate = {
+      status: 'running',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.500Z',
+    }
+    ;(checkpoint as any).skill_progress = {
+      skill_id: 'fiction-humanizer-zh',
+      index: 2,
+      total: 3,
+      started_at: '2030-01-01T00:00:01.000Z',
+      label: 'EVIL_STORED_LABEL',
+    }
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
+
+    expect((view as any).skill_progress).toEqual({
+      skill_id: 'fiction-humanizer-zh',
+      index: 2,
+      total: 3,
+      label: '写作skill · 小说去AI味',
+      started_at: '2030-01-01T00:00:01.000Z',
+    })
+    expect(JSON.stringify(view)).not.toContain('EVIL_STORED_LABEL')
+  })
+
+  test.each([
+    { name: 'unknown skill id', skill_progress: { skill_id: 'evil-skill', index: 1, total: 2 } },
+    { name: 'absurd index', skill_progress: { skill_id: 'remove-ai-flavor', index: 99, total: 2 } },
+    { name: 'non-integer index', skill_progress: { skill_id: 'remove-ai-flavor', index: 1.5, total: 2 } },
+    { name: 'index above total', skill_progress: { skill_id: 'remove-ai-flavor', index: 3, total: 2 } },
+    { name: 'non-object', skill_progress: 'remove-ai-flavor' },
+  ])('omits invalid skill progress: $name', ({ skill_progress }) => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phases.generate_candidate = {
+      status: 'running',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.500Z',
+    }
+    ;(checkpoint as any).skill_progress = skill_progress
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint))
+
+    expect('skill_progress' in view).toBe(false)
+  })
+
+  test('omits skill progress once the run is no longer active', () => {
+    const checkpoint = initialCheckpoint()
+    checkpoint.phases.generate_candidate = {
+      status: 'canceled',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.500Z',
+      completed_at: '2030-01-01T00:00:01.500Z',
+    }
+    ;(checkpoint as any).skill_progress = {
+      skill_id: 'fiction-humanizer-zh',
+      index: 1,
+      total: 2,
+    }
+    const view = buildPublicEditorRevisionRun(runWithCheckpoint(checkpoint, 'canceled'))
+
+    expect('skill_progress' in view).toBe(false)
+  })
+
   test('exposes only bounded chapter task provenance and drops source secrets', () => {
     const checkpoint = initialCheckpoint()
     ;(checkpoint as any).chapter_generation_source = {

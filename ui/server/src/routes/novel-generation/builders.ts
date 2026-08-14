@@ -1050,6 +1050,7 @@ export function standaloneProseServiceStageLabel(key: string) {
     store: '写入章节正文与版本',
     story_state: '更新故事状态机',
     humanize_postprocess: 'R76人味后处理',
+    writing_skill_humanize: '写作skill去AI味',
     opening_handoff_bridge: '开篇强交接桥接',
     zhuque_fast: '朱雀验证快路径',
     mcp_connect: '连接 MCP 服务',

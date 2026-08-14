@@ -153,6 +153,23 @@ export function composeRevisionPromptHint({
 const REVISION_LANGUAGE_HARD_RULE = '语言硬约束：中文网文正文禁止夹杂英文粘连词、拼音碎片、葡萄牙语或整段外语；若报告或人工指令要求清英文/清外语，必须逐处替换为自然简体中文，必要专名除外。'
 const REVISION_JSON_OUTPUT_HARD_RULE = 'JSON 格式硬约束：只输出一个可直接 JSON.parse 的 JSON object，不要输出 Markdown 代码围栏或解释；正文对白优先使用中文引号“”；若必须使用英文双引号，英文双引号必须转义并遵守 JSON 规则。'
 
+export function buildRevisionLengthConstraintLine(originalLength: number, wordTarget?: any) {
+  const length = Math.max(0, Math.floor(Number(originalLength) || 0))
+  const targetMin = Math.max(0, Math.floor(Number(wordTarget?.min || 0)))
+  const targetMax = Math.max(0, Math.floor(Number(wordTarget?.max || 0)))
+  const range = String(wordTarget?.rangeText || (targetMin && targetMax ? `${targetMin}-${targetMax} 字` : '')).trim()
+  if (range && targetMax > 0 && length > targetMax) {
+    return `原文长度：${length} 字，章节字数目标：${range}。原文已超过目标，必须压缩到目标区间并保留完整情节与章末钩子；禁止大幅扩写或补水，允许相对原文约 5% 的改写波动。`
+  }
+  if (range && targetMin > 0 && length < targetMin) {
+    return `原文长度：${length} 字，章节字数目标：${range}。可以补到目标区间，但不要写成注水长章。`
+  }
+  if (range) {
+    return `原文长度：${length} 字，章节字数目标：${range}。修订后必须落在目标区间，不要越修越长。`
+  }
+  return `原文长度：${length} 字。修订后应保留完整章节，字数尽量控制在原文的 70%-130%。`
+}
+
 export function buildEditorRevisionPrompt({
   project,
   chapter,
@@ -172,6 +189,10 @@ export function buildEditorRevisionPrompt({
 }) {
   const originalText = String(chapter.chapter_text || '')
   const originalLength = originalText.length
+  const wordTarget = contextPackage?.chapter_target?.word_target
+    || contextPackage?.chapterTarget?.word_target
+    || null
+  const lengthConstraintLine = buildRevisionLengthConstraintLine(originalLength, wordTarget)
   const workflowRevisionContextBrief = buildWorkflowRevisionContextBrief(contextPackage, chapter)
   const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || 'surgical_patch')
   const structural = strategy === 'structural_rewrite'
@@ -225,7 +246,7 @@ export function buildEditorRevisionPrompt({
       `项目：${project.title}`,
       '要求：优先消除进度回放、章首承接失败、章末交接缺口；可以改写开篇与中段冲突，但必须承接上一章已兑现事实，不得重演已打完的高潮。',
       `本次修订模式：${revisionMode}。结构修订允许较大改动，不只是润色。`,
-      `原文长度：${originalLength} 字。修订后应保留完整章节，字数尽量控制在原文的 70%-130%。`,
+      lengthConstraintLine,
       REVISION_LANGUAGE_HARD_RULE,
       REVISION_JSON_OUTPUT_HARD_RULE,
       '硬优先级（只修这些，不要同时处理全部交稿标签）：',
@@ -265,7 +286,8 @@ export function buildEditorRevisionPrompt({
     '语言改写证据必须写入 revision_receipts，并引用修订后正文中的可定位短句。',
     REVISION_JSON_OUTPUT_HARD_RULE,
     `oh-story workflow-revision：本次属于已写章节大修/回炉；修订前按 Step 2 做上下文对照，修订后按 Step 4 做级联检查和 Step 5 质量检查。`,
-    `原文长度：${originalLength} 字；修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
+    lengthConstraintLine,
+    `修订后字数差异超过原文 30% 或超过 800 字（取较大值）时，必须在 revision_scope_guard 标记 over_limit=true 并说明是否需要拆成局部二修。`,
     'workflow-revision 上下文对照：必须逐项核对 previous_chapter、current_chapter、next_chapter 或下一章细纲、foreshadowing、character_cards、timeline、setting_context、资产归属和关系边界；缺来源时 status=warn/fail，不得假设已经一致。',
     '正文工艺硬约束：不要用环境描写替代剧情推进；涉及战斗/行动时必须补足动作链、空间变化、代价和结果；删改时不得破坏连续性。',
     '级联检查硬约束：如果修订改变伏笔、时间线、角色状态、关系、资产归属或世界观设定，revision_receipts 必须写 affected_chapters 和 cascade_impacts，并说明后续章节或下一章细纲需要如何同步。',

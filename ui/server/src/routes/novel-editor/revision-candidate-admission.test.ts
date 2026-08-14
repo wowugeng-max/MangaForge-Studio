@@ -4,6 +4,7 @@ import { EDITOR_REVISION_PHASES } from './editor-revision-contract'
 import {
   admitRevisionCandidate,
   applySurgicalRevisionPatch,
+  resolveRevisionCandidateLengthBounds,
   RevisionCandidateAdmissionError,
   revisionTextHash,
 } from './revision-candidate-admission'
@@ -42,9 +43,9 @@ function malformedFencedResult(chapterText: string, options: {
   }
 }
 
-function captureAdmissionError(sourceText: string, result: any) {
+function captureAdmissionError(sourceText: string, result: any, wordTarget?: any) {
   try {
-    admitRevisionCandidate({ sourceText, result })
+    admitRevisionCandidate({ sourceText, result, wordTarget })
   } catch (error) {
     expect(error).toBeInstanceOf(RevisionCandidateAdmissionError)
     return error as RevisionCandidateAdmissionError
@@ -63,6 +64,71 @@ describe('editor revision contract', () => {
       'record_continuity_warning',
       'completed',
     ])
+  })
+})
+
+describe('resolveRevisionCandidateLengthBounds', () => {
+  test('keeps the 70-130 percent source band when no word target is set', () => {
+    expect(resolveRevisionCandidateLengthBounds(2000)).toEqual({
+      minimumCharCount: 1400,
+      maximumCharCount: 2600,
+    })
+  })
+
+  test('lets an overlong chapter contract into the word-target band and forbids further growth', () => {
+    expect(resolveRevisionCandidateLengthBounds(6484, {
+      mode: 'custom',
+      label: '自定义 3000 字',
+      target: 3000,
+      min: 2700,
+      max: 3300,
+      rangeText: '2700-3300 字',
+    })).toEqual({
+      minimumCharCount: 2700,
+      maximumCharCount: 6808,
+    })
+  })
+
+  test('lets a standard-mode overlong chapter contract to the workbench 3000-word floor', () => {
+    expect(resolveRevisionCandidateLengthBounds(6484, {
+      mode: 'standard',
+      label: '标准章',
+      target: 4200,
+      min: 3780,
+      max: 4620,
+      rangeText: '3780-4620 字',
+    })).toEqual({
+      minimumCharCount: 2700,
+      maximumCharCount: 6808,
+    })
+  })
+
+  test('does not let a long-chapter target collapse to the 3000-word floor', () => {
+    expect(resolveRevisionCandidateLengthBounds(15000, {
+      mode: 'long',
+      label: '长章',
+      target: 10000,
+      min: 9000,
+      max: 11000,
+      rangeText: '9000-11000 字',
+    })).toEqual({
+      minimumCharCount: 9000,
+      maximumCharCount: 15750,
+    })
+  })
+
+  test('allows a small rewrite variance when the source is only slightly over the word target', () => {
+    expect(resolveRevisionCandidateLengthBounds(4712, {
+      mode: 'standard',
+      label: '标准章',
+      target: 4200,
+      min: 3780,
+      max: 4620,
+      rangeText: '3780-4620 字',
+    })).toEqual({
+      minimumCharCount: 2700,
+      maximumCharCount: 4947,
+    })
   })
 })
 
@@ -265,6 +331,89 @@ describe('admitRevisionCandidate', () => {
     const sourceText = `${'甲'.repeat(1199)}。`
     const candidate = `${'乙'.repeat(430)}“现在就走。”${'丙'.repeat(463)}。`
     expect(admitRevisionCandidate({ sourceText, result: completeResult(candidate) }).chapterText).toBe(candidate)
+  })
+
+  test('admits a complete web-novel contraction that the old 70-percent rule would reject', () => {
+    const sourceText = `${'甲'.repeat(6483)}。`
+    const candidate = `${'乙'.repeat(3099)}。`
+    const wordTarget = {
+      mode: 'standard' as const,
+      label: '标准章',
+      target: 4200,
+      min: 3780,
+      max: 4620,
+      rangeText: '3780-4620 字',
+    }
+    const admission = admitRevisionCandidate({
+      sourceText,
+      result: completeResult(candidate),
+      wordTarget,
+    })
+
+    expect(admission.candidateCharCount).toBe(3100)
+    expect(admission.minimumCharCount).toBe(2700)
+    expect(admission.maximumCharCount).toBe(6808)
+    expect(admission.chapterText).toBe(candidate)
+  })
+
+  test('admits a slightly longer structural rewrite when the source is barely over target', () => {
+    const sourceText = `${'甲'.repeat(4711)}。`
+    const candidate = `${'乙'.repeat(4809)}。`
+    const admission = admitRevisionCandidate({
+      sourceText,
+      result: completeResult(candidate),
+      wordTarget: {
+        mode: 'standard',
+        label: '标准章',
+        target: 4200,
+        min: 3780,
+        max: 4620,
+        rangeText: '3780-4620 字',
+      },
+    })
+
+    expect(admission.candidateCharCount).toBe(4810)
+    expect(admission.minimumCharCount).toBe(2700)
+    expect(admission.maximumCharCount).toBe(4947)
+    expect(admission.chapterText).toBe(candidate)
+  })
+
+  test('still rejects a truncated stub when a word target would allow contraction', () => {
+    const sourceText = `${'甲'.repeat(6483)}。`
+    const error = captureAdmissionError(sourceText, completeResult(`${'残缺内容。'.repeat(48)}仍停在`), {
+      mode: 'custom',
+      label: '自定义 3000 字',
+      target: 3000,
+      min: 2700,
+      max: 3300,
+      rangeText: '2700-3300 字',
+    })
+
+    expect(error.code).toBe('REVISION_CANDIDATE_TOO_SHORT')
+    expect(error.diagnostics).toMatchObject({
+      source_char_count: 6484,
+      candidate_char_count: 243,
+      minimum_char_count: 2700,
+    })
+  })
+
+  test('rejects further growth when the source is already over the word target', () => {
+    const sourceText = `${'甲'.repeat(6483)}。`
+    const error = captureAdmissionError(sourceText, completeResult(`${'乙'.repeat(7199)}。`), {
+      mode: 'custom',
+      label: '自定义 3000 字',
+      target: 3000,
+      min: 2700,
+      max: 3300,
+      rangeText: '2700-3300 字',
+    })
+
+    expect(error.code).toBe('REVISION_CANDIDATE_TOO_LONG')
+    expect(error.diagnostics).toMatchObject({
+      source_char_count: 6484,
+      candidate_char_count: 7200,
+      maximum_char_count: 6808,
+    })
   })
 
   test('accepts exact 70 and 130 percent boundaries and rejects one prose character outside', () => {

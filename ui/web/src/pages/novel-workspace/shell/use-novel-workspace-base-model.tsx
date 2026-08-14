@@ -24,6 +24,9 @@ import {
   useNovelProjectWorkspaceUiState,
 } from '../useNovelProjectWorkspaceUiState'
 import {
+  resolveWritingSkillsEnabled,
+} from '../writingSkillsModel'
+import {
   useReferenceWorkflow,
 } from '../useReferenceWorkflow'
 import {
@@ -363,6 +366,8 @@ export function useNovelWorkspaceBaseModel() {
     unattendedTargetChapter, setUnattendedTargetChapter,
     chapterWordTargetMode, setChapterWordTargetMode,
     chapterTargetWordCount, setChapterTargetWordCount,
+    writingSkillsEnabled, setWritingSkillsEnabled,
+    fictionHumanizerMode, setFictionHumanizerMode,
     activeChapterDiagnostics, setActiveChapterDiagnostics,
     diagnosticsRequestRef,
     activeChapterContextPackage, setActiveChapterContextPackage,
@@ -475,6 +480,16 @@ export function useNovelWorkspaceBaseModel() {
     chapterStatusFilter,
     chapterSortMode,
   })
+  useEffect(() => {
+    const resolved = resolveWritingSkillsEnabled({ project: selectedProject })
+    setWritingSkillsEnabled(resolved.enabled)
+    setFictionHumanizerMode(resolved.fiction_humanizer_mode)
+  }, [
+    selectedProject?.id,
+    selectedProject?.reference_config?.writing_skills,
+    setFictionHumanizerMode,
+    setWritingSkillsEnabled,
+  ])
   const activeChapterIdRef = useRef(Number(activeChapterId || activeChapter?.id || 0))
   activeChapterIdRef.current = Number(activeChapterId || activeChapter?.id || 0)
   const currentProjectIdRef = useRef(projectId)
@@ -991,6 +1006,8 @@ export function useNovelWorkspaceBaseModel() {
     chapterSortMode,
     chapterStatusFilter,
     chapterTargetWordCount,
+    writingSkillsEnabled,
+    fictionHumanizerMode,
     chapterTreeData,
     chapterVersionDetail,
     chapterVersions,
@@ -1140,6 +1157,8 @@ export function useNovelWorkspaceBaseModel() {
     setChapterTargetWordCount,
     setChapterVersionDetail,
     setChapterWordTargetMode,
+    setWritingSkillsEnabled,
+    setFictionHumanizerMode,
     setChapters,
     setCommercialToolsOpen,
     setConsistencyGraphOpen,

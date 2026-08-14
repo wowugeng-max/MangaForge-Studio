@@ -63,6 +63,21 @@ const STEP_STATUSES = new Set<EditorRevisionStepStatus>([
   'canceled',
 ])
 
+/** 服务端投影的当前写作 skill 轮次;label 缺失时回退 skill_id */
+function skillProgressText(task: EditorRevisionTask): string {
+  const progress = task.skill_progress
+  if (!progress || typeof progress !== 'object') return ''
+  const name = typeof progress.label === 'string' && progress.label
+    ? progress.label
+    : typeof progress.skill_id === 'string' ? progress.skill_id : ''
+  if (!name) return ''
+  const index = Number(progress.index)
+  const total = Number(progress.total)
+  return Number.isInteger(index) && Number.isInteger(total) && index >= 1 && total >= index
+    ? `${name}（${index}/${total}）`
+    : name
+}
+
 export function formatPhaseDuration(totalSeconds: number): string {
   const seconds = Math.max(0, Math.floor(totalSeconds))
   if (seconds < 60) return `${seconds}秒`
@@ -119,6 +134,8 @@ export function buildEditorRevisionProgress(
     hint = '排队等待处理'
   } else if (running) {
     const parts = [`当前阶段：${running.label}`]
+    const skillText = running.key === 'generate_candidate' ? skillProgressText(task) : ''
+    if (skillText) parts.push(skillText)
     if (runningSeconds !== null) parts.push(`已运行 ${formatPhaseDuration(runningSeconds)}`)
     if (stalled) {
       parts.push('已超出单阶段超时上限（10 分钟），可能异常，可取消修订后重试')

@@ -28,6 +28,10 @@ import {
   type WorkspacePrimaryArea,
 } from './workspace-core-area'
 import type { WorkspaceArea } from './workspace-types'
+import type {
+  FictionHumanizerMode,
+  WritingSkillEnabledMap,
+} from '../writingSkillsModel'
 
 const { Title } = Typography
 
@@ -50,10 +54,12 @@ export type NovelWorkspaceTopBarProps = {
   selectedProject: any
   setChapterGenerationSourceAuthority: (state: any) => void
   setChapterSourceMutationPending: (pending: boolean, token: ChapterSourceOperationToken) => void
+  setFictionHumanizerMode: (mode: FictionHumanizerMode) => void
   setSelectedModelId: (id: any) => void
   setShellMode: (mode: any) => void
   setTaskCenterOpen: (open: boolean) => void
   setWorkspaceArea: (area: any) => void
+  setWritingSkillsEnabled: (enabled: WritingSkillEnabledMap) => void
   workspaceArea: any
   workspaceAreaTabs: Array<{ key: any; label: any; icon?: any }>
 }
@@ -85,10 +91,12 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
     selectedProject,
     setChapterGenerationSourceAuthority,
     setChapterSourceMutationPending,
+    setFictionHumanizerMode,
     setSelectedModelId,
     setShellMode,
     setTaskCenterOpen,
     setWorkspaceArea,
+    setWritingSkillsEnabled,
     workspaceArea,
     workspaceAreaTabs,
   } = props
@@ -254,6 +262,10 @@ export function NovelWorkspaceTopBar(props: NovelWorkspaceTopBarProps) {
         onSelectedModelConfirmed={setSelectedModelId}
         sourcePending={sourcePending}
         onSourcePendingChange={setSourceOperationPending}
+        onWritingSkillsSaved={next => {
+          setWritingSkillsEnabled(next.enabled)
+          setFictionHumanizerMode(next.fiction_humanizer_mode)
+        }}
       />
     </>
   )

@@ -79,6 +79,25 @@ function mergePlainObjects(base: unknown, patch: unknown): Record<string, unknow
   return merged
 }
 
+/**
+ * Keys whose patch values are full snapshots, not incremental patches: when the
+ * patch carries the key (including null), the value replaces the old one wholesale.
+ */
+const SNAPSHOT_RAW_PAYLOAD_KEYS = ['writing_skill_humanize'] as const
+
+function applySnapshotRawPayloadKeys(
+  merged: Record<string, unknown>,
+  patch: unknown,
+): Record<string, unknown> {
+  const sanitizedPatch = sanitizeJsonValue(patch)
+  if (!isPlainObject(sanitizedPatch)) return merged
+  for (const key of SNAPSHOT_RAW_PAYLOAD_KEYS) {
+    if (!(key in sanitizedPatch) || sanitizedPatch[key] === undefined) continue
+    merged[key] = sanitizedPatch[key]
+  }
+  return merged
+}
+
 function currentPlanFields(patch: EditorRevisionChapterPatch) {
   const allowed: Partial<EditorRevisionChapterPatch> = {}
   for (const key of ['chapter_goal', 'chapter_summary', 'conflict', 'ending_hook'] as const) {
@@ -163,7 +182,10 @@ export async function commitEditorRevisionChapter(
       ...planFields,
       chapter_text: input.candidateText,
       raw_payload: {
-        ...mergePlainObjects(current.raw_payload, input.chapterPatch.raw_payload),
+        ...applySnapshotRawPayloadKeys(
+          mergePlainObjects(current.raw_payload, input.chapterPatch.raw_payload),
+          input.chapterPatch.raw_payload,
+        ),
         editor_revision_commit: {
           run_id: input.runId,
           source_hash: input.sourceTextHash,

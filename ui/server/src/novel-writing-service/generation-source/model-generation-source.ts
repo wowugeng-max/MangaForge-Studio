@@ -34,10 +34,8 @@ export type ModelGenerationSourceInput = {
   assertCurrent?: () => Promise<void>
 }
 
-function positiveModelId(value: unknown) {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) {
-    throw new RangeError('modelId must be a positive safe integer')
-  }
+function positiveModelId(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0) return undefined
   return value
 }
 
@@ -157,6 +155,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
     }
 
     const modelId = positiveModelId(input.modelId)
+    if (modelId === undefined) throw new RangeError('modelId must be a positive safe integer')
     this.legacy = false
     this.modelId = modelId
     const projectedProvenance = projectChapterTaskProvenance(input.provenance)
@@ -244,7 +243,7 @@ export class ModelGenerationSource implements GenerationSource, ChapterTaskExecu
       const result = await awaitStageResult(
         () => this.executeAgentPort!(agentId, project, context, {
           ...options,
-          modelId: String(this.modelId),
+          modelId: String(positiveModelId(Number(options.modelId)) ?? this.modelId),
         }),
       )
       await this.assertCurrent()

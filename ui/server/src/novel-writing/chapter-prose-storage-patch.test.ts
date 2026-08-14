@@ -231,6 +231,112 @@ describe('chapter prose storage patch builders', () => {
     })
   })
 
+  test('stores the writing skill humanize generation receipt', () => {
+    const writingSkillHumanize = {
+      version: 'writing_skill_humanize_v2',
+      fiction_humanizer_mode: 'polish',
+      enabled_ids: ['fiction-humanizer-zh'],
+      enabled: true,
+      skipped: false,
+      accepted: true,
+      changed: true,
+      before_chars: 1200,
+      after_chars: 1180,
+      chunk_count: 1,
+      model_id: 317,
+      passes: [{
+        id: 'fiction-humanizer-zh',
+        mode: 'polish',
+        accepted: true,
+        before_chars: 1200,
+        after_chars: 1180,
+        chunk_count: 1,
+      }],
+    }
+
+    const patch = buildChapterProseStoragePatch({
+      chapter: { raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '林序把门带上。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      writingSkillHumanize,
+    })
+
+    expect(patch.raw_payload.writing_skill_humanize).toEqual(writingSkillHumanize)
+  })
+
+  test('stores only a bounded credential-safe allowlist from writing skill reports', () => {
+    const credentials = {
+      authorization: 'writing-skill-bearer-value',
+      cookie: 'writing-skill-cookie-value',
+      token: 'writing-skill-token-value',
+      passToken: 'writing-skill-pass-token-value',
+    }
+    const sensitiveValues = Object.values(credentials)
+    const ordinaryContext = 'provider retry failed after preserving chapter context'
+
+    const patch = buildChapterProseStoragePatch({
+      chapter: { raw_payload: {} },
+      generatedTitlePatch: {},
+      finalText: '正文内容。',
+      finalContinuityNotes: [],
+      finalSceneBreakdown: [],
+      ohStoryDeliveryReceipts: {},
+      writingSkillHumanize: {
+        version: 'writing_skill_humanize_v2',
+        fiction_humanizer_mode: 'polish',
+        enabled_ids: ['fiction-humanizer-zh'],
+        enabled: true,
+        skipped: false,
+        accepted: false,
+        changed: false,
+        reason: `${ordinaryContext} Authorization: Bearer ${credentials.authorization} ${'r'.repeat(400)}`,
+        error: `Cookie: sid=${credentials.cookie} ${'e'.repeat(400)}`,
+        warnings: Array.from(
+          { length: 40 },
+          (_, index) => `warning ${index} access_token=${credentials.token} ${'w'.repeat(400)}`,
+        ),
+        before_chars: 1200,
+        after_chars: 1200,
+        chunk_count: 1,
+        passes: Array.from({ length: 20 }, (_, index) => ({
+          id: `fiction-humanizer-zh-${index}`,
+          mode: 'polish',
+          accepted: false,
+          reason: `pass ${index} token=${credentials.passToken} ${'p'.repeat(400)}`,
+          before_chars: 1200,
+          after_chars: 1200,
+          chunk_count: 1,
+          provider_payload: { authorization: credentials.authorization },
+        })),
+        provider_payload: { cookie: credentials.cookie },
+        unknown: 'must not persist',
+      },
+    })
+    const stored = patch.raw_payload.writing_skill_humanize
+    const serialized = JSON.stringify(stored)
+    const persistedStrings = [
+      stored.version,
+      stored.fiction_humanizer_mode,
+      ...stored.enabled_ids,
+      stored.reason,
+      stored.error,
+      ...stored.warnings,
+      ...stored.passes.flatMap((pass: any) => [pass.id, pass.mode, pass.reason]),
+    ].filter((value): value is string => typeof value === 'string')
+
+    expect(sensitiveValues.some(value => serialized.includes(value))).toBe(false)
+    expect(serialized).toContain(ordinaryContext)
+    expect(persistedStrings.every(value => value.length <= 240)).toBe(true)
+    expect(stored.warnings.length).toBeLessThanOrEqual(32)
+    expect(stored.passes.length).toBeLessThanOrEqual(16)
+    expect(stored).not.toHaveProperty('provider_payload')
+    expect(stored).not.toHaveProperty('unknown')
+    expect(stored.passes[0]).not.toHaveProperty('provider_payload')
+  })
+
   test('redacts credential headers, cookies, and credential key values in allowed report strings', () => {
     const credentials = {
       basic: 'dXNlcjpwYXNzd29yZA==',

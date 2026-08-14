@@ -26,6 +26,7 @@ import { normalizeReviewRecord } from '../../novel/normalize'
 import { reviewFromRow } from '../../novel/row-mappers'
 import { withNovelDbWrite } from '../../novel/sql-rows'
 import { buildCurrentChapterPlanAlignment } from '../../novel-writing/chapter-plan-from-prose'
+import { normalizeWritingSkillHumanizeForStorage } from '../../novel-writing/chapter-prose-storage-patch'
 import { countProseChars } from '../../novel-writing/word-target'
 import { compactPreparedStoryStateForRecovery } from '../../novel-writing-service/service/story-state-machine-update'
 import { resolveEditorRevisionRuntimeConfig } from '../../novel/editor-revision-runtime-config'
@@ -60,6 +61,8 @@ import {
   storyStateReceiptKey,
   type SingleChapterStoryStateReceipt,
 } from './single-chapter-story-state'
+import { createWritingSkillHumanizeMethods } from '../../novel-writing-service/service/writing-skill-humanize-methods'
+import { applyWritingSkillHumanizeToRevisionCandidate } from './revision-writing-skill-humanize'
 
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
 const RECOVERY_POLL_MS = 1_000
@@ -209,6 +212,14 @@ export type EditorRevisionWorkerDependencies = {
   prepareStoryState: typeof prepareSingleChapterStoryState
   applyStoryState: typeof applySingleChapterStoryState
   admitCandidate: typeof admitRevisionCandidate
+  runWritingSkillHumanizePass: (
+    activeWorkspace: string,
+    project: any,
+    contextPackage: any,
+    sourceText: string,
+    modelId?: number,
+    options?: any,
+  ) => Promise<{ final_text: string; report: Record<string, any> }>
   reportTaskCloseFailure: (input: TaskCloseFailureReport) => Promise<void> | void
   now: () => string
   setInterval: (callback: () => void | Promise<void>, ms: number) => any
@@ -488,6 +499,13 @@ export function createEditorRevisionWorker(
     prepareStoryState: prepareSingleChapterStoryState,
     applyStoryState: applySingleChapterStoryState,
     admitCandidate: admitRevisionCandidate,
+    runWritingSkillHumanizePass: createWritingSkillHumanizeMethods({
+      executeAgent: ctx.executeAgent || (async () => {
+        throw new Error('editor revision writing-skill pass missing executeAgent')
+      }),
+      getStageModelId: ctx.getStageModelId,
+      getStageTemperature: ctx.getStageTemperature,
+    }).runWritingSkillHumanizePass,
     reportTaskCloseFailure: reportEditorRevisionTaskCloseFailure,
     now: () => new Date().toISOString(),
     setInterval: (callback, ms) => setInterval(callback, ms),
@@ -610,7 +628,12 @@ export function createEditorRevisionWorker(
     lease: LeaseState,
   ) {
     const fresh = await loadActiveRun(input, runId, controller, lease)
-    return { fresh, checkpoint: parseCheckpoint(fresh.output_ref, fresh.status) }
+    const checkpoint = parseCheckpoint(fresh.output_ref, fresh.status)
+    // Mid-pass skill progress is only meaningful for the write that set it;
+    // a stale value left by a crashed/retried claim must never be re-persisted
+    // into a fresh phase start, so drop it at the load point.
+    delete checkpoint.skill_progress
+    return { fresh, checkpoint }
   }
 
   async function resolveRunRuntimeConfig(
@@ -993,6 +1016,78 @@ export function createEditorRevisionWorker(
     return checkpoint
   }
 
+  async function applyRevisionWritingSkillHumanize(args: {
+    runInput: EditorRevisionRunInput
+    project: any
+    controller: AbortController
+    execution: ChapterTaskExecution
+    taskSnapshot: RevisionChapterTaskSnapshot
+    llmTimeoutMs: number
+    candidate: NonNullable<EditorRevisionCheckpoint['candidate']>
+    onSkillProgress?: (skillId: string, progress?: { index?: number; total?: number }) => Promise<void>
+  }) {
+    const admitted = args.candidate
+    if (typeof deps.runWritingSkillHumanizePass !== 'function') {
+      return applyWritingSkillHumanizeToRevisionCandidate({
+        candidate: admitted,
+        result: {
+          final_text: admitted.text,
+          report: {
+            version: 'writing_skill_humanize_v2',
+            fiction_humanizer_mode: 'polish',
+            enabled_ids: [],
+            enabled: false,
+            skipped: true,
+            accepted: true,
+            changed: false,
+            warnings: [],
+            reason: 'runner_missing',
+            before_chars: admitted.char_count,
+            after_chars: admitted.char_count,
+            chunk_count: 0,
+            passes: [],
+          },
+        },
+      })
+    }
+    try {
+      if (args.controller.signal.aborted) throw signalReason(args.controller.signal)
+      const result = await deps.runWritingSkillHumanizePass(
+        activeWorkspace!,
+        args.project,
+        args.taskSnapshot.contextPackage,
+        admitted.text,
+        args.runInput.model_id,
+        {
+          chapterTaskExecution: args.execution,
+          abortSignal: args.controller.signal,
+          llmTimeoutMs: args.llmTimeoutMs,
+          onSkillProgress: args.onSkillProgress,
+        },
+      )
+      return applyWritingSkillHumanizeToRevisionCandidate({
+        candidate: admitted,
+        result,
+      })
+    } catch (error) {
+      const code = errorCode(error)
+      if (
+        args.controller.signal.aborted
+        || error instanceof StopProcessingError
+        || code === 'REVISION_CANCELED'
+        || code === 'REVISION_WORKER_STOPPED'
+        || code === 'REVISION_LEASE_LOST'
+        || code === 'REVISION_LEASE_OR_STATE_INVALID'
+      ) {
+        throw error
+      }
+      return applyWritingSkillHumanizeToRevisionCandidate({
+        candidate: admitted,
+        error,
+      })
+    }
+  }
+
   async function generateAndAdmit(
     input: EditorRevisionRunInput,
     runId: number,
@@ -1034,7 +1129,13 @@ export function createEditorRevisionWorker(
     const resultDiagnostics = buildLLMResultDiagnostics(result)
     let admitted: RevisionCandidateAdmission
     try {
-      admitted = deps.admitCandidate({ sourceText: input.source_text, result })
+      admitted = deps.admitCandidate({
+        sourceText: input.source_text,
+        result,
+        wordTarget: taskSnapshot.contextPackage?.chapter_target?.word_target
+          || taskSnapshot.contextPackage?.chapterTarget?.word_target
+          || null,
+      })
     } catch (error) {
       const rejected = rejectedCandidateEvidence(result)
       const diagnostics = {
@@ -1067,6 +1168,33 @@ export function createEditorRevisionWorker(
     }
     loaded = await phaseCheckpoint(input, runId, controller, lease)
     const checkpoint = loaded.checkpoint
+    const skillApplied = await applyRevisionWritingSkillHumanize({
+      runInput: input,
+      project,
+      controller,
+      execution,
+      taskSnapshot,
+      llmTimeoutMs,
+      candidate: {
+        text: admitted.chapterText,
+        hash: admitted.candidateHash,
+        char_count: admitted.candidateCharCount,
+        applied_patches: admitted.appliedPatches,
+        diagnostics: admitted.diagnostics,
+      },
+      onSkillProgress: async (skillId, progress) => {
+        // Durable while the pass runs so the polled status can show the current skill;
+        // the candidate is intentionally not persisted yet (phase stays generate_candidate).
+        checkpoint.skill_progress = {
+          skill_id: String(skillId),
+          index: Number.isInteger(progress?.index) ? Number(progress?.index) : 1,
+          total: Number.isInteger(progress?.total) ? Number(progress?.total) : 1,
+          started_at: deps.now(),
+        }
+        await writeCheckpoint(input, runId, 'generate_candidate', checkpoint, 'running', undefined, lease)
+      },
+    })
+    delete checkpoint.skill_progress
     const completedAt = deps.now()
     checkpoint.phase = 'admit_candidate'
     checkpoint.phases.generate_candidate = {
@@ -1075,13 +1203,8 @@ export function createEditorRevisionWorker(
       completed_at: completedAt,
       summary: { diagnostics: resultDiagnostics },
     }
-    checkpoint.candidate = {
-      text: admitted.chapterText,
-      hash: admitted.candidateHash,
-      char_count: admitted.candidateCharCount,
-      applied_patches: admitted.appliedPatches,
-      diagnostics: admitted.diagnostics,
-    }
+    checkpoint.candidate = skillApplied.candidate
+    checkpoint.writing_skill_humanize = skillApplied.report
     checkpoint.phases.admit_candidate = {
       status: 'completed',
       attempt: phaseAttempt(checkpoint, 'admit_candidate'),
@@ -1094,7 +1217,7 @@ export function createEditorRevisionWorker(
     } catch (error) {
       const after = await deps.getRun(activeWorkspace!, input.project_id, runId).catch(() => null)
       const durable = after ? parseCheckpoint(after.output_ref, after.status) : null
-      if (durable?.candidate?.hash === admitted.candidateHash
+      if (durable?.candidate?.hash === checkpoint.candidate.hash
         && durable.phases.admit_candidate.status === 'completed') {
         throw new StopProcessingError(error)
       }
@@ -1127,6 +1250,10 @@ export function createEditorRevisionWorker(
         ? 'post_structural_revision'
         : 'post_editor_revision',
     })
+    const alignmentPatch = alignment.patch || {}
+    const writingSkillHumanize = normalizeWritingSkillHumanizeForStorage(
+      checkpoint.writing_skill_humanize || null,
+    )
     await loadActiveRun(input, runId, controller, lease)
     const committed = await deps.commitChapter(activeWorkspace!, {
       projectId: input.project_id,
@@ -1135,7 +1262,13 @@ export function createEditorRevisionWorker(
       sourceTextHash: input.source_text_hash,
       candidateText: checkpoint.candidate.text,
       candidateHash: checkpoint.candidate.hash,
-      chapterPatch: alignment.patch || {},
+      chapterPatch: {
+        ...alignmentPatch,
+        raw_payload: {
+          ...(alignmentPatch.raw_payload || {}),
+          writing_skill_humanize: writingSkillHumanize,
+        },
+      },
       reviewPayload: {
         source_review_id: input.review_id,
         requested_revision_mode: input.revision_mode,

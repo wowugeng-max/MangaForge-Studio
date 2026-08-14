@@ -1,5 +1,5 @@
 import { revisionTextHash } from '../../novel/revision-hash'
-import { countProseChars } from '../../novel-writing/word-target'
+import { countProseChars, type ChapterWordTarget } from '../../novel-writing/word-target'
 import { assertCompleteProseTransportResult } from '../../novel-writing-service/quality/prose-transport-admission'
 import { asArray, extractLLMText, getNovelPayload } from '../novel-route-utils'
 
@@ -294,6 +294,54 @@ function admissionError(code: string, message: string, diagnostics: Record<strin
   return new RevisionCandidateAdmissionError(code, message, diagnostics)
 }
 
+const WEB_NOVEL_STANDARD_MIN = 2700
+const OVER_TARGET_GROWTH_SLACK_RATIO = 0.05
+const OVER_TARGET_GROWTH_SLACK_MIN = 200
+
+function overTargetGrowthCeiling(source: number) {
+  return source + Math.max(OVER_TARGET_GROWTH_SLACK_MIN, Math.floor(source * OVER_TARGET_GROWTH_SLACK_RATIO))
+}
+
+export function resolveRevisionCandidateLengthBounds(
+  sourceCharCount: number,
+  wordTarget?: ChapterWordTarget | null,
+): { minimumCharCount: number; maximumCharCount: number } {
+  const source = Math.max(0, Math.floor(Number(sourceCharCount) || 0))
+  const sourceFloor = Math.max(800, Math.ceil(source * 0.70))
+  const sourceCeil = Math.floor(source * 1.30)
+  const targetMin = Math.max(0, Math.floor(Number(wordTarget?.min || 0)))
+  const targetMax = Math.max(0, Math.floor(Number(wordTarget?.max || 0)))
+  const target = Math.max(0, Math.floor(Number(wordTarget?.target || 0)))
+  if (!targetMin && !targetMax && !target) {
+    return { minimumCharCount: sourceFloor, maximumCharCount: sourceCeil }
+  }
+
+  const effectiveMin = targetMin || Math.max(800, Math.round(target * 0.9))
+  const effectiveMax = targetMax || Math.round(target * 1.1)
+  const mode = String(wordTarget?.mode || '').toLowerCase()
+  const overTarget = effectiveMax > 0 && source > effectiveMax
+  if (overTarget) {
+    // 超长章允许压回目标。标准章额外对齐工作台「标准章 3000」下限，
+    // 避免服务端 4200 档把完整网文短章当成残稿拦截。
+    // 上限保留约 5% 改写余量：结构修订/去 AI 味常会多几十到一两百字，
+    // 零增长门闩会把完整重写误杀。
+    const contractionFloor = mode === 'long' || mode === 'custom'
+      ? effectiveMin
+      : Math.min(effectiveMin || WEB_NOVEL_STANDARD_MIN, WEB_NOVEL_STANDARD_MIN)
+    return {
+      minimumCharCount: Math.max(800, contractionFloor || sourceFloor),
+      maximumCharCount: overTargetGrowthCeiling(source),
+    }
+  }
+
+  return {
+    minimumCharCount: effectiveMin > 0 && source > effectiveMin
+      ? Math.max(800, effectiveMin)
+      : sourceFloor,
+    maximumCharCount: effectiveMax > 0 ? Math.max(sourceCeil, effectiveMax) : sourceCeil,
+  }
+}
+
 function compactTransportDiagnostics(result: any, error?: any) {
   const raw = result?.raw && typeof result.raw === 'object' ? result.raw : null
   const usageSource = result?.usage || raw?.usage || raw?.response?.usage
@@ -457,7 +505,11 @@ function assertCompleteRevisionEnding(chapterText: string) {
   }
 }
 
-export function admitRevisionCandidate(input: { sourceText: string; result: any }): RevisionCandidateAdmission {
+export function admitRevisionCandidate(input: {
+  sourceText: string
+  result: any
+  wordTarget?: ChapterWordTarget | null
+}): RevisionCandidateAdmission {
   try {
     assertCompleteProseTransportResult(input.result, 'PROSE_REVISION_TRUNCATED')
   } catch (error) {
@@ -494,13 +546,21 @@ export function admitRevisionCandidate(input: { sourceText: string; result: any 
 
   const sourceCharCount = countProseChars(input.sourceText)
   const candidateCharCount = countProseChars(patch.chapterText)
-  const minimumCharCount = Math.max(800, Math.ceil(sourceCharCount * 0.70))
-  const maximumCharCount = Math.floor(sourceCharCount * 1.30)
+  const { minimumCharCount, maximumCharCount } = resolveRevisionCandidateLengthBounds(
+    sourceCharCount,
+    input.wordTarget,
+  )
+  const targetMin = Math.max(0, Math.floor(Number(input.wordTarget?.min || 0)))
+  const targetMax = Math.max(0, Math.floor(Number(input.wordTarget?.max || 0)))
   const diagnostics = {
     source_char_count: sourceCharCount,
     candidate_char_count: candidateCharCount,
     minimum_char_count: minimumCharCount,
     maximum_char_count: maximumCharCount,
+    ...(input.wordTarget ? {
+      word_target_min: targetMin || null,
+      word_target_max: targetMax || null,
+    } : {}),
     complete_malformed_json_recovered: completeMalformedJsonRecovered,
     ...patchDiagnostics,
   }

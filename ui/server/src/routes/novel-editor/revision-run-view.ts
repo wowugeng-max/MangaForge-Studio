@@ -14,6 +14,11 @@ import {
   type EditorRevisionRunStatus,
 } from './editor-revision-contract'
 import { revisionTextHash } from './revision-candidate-admission'
+import {
+  WRITING_SKILL_IDS,
+  WRITING_SKILL_STAGE_LABEL,
+  type WritingSkillId,
+} from '../../novel-writing/writing-skills'
 
 const EDITOR_REVISION_STATUSES = [
   'queued',
@@ -101,6 +106,13 @@ export type PublicEditorRevisionRun = {
   warnings: Array<{ code: string; message: string }>
   error: { code: string; message: string } | null
   progress: null
+  skill_progress?: {
+    skill_id: string
+    index: number
+    total: number
+    label: string
+    started_at?: string
+  }
   can_cancel: boolean
   can_retry: boolean
   can_continue: boolean
@@ -443,6 +455,30 @@ function safeChapterGenerationSource(value: unknown): PublicEditorRevisionRun['c
   }
 }
 
+const MAX_SKILL_PROGRESS_COUNT = 5
+
+function safeSkillProgress(value: unknown): NonNullable<PublicEditorRevisionRun['skill_progress']> | null {
+  const progress = parseJsonObject(value)
+  if (!progress) return null
+  const skillId = progress.skill_id
+  if (typeof skillId !== 'string' || !(WRITING_SKILL_IDS as readonly string[]).includes(skillId)) return null
+  const index = finiteInteger(progress.index)
+  const total = finiteInteger(progress.total)
+  if (index === null || total === null
+    || index < 1 || index > MAX_SKILL_PROGRESS_COUNT
+    || total < 1 || total > MAX_SKILL_PROGRESS_COUNT
+    || index > total) return null
+  const startedAt = safeString(progress.started_at, 80)
+  const startedDate = new Date(startedAt)
+  return {
+    skill_id: skillId,
+    index,
+    total,
+    label: WRITING_SKILL_STAGE_LABEL[skillId as WritingSkillId],
+    ...(startedAt && Number.isFinite(startedDate.getTime()) ? { started_at: startedDate.toISOString() } : {}),
+  }
+}
+
 function safeWarnings(value: unknown): Array<{ code: string; message: string }> {
   if (!Array.isArray(value)) return []
   return value.slice(0, 100).flatMap(item => {
@@ -524,6 +560,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     phase,
     safePhaseState(phase, checkpoint.phases[phase]),
   ])) as PublicEditorRevisionRun['phases']
+  const skillProgress = active ? safeSkillProgress(checkpoint.skill_progress) : null
   const convergence = safeDeliveryRiskConvergence(checkpoint.delivery_risk_convergence)
   if (convergence) {
     phases.record_continuity_warning = {
@@ -551,6 +588,7 @@ export function buildPublicEditorRevisionRun(run: NovelRunRecord): PublicEditorR
     warnings: safeWarnings(checkpoint.warnings),
     error,
     progress: null,
+    ...(skillProgress ? { skill_progress: skillProgress } : {}),
     can_cancel: active && (status === 'queued' || status === 'running'),
     can_retry: retryable && !postCommitIncomplete && !restartRequired,
     can_continue: retryable && postCommitIncomplete && !restartRequired,

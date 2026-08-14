@@ -19,6 +19,10 @@ export type NovelWorkspaceAreaViewProps = {
   buildPreDraftBriefForActiveChapter: any
   chapterTargetWordCount: any
   chapterWordTargetMode: any
+  writingSkillsEnabled: any
+  setWritingSkillsEnabled: any
+  fictionHumanizerMode: any
+  setFictionHumanizerMode: any
   characters: any
   commercialToolLoading: any
   confirmPreDraftBriefForActiveChapter: any
@@ -69,6 +73,7 @@ export type NovelWorkspaceAreaViewProps = {
   applyEditorRevision: any
   refreshActiveProseQuality: any
   repairActiveDeslopGate: any
+  repairChapterPreflightMaterials: any
   repairContextAndGenerateCurrentChapter: any
   repairWritingQueuePlan: any
   repairWritingQueuePlanBatch: any
@@ -129,6 +134,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     buildPreDraftBriefForActiveChapter,
     chapterTargetWordCount,
     chapterWordTargetMode,
+    writingSkillsEnabled,
+    setWritingSkillsEnabled,
+    fictionHumanizerMode,
+    setFictionHumanizerMode,
     characters,
     commercialToolLoading,
     confirmPreDraftBriefForActiveChapter,
@@ -179,6 +188,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     applyEditorRevision,
     refreshActiveProseQuality,
     repairActiveDeslopGate,
+    repairChapterPreflightMaterials,
     repairContextAndGenerateCurrentChapter,
     repairWritingQueuePlan,
     repairWritingQueuePlanBatch,
@@ -311,6 +321,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         generationTargetWordCount={chapterTargetWordCount}
         onGenerationWordTargetModeChange={setChapterWordTargetMode}
         onGenerationTargetWordCountChange={setChapterTargetWordCount}
+        writingSkillsEnabled={writingSkillsEnabled}
+        onWritingSkillsEnabledChange={setWritingSkillsEnabled}
+        fictionHumanizerMode={fictionHumanizerMode}
+        onFictionHumanizerModeChange={setFictionHumanizerMode}
         writingRecommendation={writingRecommendation}
         writingQueue={writingCockpitModel.writingQueue}
         onSelectWritingQueueChapter={(chapterId) => { void selectChapterForWriting(chapterId) }}
@@ -334,6 +348,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         editorRevisionTask={editorRevisionTask}
         proseQualityLoading={proseQualityLoading}
         onRefreshProseQuality={() => { void refreshActiveProseQuality?.('manual_refresh') }}
+        onRepairPreflightGaps={async () => {
+          const repaired = await repairChapterPreflightMaterials?.()
+          if (repaired) void refreshActiveProseQuality?.('preflight_repair')
+        }}
         onApplyEditorRevision={applyEditorRevision}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}

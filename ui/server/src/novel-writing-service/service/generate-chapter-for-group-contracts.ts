@@ -33,6 +33,7 @@ export type GenerateChapterForGroupDeps = {
   runMemePolish: (...args: any[]) => any
   runReadabilityReview: (...args: any[]) => any
   runHumanizePostProcess: (...args: any[]) => any
+  runWritingSkillHumanizePass?: (...args: any[]) => any
   prepareStoryStateUpdate: (...args: any[]) => any
   trustedWordTargetContractionBudgets: WeakSet<object>
 }

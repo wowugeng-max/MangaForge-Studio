@@ -28,6 +28,7 @@ import { WorkspaceCenterNoChapter } from './workspace-center-no-chapter'
 import {
   WorkspaceCenterSecondaryActionMenu,
   WorkspaceCenterWordTargetControl,
+  WorkspaceCenterWritingSkillsControl,
   type ChapterWordTargetMode,
 } from './workspace-center-editor-controls'
 import {
@@ -125,6 +126,10 @@ export function WorkspaceCenter({
   generationTargetWordCount = 3000,
   onGenerationWordTargetModeChange,
   onGenerationTargetWordCountChange,
+  writingSkillsEnabled,
+  onWritingSkillsEnabledChange,
+  fictionHumanizerMode,
+  onFictionHumanizerModeChange,
   writingRecommendation,
   writingQueue,
   onSelectWritingQueueChapter,
@@ -142,6 +147,7 @@ export function WorkspaceCenter({
   editorRevisionTask = null,
   proseQualityLoading = false,
   onRefreshProseQuality,
+  onRepairPreflightGaps,
   onApplyEditorRevision,
   onCancelEditorRevision,
   onRetryEditorRevision,
@@ -198,6 +204,10 @@ export function WorkspaceCenter({
   generationTargetWordCount?: number
   onGenerationWordTargetModeChange?: (mode: ChapterWordTargetMode) => void
   onGenerationTargetWordCountChange?: (count: number) => void
+  writingSkillsEnabled?: import('./writingSkillsModel').WritingSkillEnabledMap
+  onWritingSkillsEnabledChange?: (enabled: import('./writingSkillsModel').WritingSkillEnabledMap) => void
+  fictionHumanizerMode?: import('./writingSkillsModel').FictionHumanizerMode
+  onFictionHumanizerModeChange?: (mode: import('./writingSkillsModel').FictionHumanizerMode) => void
   writingRecommendation?: NovelWritingRecommendation
   writingQueue?: WritingQueueModel | null
   onSelectWritingQueueChapter?: (chapterId: number) => void
@@ -215,6 +225,7 @@ export function WorkspaceCenter({
   editorRevisionTask?: EditorRevisionTask | null
   proseQualityLoading?: boolean
   onRefreshProseQuality?: () => void
+  onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
@@ -395,12 +406,20 @@ export function WorkspaceCenter({
     extra,
   ].filter(Boolean).join(' ')
   const renderWordTargetControl = () => (
-    <WorkspaceCenterWordTargetControl
-      generationWordTargetMode={generationWordTargetMode}
-      generationTargetWordCount={generationTargetWordCount}
-      onGenerationWordTargetModeChange={onGenerationWordTargetModeChange}
-      onGenerationTargetWordCountChange={onGenerationTargetWordCountChange}
-    />
+    <div className="novel-generation-option-row">
+      <WorkspaceCenterWordTargetControl
+        generationWordTargetMode={generationWordTargetMode}
+        generationTargetWordCount={generationTargetWordCount}
+        onGenerationWordTargetModeChange={onGenerationWordTargetModeChange}
+        onGenerationTargetWordCountChange={onGenerationTargetWordCountChange}
+      />
+      <WorkspaceCenterWritingSkillsControl
+        writingSkillsEnabled={writingSkillsEnabled}
+        onWritingSkillsEnabledChange={onWritingSkillsEnabledChange}
+        fictionHumanizerMode={fictionHumanizerMode}
+        onFictionHumanizerModeChange={onFictionHumanizerModeChange}
+      />
+    </div>
   )
   const recommendedBadge = (phase: typeof recommendedAction.phase) => (
     phase === recommendedAction.phase ? <span className="novel-editor-recommended-badge">推荐下一步</span> : null
@@ -862,6 +881,7 @@ export function WorkspaceCenter({
             proseQualityLoading={proseQualityLoading}
             editorReportLoading={editorReportLoading}
             onRefreshProseQuality={onRefreshProseQuality}
+            onRepairPreflightGaps={onRepairPreflightGaps}
             onApplyEditorRevision={onApplyEditorRevision}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}

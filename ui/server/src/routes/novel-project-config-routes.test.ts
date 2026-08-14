@@ -235,3 +235,179 @@ describe('editor revision project config routes', () => {
     expect(missing.statusCode).toBe(404)
   })
 })
+
+describe('writing skills project config routes', () => {
+  test('returns catalog defaults for a legacy project', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, { title: 'legacy-skills', reference_config: {} })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+
+    const response = await callRoute(
+      handlers.get('GET /api/novel/projects/:id/writing-skills-config'),
+      { params: { id: String(project.id) } },
+    )
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body).toEqual({
+      ok: true,
+      config: {
+        enabled: {
+          'fiction-humanizer-zh': true,
+          'remove-ai-flavor': true,
+          'humanizer-zh': false,
+        },
+        fiction_humanizer_mode: 'polish',
+        model_id: null,
+      },
+    })
+  })
+
+  test('persists rewrite mode and ignores an invalid mode', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'skills-mode',
+      reference_config: {},
+    })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/writing-skills-config')
+
+    const rewrite = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { enabled: {}, fiction_humanizer_mode: 'rewrite' } },
+    })
+    const invalid = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { enabled: {}, fiction_humanizer_mode: 'light' } },
+    })
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(rewrite.body.config.fiction_humanizer_mode).toBe('rewrite')
+    expect(invalid.body.config.fiction_humanizer_mode).toBe('rewrite')
+    expect(stored?.reference_config).toMatchObject({
+      writing_skills: {
+        fiction_humanizer_mode: 'rewrite',
+      },
+    })
+  })
+
+  test('persists known skill flags and ignores unknown ids', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'skills',
+      reference_config: { story_state: { current_time: 'night' } },
+    })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/writing-skills-config')
+
+    const response = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: {
+        enabled: {
+          'humanizer-zh': true,
+          'remove-ai-flavor': false,
+          'not-a-skill': true,
+        },
+      },
+    })
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.config.enabled).toEqual({
+      'fiction-humanizer-zh': true,
+      'remove-ai-flavor': false,
+      'humanizer-zh': true,
+    })
+    expect(stored?.reference_config).toMatchObject({
+      story_state: { current_time: 'night' },
+      writing_skills: {
+        enabled: {
+          'fiction-humanizer-zh': true,
+          'remove-ai-flavor': false,
+          'humanizer-zh': true,
+        },
+      },
+    })
+  })
+
+  test('persists a positive integer writing skill model and reads it back', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, { title: 'skill-model', reference_config: {} })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/writing-skills-config')
+    const get = handlers.get('GET /api/novel/projects/:id/writing-skills-config')
+
+    const response = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { enabled: {}, model_id: 317 } },
+    })
+    const readback = await callRoute(get, { params: { id: String(project.id) } })
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(response.statusCode).toBe(200)
+    expect(response.body.config.model_id).toBe(317)
+    expect(readback.body.config.model_id).toBe(317)
+    expect(stored?.reference_config).toMatchObject({
+      writing_skills: { model_id: 317 },
+    })
+  })
+
+  test('clears the writing skill model via null', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'skill-model-clear',
+      reference_config: { writing_skills: { model_id: 317 } },
+    })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/writing-skills-config')
+    const get = handlers.get('GET /api/novel/projects/:id/writing-skills-config')
+
+    const response = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { enabled: {}, model_id: null } },
+    })
+    const readback = await callRoute(get, { params: { id: String(project.id) } })
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(response.body.config.model_id).toBe(null)
+    expect(readback.body.config.model_id).toBe(null)
+    expect((stored?.reference_config as any)?.writing_skills?.model_id).toBe(null)
+  })
+
+  test('ignores invalid writing skill model values and keeps the stored one', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'writing-skills-config-'))
+    workspaces.push(workspace)
+    const project = await createNovelProject(workspace, {
+      title: 'skill-model-invalid',
+      reference_config: { writing_skills: { model_id: 317 } },
+    })
+    const { app, handlers } = routeHarness()
+    registerNovelProjectConfigRoutes(app, context(workspace) as any)
+    const put = handlers.get('PUT /api/novel/projects/:id/writing-skills-config')
+
+    for (const invalid of ['317', 0, -1, 4.5] as unknown[]) {
+      const response = await callRoute(put, {
+        params: { id: String(project.id) },
+        body: { config: { enabled: {}, model_id: invalid } },
+      })
+      expect(response.body.config.model_id).toBe(317)
+    }
+    const absent = await callRoute(put, {
+      params: { id: String(project.id) },
+      body: { config: { enabled: {} } },
+    })
+    const stored = await getNovelProject(workspace, project.id)
+
+    expect(absent.body.config.model_id).toBe(317)
+    expect((stored?.reference_config as any)?.writing_skills?.model_id).toBe(317)
+  })
+})

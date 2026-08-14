@@ -9,6 +9,7 @@ import {
 import * as generationBuilders from './builders'
 import { createNovelProductionService } from '../novel-production-service'
 import { classifyGenerationFailure as classifyGenerationFailurePolicy } from '../novel-production/generation-failure-policy'
+import { WRITING_SKILL_STAGE_LABEL } from '../../novel-writing/writing-skills'
 
 describe('MCP standalone prose route helpers', () => {
   test('does not carry a temporary generation-source override into automatic production', () => {
@@ -28,6 +29,8 @@ describe('MCP standalone prose route helpers', () => {
     expect(standaloneProseServiceStageLabel('mcp_session_create')).toBe('创建阶段 Session')
     expect(standaloneProseServiceStageLabel('mcp_session_wait')).toBe('等待阶段 Agent')
     expect(standaloneProseServiceStageLabel('mcp_extract')).toBe('提取阶段结果')
+    expect(standaloneProseServiceStageLabel('writing_skill_humanize')).toBe('写作skill去AI味')
+    expect(WRITING_SKILL_STAGE_LABEL['fiction-humanizer-zh']).toBe('写作skill · 小说去AI味')
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_BINDING_INVALID' })).toBe(412)
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_BINDING_CHANGED' })).toBe(409)
     expect(standaloneProseServiceErrorStatus({ code: 'MCP_AGENT_BUSY' })).toBe(409)

@@ -164,4 +164,115 @@ describe('post-draft humanize and opening-handoff finalization', () => {
     expect(terminalReports[0]).not.toHaveProperty('raw')
     expect(terminalReports[0]).not.toHaveProperty('self')
   })
+
+  test('runs the writing-skill pass after humanize and uses the rewritten prose', async () => {
+    const initialText = '林序把门带上，沿着走廊继续往前。'
+    const humanized = `${initialText}他没有回头。`
+    const skilled = `${humanized}口袋里的纸边硌了一下。`
+    const stages: Array<{ stage: string; payload: any }> = []
+    let skillInput = ''
+
+    const result = await runPostDraftHumanizeAndOpeningHandoff({
+      activeWorkspace: '/tmp/novel',
+      project: { id: 7 },
+      contextPackage: {},
+      characters: [],
+      finalText: initialText,
+      preferredModelId: 217,
+      llmControlOptions: {},
+      options: { skip_mid_monologue_densify: true },
+      isZhuqueFast: false,
+      runHumanizePostProcess: async (_ws: string, _project: any, _ctx: any, sourceText: string) => ({
+        final_text: humanized,
+        report: { accepted: true },
+      }),
+      runWritingSkillHumanizePass: async (
+        _ws: string,
+        _project: any,
+        _ctx: any,
+        sourceText: string,
+        _model: any,
+        skillOptions: any,
+      ) => {
+        skillInput = sourceText
+        await skillOptions?.onSkillProgress?.('fiction-humanizer-zh', { index: 2, total: 3 })
+        return {
+          final_text: skilled,
+          report: {
+            version: 'writing_skill_humanize_v2',
+            accepted: true,
+            changed: true,
+            skipped: false,
+            enabled_ids: ['fiction-humanizer-zh'],
+            passes: [{ id: 'fiction-humanizer-zh', accepted: true }],
+          },
+        }
+      },
+      onStage: async (stage: string, payload: any) => {
+        stages.push({ stage, payload })
+      },
+    })
+
+    expect(skillInput).toBe(humanized)
+    expect(result.finalText).toContain('纸边硌了一下')
+    expect(result.writingSkillHumanize).toMatchObject({ accepted: true, skipped: false })
+    expect(stages.map(item => [item.stage, item.payload.status])).toEqual([
+      ['humanize_postprocess', 'running'],
+      ['humanize_postprocess', 'success'],
+      ['writing_skill_humanize', 'running'],
+      ['writing_skill_humanize', 'running'],
+      ['writing_skill_humanize', 'success'],
+    ])
+    expect(stages.some(item => (
+      item.stage === 'writing_skill_humanize'
+      && item.payload.status === 'running'
+      && item.payload.skill_id === 'fiction-humanizer-zh'
+      && item.payload.label === '写作skill · 小说去AI味（2/3）'
+      && item.payload.skill_index === 2
+      && item.payload.skill_total === 3
+    ))).toBe(true)
+  })
+
+  test('keeps humanized prose when the writing-skill pass throws', async () => {
+    const humanized = '林序把门带上，沿着走廊继续往前。他没有回头。'
+    const stages: Array<{ stage: string; payload: any }> = []
+
+    const result = await runPostDraftHumanizeAndOpeningHandoff({
+      activeWorkspace: '/tmp/novel',
+      project: { id: 7 },
+      contextPackage: {},
+      characters: [],
+      finalText: '林序把门带上。',
+      preferredModelId: undefined,
+      llmControlOptions: {},
+      options: { skip_mid_monologue_densify: true },
+      isZhuqueFast: false,
+      runHumanizePostProcess: async () => ({
+        final_text: humanized,
+        report: { accepted: true },
+      }),
+      runWritingSkillHumanizePass: async () => {
+        throw new Error(`skill unavailable ${'x'.repeat(300)}`)
+      },
+      onStage: async (stage: string, payload: any) => {
+        stages.push({ stage, payload })
+      },
+    })
+
+    expect(result.finalText).toContain(humanized)
+    expect(result.writingSkillHumanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      accepted: false,
+      changed: false,
+      skipped: false,
+      warnings: [],
+      passes: [],
+      reason: 'writing_skill_humanize_failed',
+    })
+    expect(String(result.writingSkillHumanize?.error || '')).toHaveLength(240)
+    expect(stages.filter(item => item.stage === 'writing_skill_humanize').map(item => item.payload.status)).toEqual([
+      'running',
+      'failed',
+    ])
+  })
 })

@@ -13,6 +13,7 @@ export type ChapterProseStoragePatchInput = {
   postDraftDirector?: any
   generationSourceProvenance?: any
   humanizePostprocess?: unknown
+  writingSkillHumanize?: unknown
   proseAdmission?: {
     status: 'accepted' | 'accepted_with_warnings'
     quality_score: number | null
@@ -100,9 +101,38 @@ export type PersistedHumanizePostprocessReport = {
   candidate_provenance?: PersistedHumanizeCandidateProvenance
 }
 
+export type PersistedWritingSkillHumanizePass = {
+  id?: string
+  mode?: string
+  accepted?: boolean
+  reason?: string
+  before_chars?: number
+  after_chars?: number
+  chunk_count?: number
+}
+
+export type PersistedWritingSkillHumanizeReport = {
+  version?: string
+  fiction_humanizer_mode?: string
+  enabled_ids?: string[]
+  enabled?: boolean
+  skipped?: boolean
+  accepted?: boolean
+  changed?: boolean
+  reason?: string
+  error?: string
+  warnings?: string[]
+  before_chars?: number
+  after_chars?: number
+  chunk_count?: number
+  model_id?: number
+  passes?: PersistedWritingSkillHumanizePass[]
+}
+
 const PERSISTED_HUMANIZE_MAX_STRING = 240
 const PERSISTED_HUMANIZE_MAX_STAGES = 64
 const PERSISTED_HUMANIZE_MAX_NESTED_ITEMS = 32
+const PERSISTED_WRITING_SKILL_MAX_PASSES = 16
 
 function normalizePersistedHumanizeString(value: unknown, maxLength = PERSISTED_HUMANIZE_MAX_STRING) {
   if (typeof value !== 'string') return undefined
@@ -290,6 +320,70 @@ export function normalizeHumanizePostprocessForStorage(
   }
   const provenance = normalizePersistedHumanizeProvenance(input.candidate_provenance)
   if (provenance) output.candidate_provenance = provenance
+  return output
+}
+
+function normalizePersistedWritingSkillPass(
+  value: unknown,
+): PersistedWritingSkillHumanizePass | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: PersistedWritingSkillHumanizePass = {}
+  const stringFields = ['id', 'mode', 'reason'] as const
+  const numberFields = ['before_chars', 'after_chars', 'chunk_count'] as const
+  for (const field of stringFields) {
+    const normalized = normalizePersistedHumanizeString(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of numberFields) {
+    const normalized = normalizePersistedHumanizeNumber(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  const accepted = normalizePersistedHumanizeBoolean(input.accepted)
+  if (accepted !== undefined) output.accepted = accepted
+  return output
+}
+
+export function normalizeWritingSkillHumanizeForStorage(
+  value: unknown,
+): PersistedWritingSkillHumanizeReport | null | undefined {
+  if (value === null) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const input = value as Record<string, unknown>
+  const output: PersistedWritingSkillHumanizeReport = {}
+  const stringFields = ['version', 'fiction_humanizer_mode', 'reason', 'error'] as const
+  const numberFields = ['before_chars', 'after_chars', 'chunk_count', 'model_id'] as const
+  const booleanFields = ['enabled', 'skipped', 'accepted', 'changed'] as const
+  for (const field of stringFields) {
+    const normalized = normalizePersistedHumanizeString(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of numberFields) {
+    const normalized = normalizePersistedHumanizeNumber(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  for (const field of booleanFields) {
+    const normalized = normalizePersistedHumanizeBoolean(input[field])
+    if (normalized !== undefined) output[field] = normalized
+  }
+  if (Array.isArray(input.enabled_ids)) {
+    output.enabled_ids = input.enabled_ids
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(item => normalizePersistedHumanizeString(item))
+      .filter((item): item is string => item !== undefined)
+  }
+  if (Array.isArray(input.warnings)) {
+    output.warnings = input.warnings
+      .slice(0, PERSISTED_HUMANIZE_MAX_NESTED_ITEMS)
+      .map(item => normalizePersistedHumanizeString(item))
+      .filter((item): item is string => item !== undefined)
+  }
+  if (Array.isArray(input.passes)) {
+    output.passes = input.passes
+      .slice(0, PERSISTED_WRITING_SKILL_MAX_PASSES)
+      .map(normalizePersistedWritingSkillPass)
+      .filter((item): item is PersistedWritingSkillHumanizePass => item !== undefined)
+  }
   return output
 }
 
@@ -511,6 +605,10 @@ export function buildChapterProseStoragePatch(input: ChapterProseStoragePatchInp
   if (input.humanizePostprocess !== undefined) {
     const humanizePostprocess = normalizeHumanizePostprocessForStorage(input.humanizePostprocess)
     if (humanizePostprocess !== undefined) rawPayload.humanize_postprocess = humanizePostprocess
+  }
+  if (input.writingSkillHumanize !== undefined) {
+    const writingSkillHumanize = normalizeWritingSkillHumanizeForStorage(input.writingSkillHumanize)
+    if (writingSkillHumanize !== undefined) rawPayload.writing_skill_humanize = writingSkillHumanize
   }
   if (input.proseAdmission !== undefined) {
     rawPayload.prose_admission = input.proseAdmission

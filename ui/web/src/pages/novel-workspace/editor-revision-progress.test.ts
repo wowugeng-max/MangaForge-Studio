@@ -103,6 +103,63 @@ describe('buildEditorRevisionProgress', () => {
     expect(progress.currentIndex).toBe(-1)
   })
 
+  test('生成候选运行中带 skill_progress 时提示展示技能名+计数', () => {
+    const task = taskWith({
+      phase: 'generate_candidate',
+      phase_label: '生成候选',
+      skill_progress: {
+        skill_id: 'fiction-humanizer-zh',
+        index: 2,
+        total: 3,
+        label: '写作skill · 小说去AI味',
+        started_at: '2026-08-13T11:29:00.000Z',
+      },
+    })
+    task.phases = {
+      generate_candidate: { status: 'running', attempt: 1, started_at: '2026-08-13T11:27:44.000Z' },
+      admit_candidate: { status: 'pending', attempt: 0 },
+      persist_chapter: { status: 'pending', attempt: 0 },
+      post_quality: { status: 'pending', attempt: 0 },
+      sync_current_story_state: { status: 'pending', attempt: 0 },
+      record_continuity_warning: { status: 'pending', attempt: 0 },
+      completed: { status: 'pending', attempt: 0 },
+    }
+    const progress = buildEditorRevisionProgress(task, NOW)
+    expect(progress.hint).toContain('当前阶段：生成候选')
+    expect(progress.hint).toContain('写作skill · 小说去AI味（2/3）')
+    expect(progress.hint).toContain('已运行')
+  })
+
+  test('skill_progress 缺 label 时回退 skill_id,无 skill_progress 时输出不变', () => {
+    const base = taskWith({
+      phase: 'generate_candidate',
+      phase_label: '生成候选',
+    })
+    base.phases = {
+      ...base.phases,
+      generate_candidate: { status: 'running', attempt: 1, started_at: '2026-08-13T11:27:44.000Z' },
+      admit_candidate: { status: 'pending', attempt: 0 },
+      persist_chapter: { status: 'pending', attempt: 0 },
+      post_quality: { status: 'pending', attempt: 0 },
+      sync_current_story_state: { status: 'pending', attempt: 0 },
+    }
+    const plain = buildEditorRevisionProgress(base, NOW)
+    expect(plain.hint).not.toContain('写作skill')
+    expect(plain.hint).toContain('当前阶段：生成候选')
+
+    const fallback = taskWith({
+      ...base,
+      skill_progress: { skill_id: 'remove-ai-flavor', index: 1, total: 2 },
+    })
+    const withFallback = buildEditorRevisionProgress(fallback, NOW)
+    expect(withFallback.hint).toContain('remove-ai-flavor（1/2）')
+
+    const otherPhase = buildEditorRevisionProgress(taskWith({
+      skill_progress: { skill_id: 'remove-ai-flavor', index: 1, total: 2, label: '写作skill · 去句壳' },
+    }), NOW)
+    expect(otherPhase.hint).not.toContain('写作skill')
+  })
+
   test('失败与跳过状态透传', () => {
     const task = taskWith({
       status: 'failed',

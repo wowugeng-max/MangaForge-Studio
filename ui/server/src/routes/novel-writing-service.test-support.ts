@@ -33,6 +33,7 @@ export type ProsePipelineTaskKind =
   | 'structured_review'
   | 'quality_revision'
   | 'humanize'
+  | 'writing_skill'
   | 'story_state'
   | 'other'
 
@@ -74,6 +75,11 @@ export function classifyProsePipelineTask(agent: string, taskInput: string): Pro
       || line.startsWith('任务：对人工特征不足窗口做')
       || line.startsWith('任务：对高风险正文窗口做')
     )) return 'humanize'
+    if (
+      agent === 'prose-agent'
+      && line.startsWith('任务：按 ')
+      && line.includes('对小说正文做去 AI 味改写')
+    ) return 'writing_skill'
     if (agent === 'review-agent' && line.startsWith('任务：从刚入库的章节正文中提取故事状态机增量')) return 'story_state'
   }
   return 'other'
@@ -379,6 +385,12 @@ export async function createProsePipelineHarness(
       if (revisionResults.length) return revisionResults.shift()
       const text = revisionTexts.shift() || draftText
       return { parsed: { chapter_text: text, revision_receipts: [{ key: 'agency', changed_evidence: text.slice(0, 80) }] }, modelName: 'fake-reviser' } as any
+    }
+    if (taskKind === 'writing_skill') {
+      const marker = '【原文】'
+      const at = task.indexOf(marker)
+      const source = at >= 0 ? task.slice(at + marker.length).trim() : ''
+      return { text: source, finish_reason: 'stop', modelName: 'fake-writing-skill' } as any
     }
     if (taskKind === 'story_state') {
       modelCalls.story_state += 1

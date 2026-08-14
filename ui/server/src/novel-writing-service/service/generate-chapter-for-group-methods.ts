@@ -292,6 +292,7 @@ export function createGenerateChapterForGroupMethods(deps: GenerateChapterForGro
   const runMemePolish = deps.runMemePolish
   const runReadabilityReview = deps.runReadabilityReview
   const runHumanizePostProcess = deps.runHumanizePostProcess
+  const runWritingSkillHumanizePass = deps.runWritingSkillHumanizePass
   const prepareStoryStateUpdate = deps.prepareStoryStateUpdate
   const trustedWordTargetContractionBudgets = deps.trustedWordTargetContractionBudgets
 
@@ -564,6 +565,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     options,
     isZhuqueFast,
     runHumanizePostProcess,
+    runWritingSkillHumanizePass,
     onStage,
   })
   finalText = normalizeProseForStorage(postDraftFinalizeResult.finalText)
@@ -579,6 +581,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
   finalText = qualityPrestoreResult.finalText
   humanizePostprocess = reconcileHumanizeFinalCandidateProvenance(humanizePostprocess, finalText)
   humanizePostprocess = normalizeHumanizePostprocessForStorage(humanizePostprocess) ?? null
+  const writingSkillHumanize = postDraftFinalizeResult.writingSkillHumanize
   finalSceneBreakdown = qualityPrestoreResult.finalSceneBreakdown
   finalContinuityNotes = qualityPrestoreResult.finalContinuityNotes
   const qualityLoop = qualityPrestoreResult.qualityLoop
@@ -663,6 +666,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
       mergeChapterRawPayload,
       editorRewrite,
       humanizePostprocess,
+      writingSkillHumanize,
       productionMode,
       draftPromptDiagnostics,
       ohStoryDeliveryReceipts,
@@ -731,6 +735,7 @@ const generateChapterForGroup = async (activeWorkspace: string, projectId: numbe
     editorRewrite,
     memePolish,
     humanizePostprocess,
+    writingSkillHumanize,
     readabilityReview,
     productionMode,
     draftPromptDiagnostics,

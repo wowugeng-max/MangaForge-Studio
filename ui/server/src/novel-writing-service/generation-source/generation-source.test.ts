@@ -2279,7 +2279,7 @@ describe('McpGenerationSource quarantine outcomes', () => {
 })
 
 describe('ModelGenerationSource', () => {
-  test('captures one API model and forces it on every stage', async () => {
+  test('captures one API model, forces it on drafts, and honors valid caller overrides on agent stages', async () => {
     const agentCalls: any[] = []
     const draftCalls: any[] = []
     const currentChecks: string[] = []
@@ -2318,7 +2318,7 @@ describe('ModelGenerationSource', () => {
     await source.executeAgent('revision', 'revision_prose', 'prose-agent', project, { task: '修订' }, {})
 
     expect(draftCalls[0][3].modelId).toBe('217')
-    expect(agentCalls.map(call => call[3].modelId)).toEqual(['217', '217'])
+    expect(agentCalls.map(call => call[3].modelId)).toEqual(['999', '217'])
     expect(agentCalls[0][3]).toMatchObject({
       temperature: 0.2, maxTokens: 321, timeoutMs: 1234, responseMode: 'non_stream',
     })

@@ -6,6 +6,7 @@ import {
   buildProseWordTargetExpansionPrompt,
 } from '../novel-writing/prose-prompt-builders'
 import { buildStoryStatePrompt } from '../novel-writing/story-state-prompt'
+import { compileWritingSkillPassPrompt } from '../novel-writing/writing-skills/compile-pass-prompt'
 import * as testSupport from './novel-writing-service.test-support'
 
 const project = { title: '任务分类测试' }
@@ -22,8 +23,13 @@ describe('novel writing service test-support task classification', () => {
   test('does not route humanize or quality prompts containing state_delta as Story State', () => {
     const classify = (testSupport as any).classifyProsePipelineTask
     const embeddedContract = '\n【合成生成合同】{"state_delta":{"open_questions":[]}}'
+    const writingSkillPrompt = `${compileWritingSkillPassPrompt({
+      skillId: 'fiction-humanizer-zh',
+      sourceText: '林序把门带上。',
+    })}${embeddedContract}`
 
     expect(classify?.('prose-agent', `任务：对高风险正文窗口做减负结构重写。${embeddedContract}`)).toBe('humanize')
+    expect(classify?.('prose-agent', writingSkillPrompt)).toBe('writing_skill')
     expect(classify?.('review-agent', `任务：独立审查小说正文。${embeddedContract}`)).toBe('quality_review')
     expect(classify?.('prose-agent', `任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')
     expect(classify?.('prose-agent', `【角色设定 · 资深网文作者】\n任务：执行第 1 轮正文定向修订，返回完整章节正文。${embeddedContract}`)).toBe('quality_revision')

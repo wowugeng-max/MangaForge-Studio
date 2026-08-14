@@ -96,6 +96,13 @@ export type EditorRevisionCheckpoint = {
     applied_patches: unknown[]
     diagnostics: Record<string, unknown>
   }
+  writing_skill_humanize?: Record<string, unknown>
+  skill_progress?: {
+    skill_id: string
+    index: number
+    total: number
+    started_at?: string
+  }
   prose_persisted: boolean
   committed_chapter_updated_at?: string
   editor_revision_review_id?: number

@@ -307,6 +307,71 @@ describe('commitEditorRevisionChapter', () => {
       .toEqual(committed.chapter.raw_payload.planning)
   })
 
+  test('replaces the writing_skill_humanize receipt wholesale instead of deep-merging stale failure fields', async () => {
+    const { workspace, project, chapter, input } = await createFixture()
+    await updateNovelChapter(workspace, chapter.id, {
+      raw_payload: {
+        writing_skill_humanize: {
+          version: 'writing_skill_humanize_v2',
+          accepted: false,
+          reason: 'writing_skill_humanize_failed',
+          error: 'old provider error',
+        },
+      },
+    }, { createVersion: false })
+    const successReceipt = {
+      version: 'writing_skill_humanize_v2',
+      fiction_humanizer_mode: 'polish',
+      enabled_ids: ['fiction-humanizer-zh'],
+      enabled: true,
+      skipped: false,
+      accepted: true,
+      changed: true,
+      warnings: [],
+      before_chars: 100,
+      after_chars: 104,
+      chunk_count: 1,
+      passes: [
+        { id: 'fiction-humanizer-zh', accepted: true, before_chars: 100, after_chars: 104, chunk_count: 1 },
+      ],
+    }
+
+    const committed = await commitEditorRevisionChapter(workspace, {
+      ...input,
+      chapterPatch: {
+        ...input.chapterPatch,
+        raw_payload: {
+          ...input.chapterPatch.raw_payload,
+          writing_skill_humanize: successReceipt,
+        },
+      },
+    })
+
+    expect(committed.chapter.raw_payload.writing_skill_humanize).toEqual(successReceipt)
+    expect((await getNovelChapter(workspace, chapter.id, project.id))?.raw_payload.writing_skill_humanize)
+      .toEqual(successReceipt)
+
+    const nextCandidate = 'candidate prose after receipt reset'
+    const nulled = await commitEditorRevisionChapter(workspace, {
+      ...input,
+      runId: input.runId + 1,
+      sourceTextHash: input.candidateHash,
+      candidateText: nextCandidate,
+      candidateHash: revisionTextHash(nextCandidate),
+      chapterPatch: {
+        ...input.chapterPatch,
+        raw_payload: {
+          ...input.chapterPatch.raw_payload,
+          writing_skill_humanize: null,
+        },
+      },
+    })
+
+    expect(nulled.chapter.raw_payload.writing_skill_humanize).toBeNull()
+    expect((await getNovelChapter(workspace, chapter.id, project.id))?.raw_payload.writing_skill_humanize)
+      .toBeNull()
+  })
+
   test('applies only current-plan fields from a contaminated chapter patch', async () => {
     const { workspace, project, outline, alternateOutline, chapter, follower, input } = await createFixture()
     const before = await getNovelChapter(workspace, chapter.id, project.id)

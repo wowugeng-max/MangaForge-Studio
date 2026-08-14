@@ -346,6 +346,25 @@ function createWorkerWithTaskExecution(ctx: any, overrides: Record<string, any> 
       }
     })
   return createEditorRevisionWorker(ctx, {
+    runWritingSkillHumanizePass: async (
+      _workspace: string,
+      _project: any,
+      _context: any,
+      sourceText: string,
+    ) => ({
+      final_text: sourceText,
+      report: {
+        version: 'writing_skill_humanize_v1',
+        enabled_ids: [],
+        enabled: false,
+        skipped: true,
+        accepted: true,
+        reason: 'test_noop',
+        before_chars: 0,
+        after_chars: 0,
+        chunk_count: 0,
+      },
+    }),
     ...overrides,
     buildChapterContextPackage,
     beginChapterTask,
@@ -360,6 +379,7 @@ function createHarness(options: {
   followers?: Array<{ chapter_no: number; chapter_text: string }>
   checkpoint?: EditorRevisionCheckpoint
   executeRevision?: (...args: any[]) => Promise<any>
+  runWritingSkillHumanizePass?: (...args: any[]) => Promise<any>
   quality?: (...args: any[]) => Promise<any>
   prepareStoryState?: (...args: any[]) => Promise<any>
   applyStoryState?: (...args: any[]) => Promise<any>
@@ -657,6 +677,25 @@ function createHarness(options: {
       return clone(review)
     },
     commitChapter: options.commit || defaultCommit,
+    runWritingSkillHumanizePass: options.runWritingSkillHumanizePass || (async (
+      _workspace: string,
+      _project: any,
+      _context: any,
+      sourceText: string,
+    ) => ({
+      final_text: sourceText,
+      report: {
+        version: 'writing_skill_humanize_v1',
+        enabled_ids: [],
+        enabled: false,
+        skipped: true,
+        accepted: true,
+        reason: 'test_noop',
+        before_chars: 0,
+        after_chars: 0,
+        chunk_count: 0,
+      },
+    })),
     executeRevision: async (...args: any[]) => {
       if (options.executeRevision) revisionCalls.push(args)
       return executeRevision(...args)
@@ -3106,6 +3145,165 @@ describe('durable editor revision worker', () => {
     expect(harness.events.indexOf('checkpoint:record_continuity_warning:running'))
       .toBeLessThan(harness.events.indexOf('review:downstream_continuity_warning'))
     expect(harness.writes.some(item => item.story_state?.status === 'prepared')).toBe(true)
+  })
+
+  test('runs the writing-skill pass after admission and persists the rewritten prose', async () => {
+    const skilled = `${'去味修订正文。'.repeat(190)}。`
+    const skillCalls: any[][] = []
+    const harness = createHarness({
+      autoQuality: false,
+      autoStoryState: false,
+      runWritingSkillHumanizePass: async (...args: any[]) => {
+        skillCalls.push(args)
+        return {
+          final_text: skilled,
+          report: {
+            version: 'writing_skill_humanize_v1',
+            enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+            enabled: true,
+            skipped: false,
+            accepted: true,
+            before_chars: candidateText.replace(/\s/g, '').length,
+            after_chars: skilled.replace(/\s/g, '').length,
+            chunk_count: 1,
+          },
+        }
+      },
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('completed')
+    expect(skillCalls).toHaveLength(1)
+    expect(skillCalls[0][1]).toEqual(harness.project)
+    expect(skillCalls[0][3]).toBe(candidateText)
+    expect(skillCalls[0][5]?.writing_skills).toBeUndefined()
+    expect(skillCalls[0][5]?.writingSkills).toBeUndefined()
+    expect(harness.checkpoint().candidate).toMatchObject({
+      text: skilled,
+      hash: revisionTextHash(skilled),
+    })
+    expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
+      accepted: true,
+      skipped: false,
+      enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+    })
+    expect(harness.chapter().chapter_text).toBe(skilled)
+    expect(harness.chapter().raw_payload.writing_skill_humanize).toMatchObject({
+      accepted: true,
+      enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+    })
+  })
+
+  test('durably records skill progress while a pass runs and clears it from later checkpoints', async () => {
+    const skilled = `${'去味修订正文。'.repeat(190)}。`
+    const harness = createHarness({
+      autoQuality: false,
+      autoStoryState: false,
+      runWritingSkillHumanizePass: async (...args: any[]) => {
+        await args[5]?.onSkillProgress?.('remove-ai-flavor', { index: 2, total: 2 })
+        return {
+          final_text: skilled,
+          report: {
+            version: 'writing_skill_humanize_v1',
+            enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+            enabled: true,
+            skipped: false,
+            accepted: true,
+            before_chars: candidateText.replace(/\s/g, '').length,
+            after_chars: skilled.replace(/\s/g, '').length,
+            chunk_count: 1,
+          },
+        }
+      },
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('completed')
+    const progressWrites = harness.writes.filter(write => (write as any).skill_progress)
+    expect(progressWrites).toHaveLength(1)
+    expect((progressWrites[0] as any).skill_progress).toMatchObject({
+      skill_id: 'remove-ai-flavor',
+      index: 2,
+      total: 2,
+    })
+    expect(typeof (progressWrites[0] as any).skill_progress.started_at).toBe('string')
+    expect(progressWrites[0].phase).toBe('generate_candidate')
+    expect(progressWrites[0].phases.generate_candidate.status).toBe('running')
+    const lastWrite = harness.writes.at(-1) as any
+    expect(lastWrite.skill_progress).toBeUndefined()
+    expect((harness.checkpoint() as any).skill_progress).toBeUndefined()
+    expect(harness.checkpoint().candidate?.text).toBe(skilled)
+  })
+
+  test('clears leftover skill progress when a resumed claim re-enters the phase', async () => {
+    const resumed = initialCheckpoint()
+    resumed.runtime_config = { llm_timeout_ms: 600_000, story_state_max_tokens: 9_000 }
+    resumed.phases.generate_candidate = {
+      status: 'running',
+      attempt: 1,
+      started_at: '2030-01-01T00:00:00.000Z',
+    }
+    resumed.skill_progress = {
+      skill_id: 'remove-ai-flavor',
+      index: 2,
+      total: 2,
+      started_at: '2030-01-01T00:00:00.500Z',
+    }
+    const harness = createHarness({
+      autoQuality: false,
+      autoStoryState: false,
+      checkpoint: resumed,
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('completed')
+    expect(harness.writes.length).toBeGreaterThan(0)
+    expect((harness.writes[0] as any).skill_progress).toBeUndefined()
+    expect(harness.writes.every(write => (write as any).skill_progress === undefined)).toBe(true)
+  })
+
+  test('keeps the admitted revision when the writing-skill pass throws', async () => {
+    const harness = createHarness({
+      autoQuality: false,
+      autoStoryState: false,
+      runWritingSkillHumanizePass: async () => {
+        throw new Error('skill unavailable')
+      },
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).toBe('completed')
+    expect(harness.chapter().chapter_text).toBe(candidateText)
+    expect(harness.checkpoint().candidate?.text).toBe(candidateText)
+    expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
+      accepted: false,
+      reason: 'writing_skill_humanize_failed',
+    })
+  })
+
+  test('aborts the run when the skill pass surfaces a lease-or-state-invalid write failure', async () => {
+    const harness = createHarness({
+      autoQuality: false,
+      autoStoryState: false,
+      runWritingSkillHumanizePass: async () => {
+        throw errorWithCode('REVISION_LEASE_OR_STATE_INVALID')
+      },
+    })
+    const worker = harness.worker()
+    await worker.start(workspace)
+    await worker.waitForIdle()
+
+    expect(harness.run.status).not.toBe('completed')
+    expect(harness.commitCalls()).toBe(0)
+    expect(harness.checkpoint().writing_skill_humanize).toBeUndefined()
   })
 
   test('uses one frozen chapter task for revision, post-review, and Story State then closes success once', async () => {

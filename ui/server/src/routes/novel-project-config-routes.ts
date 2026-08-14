@@ -9,6 +9,10 @@ import {
   normalizeEditorRevisionTimeoutSeconds,
   resolveEditorRevisionRuntimeConfig,
 } from '../novel/editor-revision-runtime-config'
+import {
+  normalizeWritingSkillsEnabled,
+  resolveWritingSkillsEnabled,
+} from '../novel-writing/writing-skills'
 
 type ProjectConfigRoutesContext = {
   getWorkspace: () => string
@@ -75,6 +79,73 @@ export function registerNovelProjectConfigRoutes(app: Express, ctx: ProjectConfi
               },
             },
             result: config,
+          }
+        },
+      })
+      if (!mutation) return res.status(404).json({ error: 'project not found' })
+      res.json({ ok: true, config: mutation.result, project: mutation.project })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.get('/api/novel/projects/:id/writing-skills-config', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const resolved = resolveWritingSkillsEnabled({ project })
+      res.json({
+        ok: true,
+        config: {
+          enabled: resolved.enabled,
+          fiction_humanizer_mode: resolved.fiction_humanizer_mode,
+          model_id: resolved.model_id ?? null,
+        },
+      })
+    } catch (error) {
+      res.status(500).json({ error: String(error) })
+    }
+  })
+
+  app.put('/api/novel/projects/:id/writing-skills-config', async (req, res) => {
+    try {
+      const activeWorkspace = ctx.getWorkspace()
+      const project = await ctx.getProject(activeWorkspace, Number(req.params.id))
+      if (!project) return res.status(404).json({ error: 'project not found' })
+      const requestConfig = req.body?.config || req.body || {}
+      const enabled = normalizeWritingSkillsEnabled(requestConfig.enabled ?? requestConfig)
+      const requestModelId = requestConfig.model_id
+      const mutation = await mutateNovelProjectReferenceConfig(activeWorkspace, {
+        projectId: project.id,
+        operation: 'update-writing-skills-config',
+        mutate: currentConfig => {
+          const fictionHumanizerMode = resolveWritingSkillsEnabled({
+            project: { reference_config: currentConfig },
+            override: requestConfig,
+          }).fiction_humanizer_mode
+          const writingSkills: Record<string, unknown> = {
+            ...(currentConfig.writing_skills || {}),
+            enabled,
+            fiction_humanizer_mode: fictionHumanizerMode,
+          }
+          if (requestModelId === null) {
+            writingSkills.model_id = null
+          } else if (typeof requestModelId === 'number' && Number.isInteger(requestModelId) && requestModelId > 0) {
+            writingSkills.model_id = requestModelId
+          }
+          return {
+            referenceConfig: {
+              ...currentConfig,
+              writing_skills: writingSkills,
+            },
+            result: {
+              enabled,
+              fiction_humanizer_mode: fictionHumanizerMode,
+              model_id: resolveWritingSkillsEnabled({
+                project: { reference_config: { writing_skills: writingSkills } },
+              }).model_id ?? null,
+            },
           }
         },
       })

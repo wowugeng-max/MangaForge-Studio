@@ -20,6 +20,14 @@ export type EditorRevisionTask = {
   quality?: EditorRevisionQuality | null
   story_state?: Record<string, unknown> | null
   phases?: Record<string, { summary?: Record<string, unknown> }>
+  /** 服务端投影的当前写作 skill 轮次(仅活跃 run 且 generate_candidate 阶段) */
+  skill_progress?: {
+    skill_id: string
+    index: number
+    total: number
+    label?: string
+    started_at?: string
+  } | null
   warnings: Array<{ code: string; message: string }>
   error: { code: string; message: string } | null
   can_cancel: boolean

@@ -32,6 +32,7 @@ import { createGenerateChapterForGroupMethods } from './generate-chapter-for-gro
 import { buildParagraphProseContext as buildParagraphProseContextFromModule } from './paragraph-prose-context'
 import { createProsePolishMethods } from './prose-polish-methods'
 import { createProseHumanizePostprocessMethods } from './prose-humanize-postprocess-methods'
+import { createWritingSkillHumanizeMethods } from './writing-skill-humanize-methods'
 import { createProseSelfReviewMethods } from './prose-self-review-methods'
 import { createProseWordTargetMethods } from './prose-word-target-methods'
 import { createSceneCardsMethods } from './scene-cards-methods'
@@ -108,6 +109,12 @@ export function createNovelWritingService(ctx: {
   })
   const runHumanizePostProcess = ctx.runtime?.runHumanizePostProcess
     || humanizePostprocessMethods.runHumanizePostProcess
+  const writingSkillHumanizeMethods = createWritingSkillHumanizeMethods({
+    executeAgent,
+    getStageModelId: (project: any, stage: any, modelId?: any) => ctx.production.getStageModelId(project, stage, modelId),
+    getStageTemperature: (project: any, stage: any, fallback?: any) => ctx.production.getStageTemperature(project, stage, fallback),
+  })
+  const runWritingSkillHumanizePass = writingSkillHumanizeMethods.runWritingSkillHumanizePass
   const sceneCardsMethods = createSceneCardsMethods({
     executeAgent,
     getStageModelId: (project: any, stage: any, modelId?: any) => ctx.production.getStageModelId(project, stage, modelId),
@@ -255,6 +262,7 @@ export function createNovelWritingService(ctx: {
     runMemePolish,
     runReadabilityReview,
     runHumanizePostProcess,
+    runWritingSkillHumanizePass,
     prepareStoryStateUpdate,
     trustedWordTargetContractionBudgets,
   })

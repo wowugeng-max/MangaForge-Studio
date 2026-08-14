@@ -13,6 +13,13 @@ import type {
   WorkspaceArea,
 } from './shell/workspace-types'
 import {
+  DEFAULT_FICTION_HUMANIZER_MODE,
+  DEFAULT_WRITING_SKILLS_ENABLED,
+  writingSkillsPayload,
+  type FictionHumanizerMode,
+  type WritingSkillEnabledMap,
+} from './writingSkillsModel'
+import {
   immersiveEnterPanelDefaults,
   isImmersiveShell as deriveIsImmersiveShell,
   loadWorkbenchDirectoryCollapsed,
@@ -68,6 +75,8 @@ export function useNovelProjectWorkspaceUiState() {
   const [unattendedTargetChapter, setUnattendedTargetChapter] = useState(10)
   const [chapterWordTargetMode, setChapterWordTargetMode] = useState<ChapterWordTargetMode>('standard')
   const [chapterTargetWordCount, setChapterTargetWordCount] = useState(3000)
+  const [writingSkillsEnabled, setWritingSkillsEnabled] = useState<WritingSkillEnabledMap>(DEFAULT_WRITING_SKILLS_ENABLED)
+  const [fictionHumanizerMode, setFictionHumanizerMode] = useState<FictionHumanizerMode>(DEFAULT_FICTION_HUMANIZER_MODE)
   const [activeChapterDiagnostics, setActiveChapterDiagnostics] = useState<ChapterOwnedData | null>(null)
   const diagnosticsRequestRef = useRef(0)
   const [activeChapterContextPackage, setActiveChapterContextPackage] = useState<ChapterOwnedData | null>(null)
@@ -84,6 +93,7 @@ export function useNovelProjectWorkspaceUiState() {
   const chapterWordTargetPayload = () => ({
     word_target_mode: chapterWordTargetMode,
     ...(chapterWordTargetMode === 'custom' ? { target_word_count: chapterTargetWordCount } : {}),
+    ...writingSkillsPayload(writingSkillsEnabled, fictionHumanizerMode),
   })
 
   const styleSampleEffectivenessItems = useMemo(() => (
@@ -235,6 +245,8 @@ export function useNovelProjectWorkspaceUiState() {
     unattendedTargetChapter, setUnattendedTargetChapter,
     chapterWordTargetMode, setChapterWordTargetMode,
     chapterTargetWordCount, setChapterTargetWordCount,
+    writingSkillsEnabled, setWritingSkillsEnabled,
+    fictionHumanizerMode, setFictionHumanizerMode,
     activeChapterDiagnostics, setActiveChapterDiagnostics,
     diagnosticsRequestRef,
     activeChapterContextPackage, setActiveChapterContextPackage,

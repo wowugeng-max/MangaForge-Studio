@@ -366,6 +366,13 @@
   background: rgba(248, 250, 252, 0.88);
 }
 
+.novel-generation-option-row {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .novel-word-target-control {
   display: inline-flex;
   align-items: center;
@@ -4377,6 +4384,12 @@
   font-size: 12px;
   font-weight: 700;
   color: #1f2937;
+}
+.novel-quality-section-title-with-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 .novel-quality-row-list {
   display: grid;

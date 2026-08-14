@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Button, Divider, InputNumber, Modal, Space, Typography, message } from 'antd'
+import { Button, Divider, InputNumber, Modal, Select, Space, Switch, Typography, message } from 'antd'
 import apiClient from '../../api/client'
 import { McpGenerationSourcePanel } from './McpGenerationSourcePanel'
 import { ChapterGenerationSourceControl } from './ChapterGenerationSourceControl'
@@ -7,6 +7,16 @@ import type {
   ChapterSourceAuthorityState,
   ChapterSourceOperationToken,
 } from './chapterGenerationSourceModel'
+import {
+  DEFAULT_FICTION_HUMANIZER_MODE,
+  DEFAULT_WRITING_SKILLS_ENABLED,
+  WRITING_SKILL_CATALOG,
+  normalizeWritingSkillsModelId,
+  resolveWritingSkillsEnabled,
+  writingSkillsSettingsPayload,
+  type FictionHumanizerMode,
+  type WritingSkillEnabledMap,
+} from './writingSkillsModel'
 
 const { Text } = Typography
 const MIN_TIMEOUT_SECONDS = 60
@@ -65,6 +75,7 @@ export function ProjectSettingsModal({
   onSelectedModelConfirmed,
   sourcePending,
   onSourcePendingChange,
+  onWritingSkillsSaved,
 }: {
   open: boolean
   projectId: number
@@ -79,9 +90,16 @@ export function ProjectSettingsModal({
   onSelectedModelConfirmed: (id: number) => void
   sourcePending: boolean
   onSourcePendingChange: (pending: boolean, token: ChapterSourceOperationToken) => void
+  onWritingSkillsSaved?: (next: {
+    enabled: WritingSkillEnabledMap
+    fiction_humanizer_mode: FictionHumanizerMode
+  }) => void
 }) {
   const [timeoutSeconds, setTimeoutSeconds] = useState<number | null>(DEFAULT_TIMEOUT_SECONDS)
   const [storyStateMaxTokens, setStoryStateMaxTokens] = useState<number | null>(DEFAULT_STORY_STATE_MAX_TOKENS)
+  const [writingSkillsEnabled, setWritingSkillsEnabled] = useState<WritingSkillEnabledMap>(DEFAULT_WRITING_SKILLS_ENABLED)
+  const [fictionHumanizerMode, setFictionHumanizerMode] = useState<FictionHumanizerMode>(DEFAULT_FICTION_HUMANIZER_MODE)
+  const [writingSkillsModelId, setWritingSkillsModelId] = useState<number | null>(null)
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -91,17 +109,29 @@ export function ProjectSettingsModal({
     let active = true
     setTimeoutSeconds(DEFAULT_TIMEOUT_SECONDS)
     setStoryStateMaxTokens(DEFAULT_STORY_STATE_MAX_TOKENS)
+    setWritingSkillsEnabled(DEFAULT_WRITING_SKILLS_ENABLED)
+    setFictionHumanizerMode(DEFAULT_FICTION_HUMANIZER_MODE)
+    setWritingSkillsModelId(null)
     setLoadFailed(false)
     setLoading(true)
-    apiClient.get(`/novel/projects/${projectId}/editor-revision-config`)
-      .then(response => {
+    Promise.all([
+      apiClient.get(`/novel/projects/${projectId}/editor-revision-config`),
+      apiClient.get(`/novel/projects/${projectId}/writing-skills-config`),
+    ])
+      .then(([revision, skills]) => {
         if (active) {
           setTimeoutSeconds(normalizeProjectEditorRevisionTimeout(
-            response.data?.config?.timeout_seconds,
+            revision.data?.config?.timeout_seconds,
           ))
           setStoryStateMaxTokens(normalizeProjectStoryStateMaxTokens(
-            response.data?.config?.story_state_max_tokens,
+            revision.data?.config?.story_state_max_tokens,
           ))
+          const resolvedWritingSkills = resolveWritingSkillsEnabled({
+            override: skills.data?.config,
+          })
+          setWritingSkillsEnabled(resolvedWritingSkills.enabled)
+          setFictionHumanizerMode(resolvedWritingSkills.fiction_humanizer_mode)
+          setWritingSkillsModelId(normalizeWritingSkillsModelId(skills.data?.config?.model_id))
         }
       })
       .catch(error => {
@@ -125,11 +155,23 @@ export function ProjectSettingsModal({
       || !isStoryStateMaxTokensValid(storyStateMaxTokens)
     ) return
     setSaving(true)
+    const writingSkillsConfig = writingSkillsSettingsPayload(
+      writingSkillsEnabled,
+      fictionHumanizerMode,
+      writingSkillsModelId,
+    )
     try {
-      await apiClient.put(
-        `/novel/projects/${projectId}/editor-revision-config`,
-        buildEditorRevisionConfigPayload(timeoutSeconds, storyStateMaxTokens),
-      )
+      await Promise.all([
+        apiClient.put(
+          `/novel/projects/${projectId}/editor-revision-config`,
+          buildEditorRevisionConfigPayload(timeoutSeconds, storyStateMaxTokens),
+        ),
+        apiClient.put(
+          `/novel/projects/${projectId}/writing-skills-config`,
+          writingSkillsConfig,
+        ),
+      ])
+      onWritingSkillsSaved?.(writingSkillsConfig)
       message.success('项目设置已保存')
       onClose()
     } catch (error: any) {
@@ -228,6 +270,60 @@ export function ProjectSettingsModal({
         )}
         <Text type="secondary">
           只控制修订后当前章故事状态同步的单次模型输出预算，不控制正文长度，也不会扩展到全部章节。
+        </Text>
+      </Space>
+      <Divider />
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Text strong>去 AI 味写作 skill</Text>
+        <Text type="secondary">
+          项目默认。生成时可在写作条临时覆盖；修订只读这里。
+        </Text>
+        {WRITING_SKILL_CATALOG.map(skill => (
+          <Space key={skill.id} align="start">
+            <Switch
+              checked={writingSkillsEnabled[skill.id]}
+              aria-label={skill.label}
+              disabled={loading || loadFailed}
+              onChange={checked => setWritingSkillsEnabled(current => ({
+                ...current,
+                [skill.id]: checked,
+              }))}
+            />
+            {skill.id === 'fiction-humanizer-zh' && (
+              <Select
+                aria-label="小说去AI味档位"
+                value={fictionHumanizerMode}
+                options={[
+                  { value: 'polish', label: '精修' },
+                  { value: 'rewrite', label: '重写' },
+                ]}
+                disabled={!writingSkillsEnabled['fiction-humanizer-zh'] || loading || loadFailed}
+                onChange={setFictionHumanizerMode}
+                style={{ width: 88 }}
+              />
+            )}
+            <Space direction="vertical" size={0}>
+              <Text>{skill.label}</Text>
+              <Text type="secondary">{skill.description}</Text>
+            </Space>
+          </Space>
+        ))}
+        <Space align="center" wrap>
+          <Text>写作skill模型</Text>
+          <Select
+            aria-label="写作skill模型"
+            value={writingSkillsModelId}
+            options={[
+              { value: null as number | null, label: '跟随项目模型' },
+              ...modelOptions,
+            ]}
+            disabled={loading || loadFailed}
+            onChange={value => setWritingSkillsModelId(value ?? null)}
+            style={{ width: 220 }}
+          />
+        </Space>
+        <Text type="secondary">
+          所有写作 skill 轮次共用该模型；跟随项目模型时使用修订阶段/项目首选模型。
         </Text>
       </Space>
     </Modal>

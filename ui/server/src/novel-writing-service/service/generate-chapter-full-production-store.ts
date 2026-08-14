@@ -113,6 +113,7 @@ export async function runFullProductionAdmissionAndStore(args: {
   editorRewrite: any
   memePolish: any
   humanizePostprocess?: any
+  writingSkillHumanize?: any
   readabilityReview: any
   productionMode: string
   draftPromptDiagnostics: any
@@ -176,6 +177,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     editorRewrite,
     memePolish,
     humanizePostprocess = null,
+    writingSkillHumanize,
     readabilityReview,
     productionMode,
     draftPromptDiagnostics,
@@ -337,6 +339,7 @@ export async function runFullProductionAdmissionAndStore(args: {
     postDraftDirector,
     generationSourceProvenance: draftPromptDiagnostics?.generation_source,
     humanizePostprocess,
+    writingSkillHumanize,
     proseAdmission,
   })
   const acceptancePrep = buildChapterAcceptancePrep({

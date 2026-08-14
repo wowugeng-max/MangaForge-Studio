@@ -616,6 +616,46 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('replace 允许为空字符串')
   })
 
+  test('does not inject condensed writing-skill rules into full revision prompts', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: {
+        title: '超人的规则怪谈世界',
+        reference_config: {
+          writing_skills: { enabled: { 'humanizer-zh': true } },
+        },
+      },
+      chapter: { chapter_text: '林序把门带上。\n\n走廊里只剩灯管声。' },
+      report: { must_fix: ['去掉总结腔'] },
+      revisionMode: 'from_report',
+      userPrompt: '',
+    })
+
+    expect(prompt).not.toContain('去 AI 味写作 skill')
+    expect(prompt).not.toContain('轻改：保留原段落顺序')
+    expect(prompt).not.toContain('±15%')
+  })
+
+  test('does not inject writing-skill directives into opening structural patches', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: {
+        title: '超人的规则怪谈世界',
+        reference_config: {
+          writing_skills: { enabled: { 'humanizer-zh': true } },
+        },
+      },
+      chapter: { chapter_text: '林序把门带上。\n\n走廊里只剩灯管声。' },
+      report: {
+        revision_strategy: 'opening_structural_patch',
+        must_fix: ['开篇承接章末钩子'],
+      },
+      revisionMode: 'from_report',
+      userPrompt: '',
+    })
+
+    expect(prompt).toContain('opening_structural_patch')
+    expect(prompt).not.toContain('去 AI 味写作 skill')
+  })
+
   test('asks editor revision to follow workflow-revision context and output receipts', () => {
     const prompt = buildEditorRevisionPrompt({
       project: { title: '超人的规则怪谈世界' },
@@ -659,6 +699,36 @@ describe('editor revision route safeguards', () => {
     expect(prompt).toContain('中文引号')
     expect(prompt).toContain('英文双引号')
     expect(prompt).toContain('必须转义')
+  })
+
+  test('tells structural rewrite to compress an overlong chapter to the word target', () => {
+    const prompt = buildEditorRevisionPrompt({
+      project: { title: '大夏的第三位天选者' },
+      chapter: { chapter_text: `${'原章节正文。'.repeat(1080)}收束。` },
+      contextPackage: {
+        chapter_target: {
+          word_target: {
+            mode: 'standard',
+            label: '标准章',
+            target: 3000,
+            min: 2700,
+            max: 3300,
+            rangeText: '2700-3300 字',
+          },
+        },
+      },
+      report: {
+        revision_strategy: 'structural_rewrite',
+        must_fix: ['压缩注水描写，回到标准章篇幅'],
+      },
+      revisionMode: 'from_report',
+      userPrompt: '',
+    })
+
+    expect(prompt).toContain('章节字数目标：2700-3300 字')
+    expect(prompt).toContain('原文已超过目标')
+    expect(prompt).toContain('禁止大幅扩写')
+    expect(prompt).not.toContain('字数尽量控制在原文的 70%-130%')
   })
 
   test('keeps structural rewrite output to the two fields consumed by the worker', () => {

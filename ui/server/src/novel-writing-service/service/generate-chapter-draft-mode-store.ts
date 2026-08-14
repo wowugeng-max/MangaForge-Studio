@@ -92,6 +92,7 @@ export async function runDraftModeAdmissionAndStore(args: {
   mergeChapterRawPayload: (...a: any[]) => any
   editorRewrite: any
   humanizePostprocess?: any
+  writingSkillHumanize?: any
   productionMode: string
   draftPromptDiagnostics: any
   ohStoryDeliveryReceipts: any
@@ -145,6 +146,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     mergeChapterRawPayload,
     editorRewrite,
     humanizePostprocess = null,
+    writingSkillHumanize,
     productionMode,
     draftPromptDiagnostics,
     ohStoryDeliveryReceipts,
@@ -266,6 +268,7 @@ export async function runDraftModeAdmissionAndStore(args: {
     postDraftDirector,
     generationSourceProvenance: draftPromptDiagnostics?.generation_source,
     humanizePostprocess,
+    writingSkillHumanize,
     proseAdmission: draftModeProseAdmission,
   })
   let updatedReviewedDraft: any = { ...chapter, ...draftModeChapterPatch }

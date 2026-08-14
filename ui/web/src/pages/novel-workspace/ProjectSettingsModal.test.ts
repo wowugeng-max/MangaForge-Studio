@@ -229,6 +229,25 @@ describe('project settings editor revision timeout', () => {
     expect(modal).toContain('max={262144}')
     expect(modal).toContain('step={512}')
     expect(modal).toContain('> 64_000')
+    expect(modal).toContain('/writing-skills-config')
+    expect(modal).toContain('去 AI 味写作 skill')
+    expect(modal).toContain('WRITING_SKILL_CATALOG')
+    expect(modal).toContain('skill.label')
+    expect(modal).toContain('fiction_humanizer_mode')
+    expect(modal).toContain('精修')
+    expect(modal).toContain('重写')
+    expect(modal).toContain('onWritingSkillsSaved?.(')
+  })
+
+  test('adds a project-level writing skill model select saved through the same PUT', () => {
+    const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
+    expect(modal).toContain('aria-label="写作skill模型"')
+    expect(modal).toContain('跟随项目模型')
+    expect(modal).toContain('writingSkillsModelId')
+    expect(modal).toContain('normalizeWritingSkillsModelId')
+    expect(modal).toContain('skills.data?.config?.model_id')
+    expect(modal).toContain('writingSkillsSettingsPayload(')
+    expect(modal).toContain('...modelOptions')
   })
 
   test('keeps save disabled when the current project setting fails to load', () => {

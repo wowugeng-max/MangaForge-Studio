@@ -18,7 +18,12 @@ import {
   buildR76HumanizeDefaultOptions,
   R76_ZHUQUE_STACK_VERSION,
 } from '../../novel-writing/r76-zhuque-stack'
+import {
+  WRITING_SKILL_STAGE_LABEL,
+  type WritingSkillId,
+} from '../../novel-writing/writing-skills'
 import { formatAdmissionError } from '../quality/admission-error'
+import { WRITING_SKILL_HUMANIZE_VERSION } from './writing-skill-humanize-methods'
 
 function buildHandoffContext(contextPackage: any) {
   return enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
@@ -81,8 +86,13 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
   options: any
   isZhuqueFast: boolean
   runHumanizePostProcess: (...args: any[]) => any
+  runWritingSkillHumanizePass?: (...args: any[]) => any
   onStage: (...args: any[]) => any
-}): Promise<{ finalText: string; humanizePostprocess: PersistedHumanizePostprocessReport | null }> {
+}): Promise<{
+  finalText: string
+  humanizePostprocess: PersistedHumanizePostprocessReport | null
+  writingSkillHumanize?: Record<string, any> | null
+}> {
   const {
     activeWorkspace,
     project,
@@ -93,6 +103,7 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
     options,
     isZhuqueFast,
     runHumanizePostProcess,
+    runWritingSkillHumanizePass,
     onStage,
   } = args
   let finalText = args.finalText
@@ -155,6 +166,70 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
     })
   }
 
+  let writingSkillHumanize: Record<string, any> | null = null
+  if (typeof runWritingSkillHumanizePass === 'function') {
+    await onStage('writing_skill_humanize', {
+      status: 'running',
+      version: WRITING_SKILL_HUMANIZE_VERSION,
+    })
+    try {
+      const skillResult = await runWritingSkillHumanizePass(
+        activeWorkspace,
+        project,
+        contextPackage,
+        finalText,
+        preferredModelId,
+        {
+          ...llmControlOptions,
+          writing_skills: options.writing_skills ?? options.writingSkills,
+          writingSkills: options.writing_skills ?? options.writingSkills,
+          onSkillProgress: async (skillId: WritingSkillId, progress?: { index?: number; total?: number }) => {
+            const skillIndex = Number(progress?.index)
+            const skillTotal = Number(progress?.total)
+            const hasCounter = Number.isInteger(skillIndex) && Number.isInteger(skillTotal)
+              && skillIndex >= 1 && skillTotal >= 1
+            const baseLabel = WRITING_SKILL_STAGE_LABEL[skillId]
+            await onStage('writing_skill_humanize', {
+              status: 'running',
+              skill_id: skillId,
+              label: hasCounter ? `${baseLabel}（${skillIndex}/${skillTotal}）` : baseLabel,
+              ...(hasCounter ? { skill_index: skillIndex, skill_total: skillTotal } : {}),
+            })
+          },
+        },
+      )
+      finalText = String(skillResult?.final_text || finalText)
+      writingSkillHumanize = skillResult?.report || null
+      await onStage('writing_skill_humanize', {
+        status: writingSkillHumanize?.skipped ? 'skipped' : (writingSkillHumanize?.accepted ? 'success' : 'warn'),
+        report: writingSkillHumanize,
+        chars: (finalText || '').length,
+      })
+    } catch (error: any) {
+      if (llmControlOptions?.chapterTaskExecution) throw error
+      writingSkillHumanize = {
+        version: WRITING_SKILL_HUMANIZE_VERSION,
+        fiction_humanizer_mode: 'polish',
+        enabled_ids: [],
+        enabled: true,
+        accepted: false,
+        changed: false,
+        skipped: false,
+        warnings: [],
+        passes: [],
+        reason: 'writing_skill_humanize_failed',
+        error: formatAdmissionError(error, 240),
+        before_chars: 0,
+        after_chars: 0,
+        chunk_count: 0,
+      }
+      await onStage('writing_skill_humanize', {
+        status: 'failed',
+        report: writingSkillHumanize,
+      })
+    }
+  }
+
   const sanitizeProse = (text: string) => applyR76PreStoreSanitize(text, {
     project,
     contextPackage,
@@ -185,5 +260,5 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
     })
   }
 
-  return { finalText, humanizePostprocess }
+  return { finalText, humanizePostprocess, writingSkillHumanize }
 }

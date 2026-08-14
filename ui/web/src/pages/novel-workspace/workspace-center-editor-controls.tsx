@@ -2,6 +2,13 @@ import React from 'react'
 import { EditOutlined, FileTextOutlined } from '@ant-design/icons'
 import { Button, InputNumber, Tooltip, Typography } from 'antd'
 import type { NovelWritingRecommendedActionKey } from './writingRecommendationModel'
+import {
+  DEFAULT_FICTION_HUMANIZER_MODE,
+  DEFAULT_WRITING_SKILLS_ENABLED,
+  WRITING_SKILL_CATALOG,
+  type FictionHumanizerMode,
+  type WritingSkillEnabledMap,
+} from './writingSkillsModel'
 
 const { Text } = Typography
 
@@ -69,6 +76,53 @@ export function WorkspaceCenterWordTargetControl({
         />
       </Tooltip>
       <span className="novel-word-target-unit">字</span>
+    </div>
+  )
+}
+
+export function WorkspaceCenterWritingSkillsControl({
+  writingSkillsEnabled,
+  onWritingSkillsEnabledChange,
+  fictionHumanizerMode,
+  onFictionHumanizerModeChange,
+}: {
+  writingSkillsEnabled?: WritingSkillEnabledMap
+  onWritingSkillsEnabledChange?: (enabled: WritingSkillEnabledMap) => void
+  fictionHumanizerMode?: FictionHumanizerMode
+  onFictionHumanizerModeChange?: (mode: FictionHumanizerMode) => void
+}) {
+  const current = writingSkillsEnabled || DEFAULT_WRITING_SKILLS_ENABLED
+  const mode = fictionHumanizerMode || DEFAULT_FICTION_HUMANIZER_MODE
+  const modeDisabled = !current['fiction-humanizer-zh']
+  return (
+    <div className="novel-word-target-control novel-writing-skills-control" aria-label="去AI味写作skill">
+      {WRITING_SKILL_CATALOG.map(skill => (
+        <Tooltip key={skill.id} title={skill.description}>
+          <Button
+            size="small"
+            type="default"
+            className={`novel-word-preset novel-btn-crystal ${current[skill.id] ? 'novel-btn-crystal-local is-selected' : 'novel-btn-crystal-display'}`}
+            onClick={() => onWritingSkillsEnabledChange?.({
+              ...current,
+              [skill.id]: !current[skill.id],
+            })}
+          >
+            {skill.label}
+          </Button>
+        </Tooltip>
+      ))}
+      {(['polish', 'rewrite'] as const).map(item => (
+        <Button
+          key={item}
+          size="small"
+          disabled={modeDisabled}
+          aria-label={item === 'polish' ? '精修' : '重写'}
+          className={`novel-word-preset novel-btn-crystal ${!modeDisabled && mode === item ? 'novel-btn-crystal-local is-selected' : 'novel-btn-crystal-display'}`}
+          onClick={() => onFictionHumanizerModeChange?.(item)}
+        >
+          {item === 'polish' ? '精修' : '重写'}
+        </Button>
+      ))}
     </div>
   )
 }
