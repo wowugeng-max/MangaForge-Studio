@@ -162,6 +162,10 @@ async function postProviderJson<T = any>(
   // Cloudflare 524 burns ~2min per attempt; cap retries so expand/draft can fall back quickly.
   let cloudflare524Attempts = 0
   const maxCloudflare524Attempts = 2
+  // 代理/网关会在长流(如整章修订)约 2 分钟后断开 socket,属瞬态故障应重试;
+  // 但每次失败前可能已烧掉数分钟,封顶重试次数避免持续断流时无谓消耗。
+  let streamReadFailures = 0
+  const maxStreamReadFailures = 2
 
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
@@ -323,9 +327,13 @@ async function postProviderJson<T = any>(
       } catch (error) {
         if (options.signal?.aborted) throw runtimeRequestCanceledError()
         if (streamTimedOut) throw new Error(`Request timed out after ${timeoutMs}ms while reading provider stream`)
-        lastError = describeFetchError(error)
-        console.error(`[provider-runtime] Stream read error: ${lastError}`)
-        throw new Error(`Provider stream read failed: ${lastError}`)
+        lastError = `Provider stream read failed: ${describeFetchError(error)}`
+        streamReadFailures += 1
+        if (streamReadFailures > maxStreamReadFailures) {
+          throw new Error(`${lastError} (stream_read_retry_cap=${maxStreamReadFailures})`)
+        }
+        console.error(`[provider-runtime] Stream read error, will retry (${streamReadFailures}/${maxStreamReadFailures}): ${lastError}`)
+        continue
       } finally {
         clearTimeout(streamTimeout)
         if (options.signal) options.signal.removeEventListener('abort', abortStreamFromParent)

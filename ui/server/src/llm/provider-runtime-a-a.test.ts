@@ -823,3 +823,74 @@ describe('codex responses provider runtime a a', () => {
     expect(body.prompt).not.toContain('https://cdn.example/input.png')
   })
 })
+
+describe('provider stream read retry', () => {
+  // 回归:代理在流式响应中途断开 socket(约 2 分钟超时)时,
+  // 请求前的网络错误会重试,但流读取失败曾直接抛错导致修订阶段整体失败。
+  test('retries a severed provider stream like a transient network failure', async () => {
+    const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-stream-retry-'))
+    try {
+      await writeFile(join(workspace, 'providers.json'), JSON.stringify([
+        {
+          id: 'grok-proxy',
+          display_name: 'Grok Proxy',
+          service_type: 'llm',
+          api_format: 'openai_compatible',
+          auth_type: 'bearer',
+          response_mode: 'auto',
+          supported_modalities: ['chat'],
+          default_base_url: 'https://proxy.example/v1',
+          is_active: true,
+          endpoints: {},
+          custom_headers: {},
+        },
+      ]))
+      await writeFile(join(workspace, 'keys.json'), JSON.stringify([
+        { id: 1, provider: 'grok-proxy', key: 'secret-key', is_active: true },
+      ]))
+      await writeFile(join(workspace, 'models.json'), JSON.stringify([
+        {
+          id: 1, api_key_id: 1, provider: 'grok-proxy', display_name: 'Grok',
+          model_name: 'grok-4.6', capabilities: { chat: true }, health_status: 'healthy',
+        },
+      ]))
+
+      const encoder = new TextEncoder()
+      let calls = 0
+      globalThis.fetch = (async () => {
+        calls += 1
+        if (calls === 1) {
+          const severed = new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"前半"}}]}\n\n'))
+              controller.error(new Error('The socket connection was closed unexpectedly.'))
+            },
+          })
+          return new Response(severed, { status: 200 })
+        }
+        const complete = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"重试成功"}}]}\n\n'))
+            controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'))
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+            controller.close()
+          },
+        })
+        return new Response(complete, { status: 200 })
+      }) as typeof fetch
+
+      const result = await executeWithRuntimeModel(workspace, {
+        model: 'balanced',
+        messages: [{ role: 'user', content: '写正文' }],
+        stream: true,
+        response_format: 'text',
+      } as any, 1, { maxRetries: 1 })
+
+      expect(calls).toBe(2)
+      expect(result.error).toBeUndefined()
+      expect(result.content).toBe('重试成功')
+    } finally {
+      await rm(workspace, { recursive: true, force: true })
+    }
+  })
+})

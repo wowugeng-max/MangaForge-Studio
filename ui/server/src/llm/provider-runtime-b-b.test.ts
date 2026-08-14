@@ -615,7 +615,7 @@ describe('codex responses provider runtime b b', () => {
       await rm(workspace, { recursive: true, force: true })
     }
   })
-  test('does not retry a completed streaming response when the body read fails', async () => {
+  test('caps retries when the streaming body keeps failing mid-read', async () => {
     const workspace = await mkdtemp(join(tmpdir(), 'mangaforge-runtime-stream-no-retry-'))
     try {
       await writeFile(join(workspace, 'providers.json'), JSON.stringify([
@@ -666,8 +666,11 @@ describe('codex responses provider runtime b b', () => {
         stream: true,
       }, 1, { maxRetries: 2, timeoutMs: 1000 })
 
+      // 瞬态断流会重试(见 provider-runtime-a-a 的成功恢复用例),
+      // 持续断流则在重试封顶(2 次)后失败,共 3 次请求。
       expect(result.error).toContain('upstream stream disconnected')
-      expect(fetchCalls).toBe(1)
+      expect(result.error).toContain('stream_read_retry_cap')
+      expect(fetchCalls).toBe(3)
     } finally {
       await rm(workspace, { recursive: true, force: true })
     }
