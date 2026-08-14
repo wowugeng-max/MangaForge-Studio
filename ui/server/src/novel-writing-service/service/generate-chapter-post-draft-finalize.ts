@@ -18,9 +18,11 @@ import {
   buildR76HumanizeDefaultOptions,
   R76_ZHUQUE_STACK_VERSION,
 } from '../../novel-writing/r76-zhuque-stack'
-import { resolveWritingSkillStageLabel } from '../../novel-writing/writing-skills'
 import { formatAdmissionError } from '../quality/admission-error'
-import { WRITING_SKILL_HUMANIZE_VERSION } from './writing-skill-humanize-methods'
+import {
+  WRITING_SKILL_HUMANIZE_DEFER_REASON,
+  WRITING_SKILL_HUMANIZE_VERSION,
+} from './writing-skill-humanize-methods'
 
 function buildHandoffContext(contextPackage: any) {
   return enrichContextWithProgressResync(enrichContextWithStrongHandoff(contextPackage))
@@ -165,70 +167,26 @@ export async function runPostDraftHumanizeAndOpeningHandoff(args: {
 
   let writingSkillHumanize: Record<string, any> | null = null
   if (typeof runWritingSkillHumanizePass === 'function') {
-    await onStage('writing_skill_humanize', {
-      status: 'running',
+    const deferredCharCount = (finalText || '').replace(/\s/g, '').length
+    writingSkillHumanize = {
       version: WRITING_SKILL_HUMANIZE_VERSION,
-    })
-    try {
-      const skillResult = await runWritingSkillHumanizePass(
-        activeWorkspace,
-        project,
-        contextPackage,
-        finalText,
-        preferredModelId,
-        {
-          ...llmControlOptions,
-          writing_skills: options.writing_skills ?? options.writingSkills,
-          writingSkills: options.writing_skills ?? options.writingSkills,
-          onSkillProgress: async (skillId: string, progress?: { index?: number; total?: number; label?: string }) => {
-            const skillIndex = Number(progress?.index)
-            const skillTotal = Number(progress?.total)
-            const hasCounter = Number.isInteger(skillIndex) && Number.isInteger(skillTotal)
-              && skillIndex >= 1 && skillTotal >= 1
-            // resolveWritingSkillStageLabel never returns undefined: installed ids
-            // fall back to the runner-provided pack label or the bounded id.
-            const baseLabel = String(
-              progress?.label || resolveWritingSkillStageLabel(skillId),
-            ).slice(0, 60)
-            await onStage('writing_skill_humanize', {
-              status: 'running',
-              skill_id: skillId,
-              label: hasCounter ? `${baseLabel}（${skillIndex}/${skillTotal}）` : baseLabel,
-              ...(hasCounter ? { skill_index: skillIndex, skill_total: skillTotal } : {}),
-            })
-          },
-        },
-      )
-      finalText = String(skillResult?.final_text || finalText)
-      writingSkillHumanize = skillResult?.report || null
-      await onStage('writing_skill_humanize', {
-        status: writingSkillHumanize?.skipped ? 'skipped' : (writingSkillHumanize?.accepted ? 'success' : 'warn'),
-        report: writingSkillHumanize,
-        chars: (finalText || '').length,
-      })
-    } catch (error: any) {
-      if (llmControlOptions?.chapterTaskExecution) throw error
-      writingSkillHumanize = {
-        version: WRITING_SKILL_HUMANIZE_VERSION,
-        fiction_humanizer_mode: 'polish',
-        enabled_ids: [],
-        enabled: true,
-        accepted: false,
-        changed: false,
-        skipped: false,
-        warnings: [],
-        passes: [],
-        reason: 'writing_skill_humanize_failed',
-        error: formatAdmissionError(error, 240),
-        before_chars: 0,
-        after_chars: 0,
-        chunk_count: 0,
-      }
-      await onStage('writing_skill_humanize', {
-        status: 'failed',
-        report: writingSkillHumanize,
-      })
+      fiction_humanizer_mode: 'polish',
+      enabled_ids: [],
+      enabled: false,
+      skipped: true,
+      accepted: true,
+      changed: false,
+      warnings: [],
+      reason: WRITING_SKILL_HUMANIZE_DEFER_REASON,
+      before_chars: deferredCharCount,
+      after_chars: deferredCharCount,
+      chunk_count: 0,
+      passes: [],
     }
+    await onStage('writing_skill_humanize', {
+      status: 'skipped',
+      report: writingSkillHumanize,
+    })
   }
 
   const sanitizeProse = (text: string) => applyR76PreStoreSanitize(text, {

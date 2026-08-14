@@ -519,7 +519,7 @@ describe('writing skill humanize methods', () => {
       undefined,
       {
         writing_skills: { enabled: { 'remove-ai-flavor': false, 'humanizer-zh': false } },
-        fingerprintSelect: () => ({ accepted: false, reason: 'fingerprint_continuity_failed', text: SOURCE }),
+        fingerprintSelect: () => ({ accepted: false, reason: 'fingerprint_continuity_failed', text: PASS_A }),
       },
     )
     expect(result.final_text).toBe(PASS_A)

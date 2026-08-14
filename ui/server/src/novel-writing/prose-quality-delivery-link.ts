@@ -417,12 +417,14 @@ export function selectPriorityDeliveryDirectives(input: {
       severity: 'medium',
       label: `${label}·${row.label}`,
       directive: compactText(`补${label}：${row.fix}`, 200),
+      excludeFromDirectives: key === 'conflict_structure',
       issue: {
         severity: 'medium',
         type: key,
         description: row.issue,
         fix: row.fix,
         source: type,
+        ...(key === 'conflict_structure' ? { category: 'reference' } : {}),
       },
     })
     break

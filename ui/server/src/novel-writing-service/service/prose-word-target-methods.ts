@@ -30,7 +30,7 @@ import {
   isAbortError,
   throwIfAborted,
 } from './runtime-helpers'
-import { selectFingerprintSafeProse } from '../../novel-writing/human-webnovel-resistance'
+import { selectFingerprintAdvisoryProse } from '../../novel-writing/human-webnovel-resistance'
 import { executeChapterStage } from '../generation-source/types'
 
 export function createProseWordTargetMethods(deps: {
@@ -193,49 +193,38 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     if (massiveOvershoot) {
       const localFirst = surgicalContractProseToWordTarget(currentText, wordTarget)
       if (localFirst.removed > 0 && localFirst.to < actualChars) {
-        const localGate = selectFingerprintSafeProse(String(chapterText || ''), localFirst.text, { stage: 'word_target_contract_local_first' })
-        if (localGate.accepted) {
-          const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
-          contractionAttempts.push({
-            attempt: 'local_surgical_first',
-            previous_count: actualChars,
-            contracted_count: localFirst.to,
-            evaluation: localEval,
-            returned_text: true,
-            candidate_rejected: false,
-            rejection_reason: null,
-            local_removed: localFirst.removed,
-            massive_overshoot: true,
-          })
-          currentText = localGate.text
-          currentEvaluation = localEval
-          bestCompleteText = localGate.text
-          bestCompleteEvaluation = localEval
-          if (!localEval.too_long || localEval.passed) {
-            return {
-              final_text: localGate.text,
-              contracted: true,
-              expanded: false,
-              evaluation,
-              final_evaluation: localEval,
-              contraction: {
-                attempts: contractionAttempts,
-                local_surgical_first: localFirst,
-                fingerprint_continuity: localGate.assessment,
-              },
-              expansion: null,
-            }
+        const localGate = selectFingerprintAdvisoryProse(String(chapterText || ''), localFirst.text, { stage: 'word_target_contract_local_first' })
+        const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
+        contractionAttempts.push({
+          attempt: 'local_surgical_first',
+          previous_count: actualChars,
+          contracted_count: localFirst.to,
+          evaluation: localEval,
+          returned_text: true,
+          candidate_rejected: false,
+          rejection_reason: null,
+          local_removed: localFirst.removed,
+          massive_overshoot: true,
+          fingerprint_continuity: localGate.assessment,
+        })
+        currentText = localGate.text
+        currentEvaluation = localEval
+        bestCompleteText = localGate.text
+        bestCompleteEvaluation = localEval
+        if (!localEval.too_long || localEval.passed) {
+          return {
+            final_text: localGate.text,
+            contracted: true,
+            expanded: false,
+            evaluation,
+            final_evaluation: localEval,
+            contraction: {
+              attempts: contractionAttempts,
+              local_surgical_first: localFirst,
+              fingerprint_continuity: localGate.assessment,
+            },
+            expansion: null,
           }
-        } else {
-          contractionAttempts.push({
-            attempt: 'local_surgical_first',
-            previous_count: actualChars,
-            contracted_count: localFirst.to,
-            returned_text: true,
-            candidate_rejected: true,
-            rejection_reason: `fingerprint_continuity:${localGate.reason || 'failed'}`,
-            massive_overshoot: true,
-          })
         }
       }
     }
@@ -341,16 +330,12 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
 
       if (candidateRejected) continue
 
-      const fingerprintGate = selectFingerprintSafeProse(currentText, contractedText, { stage: 'word_target_contract' })
-      if (!fingerprintGate.accepted) {
-        contractionAttempts[contractionAttempts.length - 1] = {
-          ...contractionAttempts[contractionAttempts.length - 1],
-          candidate_rejected: true,
-          rejection_reason: `fingerprint_continuity:${fingerprintGate.reason || 'failed'}`,
-        }
-        continue
-      }
+      const fingerprintGate = selectFingerprintAdvisoryProse(currentText, contractedText, { stage: 'word_target_contract' })
       contractedText = fingerprintGate.text
+      contractionAttempts[contractionAttempts.length - 1] = {
+        ...contractionAttempts[contractionAttempts.length - 1],
+        fingerprint_continuity: fingerprintGate.assessment,
+      }
 
       const candidateModelName = sanitizeWordTargetModelName((contractionResult as any).modelName)
       const candidatePayload = {
@@ -397,48 +382,38 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
       // LLM contraction often fails on long drafts (partial JSON). Fall back to local paragraph drop.
       const local = surgicalContractProseToWordTarget(currentText, wordTarget)
       if (local.removed > 0 && local.to < countProseChars(currentText)) {
-        const localGate = selectFingerprintSafeProse(String(chapterText || ''), local.text, { stage: 'word_target_contract_local' })
-        if (localGate.accepted) {
-          const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
-          contractionAttempts.push({
-            attempt: 'local_surgical',
-            previous_count: countProseChars(currentText),
-            contracted_count: local.to,
-            evaluation: localEval,
-            returned_text: true,
-            candidate_rejected: false,
-            rejection_reason: null,
-            local_removed: local.removed,
-          })
-          if (!localEval.too_long || localEval.passed) {
-            return {
-              final_text: localGate.text,
-              contracted: true,
-              expanded: false,
-              evaluation,
-              final_evaluation: localEval,
-              contraction: {
-                attempts: contractionAttempts,
-                local_surgical: local,
-                fingerprint_continuity: localGate.assessment,
-              },
-              expansion: null,
-            }
+        const localGate = selectFingerprintAdvisoryProse(String(chapterText || ''), local.text, { stage: 'word_target_contract_local' })
+        const localEval = applyProseWordTargetSoftCap(evaluateProseWordTarget(localGate.text, wordTarget))
+        contractionAttempts.push({
+          attempt: 'local_surgical',
+          previous_count: countProseChars(currentText),
+          contracted_count: local.to,
+          evaluation: localEval,
+          returned_text: true,
+          candidate_rejected: false,
+          rejection_reason: null,
+          local_removed: local.removed,
+          fingerprint_continuity: localGate.assessment,
+        })
+        if (!localEval.too_long || localEval.passed) {
+          return {
+            final_text: localGate.text,
+            contracted: true,
+            expanded: false,
+            evaluation,
+            final_evaluation: localEval,
+            contraction: {
+              attempts: contractionAttempts,
+              local_surgical: local,
+              fingerprint_continuity: localGate.assessment,
+            },
+            expansion: null,
           }
-          currentText = localGate.text
-          currentEvaluation = localEval
-          bestCompleteText = localGate.text
-          bestCompleteEvaluation = localEval
-        } else {
-          contractionAttempts.push({
-            attempt: 'local_surgical',
-            previous_count: countProseChars(currentText),
-            contracted_count: local.to,
-            returned_text: true,
-            candidate_rejected: true,
-            rejection_reason: `fingerprint_continuity:${localGate.reason || 'failed'}`,
-          })
         }
+        currentText = localGate.text
+        currentEvaluation = localEval
+        bestCompleteText = localGate.text
+        bestCompleteEvaluation = localEval
       }
       const compatibility = resolveStandardWordTargetCompatibility(evaluation, wordTarget)
       if (compatibility.passed) {
@@ -597,16 +572,13 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     })
 
     if (!candidateRejected && expandedText && expandedCount > previousCount) {
-      const fingerprintGate = selectFingerprintSafeProse(currentText, expandedText, { stage: 'word_target_expand' })
-      if (!fingerprintGate.accepted) {
-        attempts[attempts.length - 1] = {
-          ...attempts[attempts.length - 1],
-          candidate_rejected: true,
-          rejection_reason: `fingerprint_continuity:${fingerprintGate.reason || 'failed'}`,
-        }
-      } else {
+      const fingerprintGate = selectFingerprintAdvisoryProse(currentText, expandedText, { stage: 'word_target_expand' })
       currentText = fingerprintGate.text
       currentEvaluation = finalEvaluation
+      attempts[attempts.length - 1] = {
+        ...attempts[attempts.length - 1],
+        fingerprint_continuity: fingerprintGate.assessment,
+      }
       // Candidate selection: in-hard-range first (distance to range), only then prefer longer.
       const bestDistance = wordTargetDistance(bestCompleteEvaluation)
       const candidateDistance = wordTargetDistance(finalEvaluation)
@@ -622,14 +594,10 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
           fingerprint_continuity: fingerprintGate.assessment,
         }
       }
-      }
     }
 
     if (!candidateRejected && expandedText && expandedCount > previousCount && finalEvaluation.passed) {
-      const fingerprintGate = selectFingerprintSafeProse(String(chapterText || ''), expandedText, { stage: 'word_target_expand' })
-      if (!fingerprintGate.accepted) {
-        // keep searching / fall back to bestComplete
-      } else {
+      const fingerprintGate = selectFingerprintAdvisoryProse(String(chapterText || ''), expandedText, { stage: 'word_target_expand' })
       const expandedDialogueRatio = measureDialogueParaRatio(fingerprintGate.text)
       const hardAfter = evaluateProseWordTarget(fingerprintGate.text, wordTarget)
       const dialogueStillShort = expandedDialogueRatio + 1e-9 < DIALOGUE_EXPAND_MIN_RATIO
@@ -666,7 +634,6 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
         },
       }
       }
-      }
     }
 
     // Hard too_long brake: once current text reaches/exceeds the hard ceiling, stop expanding.
@@ -674,14 +641,9 @@ const ensureProseMeetsWordTarget = async (activeWorkspace: string, project: any,
     if (Number(currentHardEvaluation.max || 0) > 0 && Number(currentHardEvaluation.actual || 0) >= Number(currentHardEvaluation.max)) break
   }
 
-  // Final expansion/contraction candidate also must keep fingerprint vs original draft.
-  const finalGate = selectFingerprintSafeProse(String(chapterText || ''), bestCompleteText, { stage: 'word_target_final' })
-  if (!finalGate.accepted) {
-    bestCompleteText = String(chapterText || '')
-    bestCompleteEvaluation = initialEvaluation
-  } else {
-    bestCompleteText = finalGate.text
-  }
+  // Final candidate records fingerprint as reference only; do not roll back rewritten prose.
+  const finalGate = selectFingerprintAdvisoryProse(String(chapterText || ''), bestCompleteText, { stage: 'word_target_final' })
+  bestCompleteText = finalGate.text
 
   // Report the real evaluation of the returned text: dialogue-only triggers must not surface a
   // synthesized too_short/word_target_short warning on a chapter that is inside the hard range.

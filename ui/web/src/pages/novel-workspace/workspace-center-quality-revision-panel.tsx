@@ -308,6 +308,8 @@ export function WorkspaceCenterQualityRevisionPanel({
   onRefreshProseQuality,
   onRepairPreflightGaps,
   onApplyEditorRevision,
+  onOhStoryReview,
+  onOhStoryDeslop,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -323,6 +325,8 @@ export function WorkspaceCenterQualityRevisionPanel({
   onRefreshProseQuality?: () => void
   onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
+  onOhStoryReview?: () => void | Promise<void>
+  onOhStoryDeslop?: () => void | Promise<void>
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -455,12 +459,31 @@ export function WorkspaceCenterQualityRevisionPanel({
     >
       <summary className="novel-quality-revision-summary">
         <span className="novel-quality-revision-title">质检修订</span>
-        <span className="novel-quality-revision-pills">
-          {summaryBits.map(bit => (
-            <span key={bit} className="novel-quality-revision-pill">{bit}</span>
-          ))}
+        <span className="novel-quality-revision-score-block" style={{ display: 'inline-flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span className="novel-quality-revision-pills">
+            {summaryBits.map(bit => (
+              <span key={bit} className="novel-quality-revision-pill">{bit}</span>
+            ))}
+          </span>
+          <span className="novel-quality-revision-score-caption novel-quality-revision-hint">参考，不自动改稿</span>
         </span>
-        <span className="novel-quality-revision-summary-action">
+        <span className="novel-quality-revision-summary-action" style={{ gap: 6 }}>
+          <Button
+            size="small"
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void onOhStoryReview?.()
+            }}
+          >oh-story 审稿</Button>
+          <Button
+            size="small"
+            onClick={(event) => {
+              event.preventDefault()
+              event.stopPropagation()
+              void onOhStoryDeslop?.()
+            }}
+          >oh-story 去AI</Button>
           {canRevise ? (
             <Button
               size="small"

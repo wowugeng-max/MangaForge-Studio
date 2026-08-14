@@ -4817,3 +4817,25 @@ export function selectFingerprintSafeProse(
   }
   return { text: after, accepted: true, reason: '', assessment }
 }
+
+/** Keep the candidate as reference-only; never roll back rewritten prose. */
+export function selectFingerprintAdvisoryProse(
+  beforeText: string,
+  afterText: string,
+  options: { contract?: FingerprintContract | null; cwd?: string; stage?: string } = {},
+): { text: string; accepted: boolean; reason: string; assessment: ResistanceRevisionAssessment } {
+  const before = String(beforeText || '')
+  const after = String(afterText || '')
+  if (!after.trim()) {
+    const assessment = assessProseFingerprintContinuity(before, before, options)
+    return { text: before, accepted: false, reason: 'empty_candidate', assessment }
+  }
+  const assessment = assessProseFingerprintContinuity(before, after, options)
+  const rawReason = assessment.accepted ? '' : (assessment.reason || 'fingerprint_reference_only')
+  return {
+    text: after,
+    accepted: assessment.accepted,
+    reason: /已回退/.test(rawReason) ? 'fingerprint_reference_only' : rawReason,
+    assessment,
+  }
+}

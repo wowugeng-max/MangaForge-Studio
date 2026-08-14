@@ -15,7 +15,7 @@ import {
   type WritingSkillPassReport,
 } from '../../novel-writing/writing-skills'
 import { redactAndBoundCredentialText } from '../../novel-writing/credential-redaction'
-import { selectFingerprintSafeProse } from '../../novel-writing/human-webnovel-resistance'
+import { selectFingerprintAdvisoryProse } from '../../novel-writing/human-webnovel-resistance'
 import { countProseChars, proseMaxTokensForWordTarget } from '../../novel-writing/word-target'
 import { assertCompleteProseTransportResult } from '../quality/prose-transport-admission'
 import { getNovelPayload } from '../../routes/novel-route-utils'
@@ -23,6 +23,7 @@ import { throwIfAborted } from './runtime-helpers'
 import { executeChapterStage } from '../generation-source/types'
 
 export const WRITING_SKILL_HUMANIZE_VERSION = 'writing_skill_humanize_v2'
+export const WRITING_SKILL_HUMANIZE_DEFER_REASON = 'deferred_until_oh_story_core_eval'
 export type { WritingSkillHumanizeReport } from '../../novel-writing/writing-skills'
 
 const DEFAULT_WORD_TARGET = {
@@ -184,7 +185,7 @@ export function createWritingSkillHumanizeMethods(deps: {
     const wordTarget = contextPackage?.chapter_target?.word_target
       || contextPackage?.chapterTarget?.word_target
       || DEFAULT_WORD_TARGET
-    const fingerprintSelect = options.fingerprintSelect || selectFingerprintSafeProse
+    const fingerprintSelect = options.fingerprintSelect || selectFingerprintAdvisoryProse
     const warnings: string[] = []
     const passes: WritingSkillPassReport[] = []
     let currentText = source
@@ -269,9 +270,8 @@ export function createWritingSkillHumanizeMethods(deps: {
         const fingerprint = fingerprintSelect(passInput, currentText, { stage: 'writing_skill_humanize' })
         if (!fingerprint.accepted) {
           warnings.push(fingerprint.reason || 'writing_skill_fingerprint')
-        } else {
-          currentText = fingerprint.text
         }
+        currentText = fingerprint.text
         passes.push({
           id,
           ...(id === 'fiction-humanizer-zh' ? { mode: resolved.fiction_humanizer_mode } : {}),

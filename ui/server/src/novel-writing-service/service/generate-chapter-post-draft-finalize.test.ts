@@ -213,24 +213,23 @@ describe('post-draft humanize and opening-handoff finalization', () => {
       },
     })
 
-    expect(skillInput).toBe(humanized)
-    expect(result.finalText).toContain('纸边硌了一下')
-    expect(result.writingSkillHumanize).toMatchObject({ accepted: true, skipped: false })
+    expect(skillInput).toBe('')
+    expect(result.finalText).toContain(humanized)
+    expect(result.finalText).not.toContain('纸边硌了一下')
+    expect(result.writingSkillHumanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
+      accepted: true,
+      changed: false,
+      passes: [],
+    })
     expect(stages.map(item => [item.stage, item.payload.status])).toEqual([
       ['humanize_postprocess', 'running'],
       ['humanize_postprocess', 'success'],
-      ['writing_skill_humanize', 'running'],
-      ['writing_skill_humanize', 'running'],
-      ['writing_skill_humanize', 'success'],
+      ['writing_skill_humanize', 'skipped'],
     ])
-    expect(stages.some(item => (
-      item.stage === 'writing_skill_humanize'
-      && item.payload.status === 'running'
-      && item.payload.skill_id === 'fiction-humanizer-zh'
-      && item.payload.label === '写作skill · 小说去AI味（2/3）'
-      && item.payload.skill_index === 2
-      && item.payload.skill_total === 3
-    ))).toBe(true)
   })
 
   test('keeps humanized prose when the writing-skill pass throws', async () => {
@@ -262,17 +261,16 @@ describe('post-draft humanize and opening-handoff finalization', () => {
     expect(result.finalText).toContain(humanized)
     expect(result.writingSkillHumanize).toMatchObject({
       version: 'writing_skill_humanize_v2',
-      accepted: false,
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
+      accepted: true,
       changed: false,
-      skipped: false,
-      warnings: [],
       passes: [],
-      reason: 'writing_skill_humanize_failed',
     })
-    expect(String(result.writingSkillHumanize?.error || '')).toHaveLength(240)
+    expect(result.writingSkillHumanize?.error).toBeUndefined()
     expect(stages.filter(item => item.stage === 'writing_skill_humanize').map(item => item.payload.status)).toEqual([
-      'running',
-      'failed',
+      'skipped',
     ])
   })
 })

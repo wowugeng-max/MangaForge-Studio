@@ -333,13 +333,11 @@ if (isZhuqueFast) {
     onStage,
   }))
 } else {
-// System-wide detector resistance: even draft_only gets one minimal revise when pure-AI hard classes hit.
-// This is not chapter-specific tuning; full quality revise still stays off for pure draft modes when clean.
+// Spec B: detector does not start extra revision rounds. Keep the probe so later UI can still show the score.
 const resistanceProbe = evaluateHumanWebnovelResistance(finalText)
 const resistanceHardCount = Array.isArray(resistanceProbe?.hard_failures) ? resistanceProbe.hard_failures.length : 0
-const resistanceNeedsRevise = resistanceHardCount > 0
-// R24 lesson: inventory/clinical/symmetry hard fails often need >1 revise; do not stop at one warn/skip.
-// Hard detector risks get revision attempts; store still blocks if residual hard remains.
+void resistanceHardCount
+const resistanceNeedsRevise = false
 // Claude/cliproxy long revise streams often hang or truncate — prefer fewer rounds + residual sanitize.
 const explicitRevisionCap = Number((options as any)?.max_quality_revision_rounds)
 const defaultDraftRounds = resistanceNeedsRevise ? 3 : 0
@@ -470,11 +468,11 @@ qualityReviewExecutor.throwIfTaskExecutionFailed()
 if (chapterTaskExecutionFailed) throw chapterTaskExecutionFailure
 finalText = String(qualityLoop.final_text || '')
 } // end !isZhuqueFast
-// Re-scan after sanitize; residual hard risks stay on decision for admission/store block.
+// Re-scan after sanitize; residual detector hits stay on the decision for score/diagnostics, not store block.
 {
   const residual = evaluateHumanWebnovelResistance(finalText)
-  // Store-blocking residual: pure-AI families only. Positive fingerprint / texture soft-gates
-  // stay as revise targets and warnings while Zhuque pass is being validated first.
+  // Residual probe: pure-AI families only. Positive fingerprint / texture soft-gates
+  // stay as diagnostics and warnings; Spec B does not block store on detector hits.
   const residualHard = (Array.isArray(residual?.hard_failures) ? residual.hard_failures : [])
     .filter((item: any) => isStoreBlockingPureAiResistanceKey(String(item?.key || '')))
   if (residualHard.length) {

@@ -13,6 +13,7 @@ import {
   scoreNarrativeHardContract,
   repairOverUniformParagraphShape,
   selectFingerprintSafeProse,
+  selectFingerprintAdvisoryProse,
   sanitizeR58ZhuqueKillers,
   sanitizeR60ZhuqueKillers,
   sanitizeR63ZhuqueKillers,
@@ -267,6 +268,28 @@ test('fingerprint continuity accepts preserve-mode when risk not worse', () => {
   const gate = selectFingerprintSafeProse(before, after, { stage: 'word_target_expand' })
   expect(gate.accepted).toBe(true)
   expect(gate.text).toContain('门外脚步又近了半步')
+})
+
+test('selectFingerprintAdvisoryProse keeps the candidate even when assessment rejects', () => {
+  const before = [
+    '门口有人停了一下。',
+    '“先别出声。”',
+    '“……好。”他按住门闩，又把纸条塞回内侧口袋。',
+    '他不想现在就把这单写进系统。',
+    '他摸了摸还热的腕侧。',
+  ].join('\n\n')
+  const after = Array.from({ length: 28 }, (_, i) => `他看了一眼桌面编号${i + 1}。`).join('\n\n')
+  const gate = selectFingerprintAdvisoryProse(before, after, { stage: 'writing_skill_humanize' })
+  expect(gate.text).toBe(after)
+  expect(gate.accepted).toBe(false)
+  expect(String(gate.reason || '')).not.toMatch(/已回退前一版正文/)
+})
+
+test('selectFingerprintAdvisoryProse still rejects empty candidates', () => {
+  const gate = selectFingerprintAdvisoryProse('有正文', '   ')
+  expect(gate.text).toBe('有正文')
+  expect(gate.accepted).toBe(false)
+  expect(gate.reason).toBe('empty_candidate')
 })
 
 

@@ -1,6 +1,7 @@
 import type { Express } from 'express'
 import { createOhStoryCapabilityService } from '../novel-oh-story-capability-service'
 import { describeKnowledgeIntegration, publishOhStoryPlanToKnowledge } from '../../novel-writing/oh-story-knowledge-bridge'
+import { registerOhStoryCoreRoutes } from '../novel-oh-story-core-routes'
 import type { CommercialOpsContext } from './builders'
 
 export function registerNovelCommercialOpsOhStoryRoutes(app: Express, ctx: CommercialOpsContext) {
@@ -75,4 +76,6 @@ export function registerNovelCommercialOpsOhStoryRoutes(app: Express, ctx: Comme
       res.status(500).json({ error: String(error?.message || error) })
     }
   })
+
+  registerOhStoryCoreRoutes(app, ctx)
 }

@@ -169,6 +169,12 @@ export async function runDraftModeAdmissionAndStore(args: {
 
   const draftResistanceAdmission = evaluateResistanceAdmission(finalText)
   const fingerprintContractInfo = resolveFingerprintContractInfo()
+  // Spec B: detector/Zhuque are reference scores only. Record residual hits as warnings; do not block store.
+  qualityWarningCandidates.push(
+    ...draftResistanceAdmission.hard_failures.map((failure) =>
+      proseAdmissionWarning('quality', 'detector_resistance_reference', failure.message),
+    ),
+  )
   const draftModeHardAdmission = classifyProseAdmission({
     hard_failures: [
       ...validateMinimalChapterProse(finalText).failures,
@@ -181,8 +187,6 @@ export async function runDraftModeAdmissionAndStore(args: {
           message: failure?.message || '正文与高置信正史专名冲突。',
           details: failure,
         })),
-      // System-wide: detector hard risks must never soft-pass into store.
-      ...draftResistanceAdmission.hard_failures,
     ],
   })
   if (draftModeHardAdmission.hard_failures.length) {

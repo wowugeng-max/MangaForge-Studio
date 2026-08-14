@@ -219,13 +219,17 @@ export async function runFullProductionAdmissionAndStore(args: {
     }))
   const resistanceAdmission = evaluateResistanceAdmission(finalText)
   const fingerprintContractInfo = resolveFingerprintContractInfo()
+  // Spec B: detector/Zhuque are reference scores only. Record residual hits as warnings; do not block store.
+  qualityWarningCandidates.push(
+    ...resistanceAdmission.hard_failures.map((failure) =>
+      proseAdmissionWarning('quality', 'detector_resistance_reference', failure.message),
+    ),
+  )
   const hardAdmission = classifyProseAdmission({
     hard_failures: [
       ...minimalValidation.failures,
       ...openingContinuityFailures,
       ...canonicalFailures,
-      // System-wide: detector hard risks must never soft-pass into store.
-      ...resistanceAdmission.hard_failures,
     ],
   })
   if (hardAdmission.hard_failures.length) {

@@ -384,10 +384,10 @@ describe('oh-story director core', () => {
     expect(director.stage).toBe('post_draft')
     expect(director.readiness).toBe('needs_repair')
     expect(director.acceptance).toBe('needs_revision')
-    expect(director.primary_action.key).toBe('run_revision')
-    expect(director.primary_action.mode).toBe('automatic')
+    expect(director.primary_action.key).toBe('run_oh_story_deslop')
+    expect(director.primary_action.mode).toBe('manual')
     expect(director.required_repairs.map(item => item.category)).toContain('quality_revision_required')
-    expect(director.blocking_findings.map(item => item.key)).toContain('deslop_gate')
+    expect(director.required_repairs.map(item => item.key)).toContain('deslop_gate')
   })
 
   test('treats real deslop diagnostics concern gates as post-draft revision blockers', () => {
@@ -403,11 +403,32 @@ describe('oh-story director core', () => {
 
     expect(director.stage).toBe('post_draft')
     expect(director.acceptance).toBe('needs_revision')
-    expect(director.primary_action.key).toBe('run_revision')
+    expect(director.primary_action.key).toBe('run_oh_story_deslop')
     expect(director.required_repairs).toContainEqual(expect.objectContaining({
       key: 'deslop_gate',
       category: 'quality_revision_required',
+      blocking: false,
     }))
+  })
+
+  test('fingerprint and conflict-structure findings are reference, not blocking, and schedule oh-story skills', () => {
+    const director = buildOhStoryDirectorForPostDraft({
+      quality: {
+        fingerprint: { accepted: false, reason: 'texture_worse' },
+        conflict_structure_sync: {
+          status: 'warn',
+          checks: [{ key: 'conflict_network_layers', delivered: false }],
+        },
+      },
+    })
+    expect(director.primary_action.key).toMatch(/run_oh_story_review|run_oh_story_deslop/)
+    expect(director.primary_action.key).not.toBe('run_revision')
+    expect(director.primary_action.key).not.toBe('auto_repair_quality_revision')
+    const findings = [...(director.blocking_findings || []), ...(director.required_repairs || []), ...(director.carryover_findings || [])]
+    const ref = findings.filter(f => /fingerprint|conflict|conflict_network/.test(f.key + f.detail + f.label))
+    expect(ref.length).toBeGreaterThan(0)
+    expect(ref.every(f => f.blocking === false)).toBe(true)
+    expect(director.prompt_budget_plan.omit.join(' ')).toMatch(/outline-conflict|genre-core-mechanics|三层矛盾/)
   })
 
   test('normalizes singleton post-draft story power misses and revision receipts', () => {

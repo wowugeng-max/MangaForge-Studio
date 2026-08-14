@@ -285,10 +285,7 @@ export function buildUpgradeRhythmPromptSection(upgradeRhythmContract: any) {
 export function buildConflictStructurePromptSection(conflictStructureContract: any) {
   return [
     conflictStructureContract ? '【冲突结构合同】' : '',
-    conflictStructureContract ? '硬性要求：执行 chapter_target.conflict_structure_contract；这是来自 oh-story outline-conflict 的矛盾与结构设计口径，正文必须让冲突成立、升级、有胜负结果，并让阻力真实阻止主角得到目标。' : '',
-    conflictStructureContract ? '执行方式：每个主要场景都要回答“谁/什么规则在阻止主角得到他想要的东西”；冲突必须从言语/规则压迫推进到行动阻拦、激烈对抗或决定胜负；结尾必须留下下一冲突种子。' : '',
-    conflictStructureContract ? '有进无出：读者必须相信主角非踏入不可；本章要明确死亡赌注/退出代价，并用杀人理由、工作职责、道德责任或实体场所作为黏结剂，让对立双方都无法轻易脱身。' : '',
-    conflictStructureContract?.conflict_network_layers ? '三层矛盾网：长篇冲突必须同时保留纵向矛盾、横向矛盾、交叉矛盾；按定地图→定阵营→定角色编织，解决一层时牵动另一层。' : '',
+    conflictStructureContract ? '每个主要场景用场上具体阻力回答：谁或什么规则在拦主角得到他要的东西。不要把纵向矛盾/横向矛盾/三层矛盾网这些词写进正文。' : '',
     conflictStructureContract?.conflict_ladder?.length ? `冲突阶梯：${joinList(conflictStructureContract.conflict_ladder)}` : '',
     conflictStructureContract?.motivation_sources?.length ? `动机来源：${joinList(conflictStructureContract.motivation_sources)}` : '',
     conflictStructureContract?.antagonist_pressure_rules?.length ? `对抗规则：${joinList(conflictStructureContract.antagonist_pressure_rules)}` : '',
@@ -299,7 +296,6 @@ export function buildConflictStructurePromptSection(conflictStructureContract: a
     conflictStructureContract?.conflict_web ? `矛盾网：活跃线=${joinList(asArray(conflictStructureContract.conflict_web.active_lines), '、')}；关联规则=${joinList(conflictStructureContract.conflict_web.link_rules)}；激活规则=${joinList(conflictStructureContract.conflict_web.activation_rules)}` : '',
     conflictStructureContract?.no_exit_rules?.length ? `有进无出/黏结剂：${joinList(conflictStructureContract.no_exit_rules)}` : '',
     conflictStructureContract?.quality_checks?.length ? `conflict_structure_checks：${joinList(conflictStructureContract.quality_checks)}` : '',
-    conflictStructureContract ? '交稿自检必须输出 conflict_structure_checks，并用正文证据检查有人阻止主角得到目标、有进无出/死亡赌注/黏结剂、言语->行动->激烈对抗->决定胜负、压势不压人、主角主动破局、明确结果、矛盾网、三层矛盾网和下一冲突种子；矛盾网要求同一时刻保持2-3条矛盾线，线与线之间有因果/利益冲突/信息差，解决一条后必须激活或加深另一条；三层矛盾网必须检查纵向/横向/交叉矛盾是否同时运作。' : '',
     conflictStructureContract ? JSON.stringify(conflictStructureContract, null, 2).slice(0, 2500) : '',
     '',
   ]

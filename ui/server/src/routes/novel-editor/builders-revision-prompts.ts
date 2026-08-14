@@ -126,7 +126,9 @@ export function composeRevisionPromptHint({
   includeReceipts?: boolean
 }) {
   const custom = String(userPrompt || '').replace(/\s+/g, ' ').trim()
-  const systemHint = String(report?.one_click_revision_prompt || asArray(mustFixLines).join('；') || '').replace(/\s+/g, ' ').trim()
+  const systemHint = dropOhStoryTheoryPromptText(report?.one_click_revision_prompt)
+    || asArray(mustFixLines).filter(line => !OH_STORY_THEORY_DIRECTIVE_RE.test(line)).join('；')
+    || ''
   if (custom && systemHint) {
     return [
       '【人工强制修订指令（最高优先级，必须先兑现）】',
@@ -197,11 +199,12 @@ export function buildEditorRevisionPrompt({
   const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || 'surgical_patch')
   const structural = strategy === 'structural_rewrite'
   const openingStructural = strategy === 'opening_structural_patch'
-  const focusedRiskBrief = focusDeliveryRiskBriefForRevision(deliveryRiskBrief || {}, report || {})
-  const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  const mustFixLines = dropOhStoryTheoryDirectives(report?.must_fix || report?.one_click_revision_prompt)
+  const revisionReport = sanitizeRevisionReportForPrompt(report, mustFixLines)
+  const focusedRiskBrief = focusDeliveryRiskBriefForRevision(deliveryRiskBrief || {}, revisionReport || {})
   const revisionPromptHint = composeRevisionPromptHint({
     userPrompt,
-    report,
+    report: revisionReport,
     mustFixLines,
     includeReceipts: !structural,
   })
@@ -226,7 +229,7 @@ export function buildEditorRevisionPrompt({
       resumeHint ? '【可保留接续锚点候选】' : '',
       resumeHint || '',
       '【必修项】',
-      editorJson({ must_fix: mustFixLines, revision_strategy: 'opening_structural_patch', overall_score: report?.overall_score }, 2500),
+      editorJson({ must_fix: mustFixLines, revision_strategy: 'opening_structural_patch', overall_score: revisionReport?.overall_score }, 2500),
       '【聚焦交稿风险】',
       editorJson(focusedRiskBrief || {}, 2500),
       workflowRevisionContextBrief ? '【上下文摘要】' : '',
@@ -255,7 +258,7 @@ export function buildEditorRevisionPrompt({
       '禁止把“无需修改/处理得精彩”之类低优先级意见覆盖高优先级回放修复。',
       '输出策略：只输出完整 chapter_text；禁止输出 replacements、insertions 或其他补丁字段。',
       '【必修项】',
-      editorJson({ must_fix: mustFixLines, revision_strategy: 'structural_rewrite', overall_score: report?.overall_score }, 4000),
+      editorJson({ must_fix: mustFixLines, revision_strategy: 'structural_rewrite', overall_score: revisionReport?.overall_score }, 4000),
       '【聚焦交稿风险】',
       editorJson(focusedRiskBrief || {}, 3500),
       workflowRevisionContextBrief ? '【上下文摘要】' : '',
@@ -296,7 +299,7 @@ export function buildEditorRevisionPrompt({
     '为了避免长连接失败，优先输出局部补丁，不要输出完整正文。',
     '补丁长度硬约束：每条 find/anchor 控制在 30-300 字，必须是原文中唯一可精确匹配的短片段；不要把整章或多段长正文塞进 find/anchor。需要大幅删减时拆成多条短 replacement；删除时 replace 允许为空字符串。',
     '【编辑报告】',
-    editorJson(report, 7000),
+    editorJson(revisionReport, 7000),
     '【交稿风险清单】',
     editorJson(focusedRiskBrief || deliveryRiskBrief || {}, 5000),
     workflowRevisionContextBrief ? '【workflow-revision 上下文包】' : '',
@@ -337,8 +340,9 @@ export function buildCompactEditorRevisionPrompt({
   userPrompt?: string
   previousOutputPreview?: string
 }) {
-  const mustFixLines = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
-  const revisionPromptHint = composeRevisionPromptHint({ userPrompt, report, mustFixLines })
+  const mustFixLines = dropOhStoryTheoryDirectives(report?.must_fix || report?.one_click_revision_prompt)
+  const revisionReport = sanitizeRevisionReportForPrompt(report, mustFixLines)
+  const revisionPromptHint = composeRevisionPromptHint({ userPrompt, report: revisionReport, mustFixLines })
   const strategy = String(report?.revision_strategy || deliveryRiskBrief?.revision_strategy || '')
   const structural = strategy === 'structural_rewrite'
   const openingStructural = strategy === 'opening_structural_patch' || strategy === 'structural_rewrite'
@@ -353,7 +357,7 @@ export function buildCompactEditorRevisionPrompt({
       '只处理最高优先级：开篇承接章末主钩子 / 禁止平行戏或进度回放。',
       '只输出一个可完整闭合的 JSON object。',
       '【必修项】',
-      editorJson({ must_fix: uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 4), revision_strategy: 'opening_structural_patch' }, 1800),
+      editorJson({ must_fix: dropOhStoryTheoryDirectives(report?.must_fix || report?.one_click_revision_prompt, 4), revision_strategy: 'opening_structural_patch' }, 1800),
       '【可替换开篇区】',
       replaceableOpening,
       resumeHint ? '【可保留接续锚点候选】' : '',
@@ -380,7 +384,7 @@ export function buildCompactEditorRevisionPrompt({
     'insertion 限制：anchor 控制在 20-160 字，text 控制在 20-900 字。',
     '如果修不完，只修最高优先级的 1-3 个问题，保证 JSON 完整闭合。',
     '【编辑报告】',
-    editorJson(report, 3000),
+    editorJson(revisionReport, 3000),
     '【交稿风险清单】',
     editorJson(deliveryRiskBrief || {}, 2500),
     '【修订提示】',
@@ -406,6 +410,31 @@ function uniqueRevisionTexts(values: any, limit = 8) {
     if (out.length >= limit) break
   }
   return out
+}
+
+const OH_STORY_THEORY_DIRECTIVE_RE = /三层矛盾|矛盾网|冲突阶梯|有进无出|死亡赌注|压势不压人|定地图|定阵营|定角色/
+
+function dropOhStoryTheoryDirectives(lines: any, limit = 6) {
+  return uniqueRevisionTexts(lines, limit).filter(line => !OH_STORY_THEORY_DIRECTIVE_RE.test(line))
+}
+
+function dropOhStoryTheoryPromptText(value: any) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (!text) return ''
+  const parts = text.split(/[；;]/).map(part => part.replace(/\s+/g, ' ').trim()).filter(Boolean)
+  return dropOhStoryTheoryDirectives(parts.length ? parts : [text]).join('；')
+}
+
+function sanitizeRevisionReportForPrompt(report: any, mustFixLines: string[]) {
+  if (!report || typeof report !== 'object') return report
+  return {
+    ...report,
+    must_fix: mustFixLines,
+    one_click_revision_prompt: dropOhStoryTheoryPromptText(report.one_click_revision_prompt) || mustFixLines.join('；'),
+    ...(report.revision_directives != null
+      ? { revision_directives: dropOhStoryTheoryDirectives(report.revision_directives) }
+      : {}),
+  }
 }
 
 function isKeepAsIsRevisionIssue(issue: any) {
@@ -472,7 +501,7 @@ export function buildProseQualityRevisionReport(selfCheckReview: any = {}) {
 
 export function focusDeliveryRiskBriefForRevision(brief: any = {}, report: any = {}) {
   const strategy = String(report?.revision_strategy || '')
-  const mustFix = uniqueRevisionTexts(report?.must_fix || report?.one_click_revision_prompt, 6)
+  const mustFix = dropOhStoryTheoryDirectives(report?.must_fix || report?.one_click_revision_prompt)
   if (!brief || typeof brief !== 'object') {
     return {
       total_count: mustFix.length,
@@ -490,7 +519,7 @@ export function focusDeliveryRiskBriefForRevision(brief: any = {}, report: any =
     return true
   })
   const risks = (preferred.length ? preferred : asArray(brief.risks)).slice(0, (strategy === 'structural_rewrite' || strategy === 'opening_structural_patch') ? 5 : 8)
-  const directives = uniqueRevisionTexts([
+  const directives = dropOhStoryTheoryDirectives([
     ...mustFix,
     ...risks.map((risk: any) => risk?.directive || risk?.item),
     ...asArray(brief.revision_directives),
@@ -498,7 +527,7 @@ export function focusDeliveryRiskBriefForRevision(brief: any = {}, report: any =
   return {
     ...brief,
     total_count: Math.min(Number(brief.total_count || 0) || directives.length, directives.length || Number(brief.total_count || 0)),
-    items: uniqueRevisionTexts([
+    items: dropOhStoryTheoryDirectives([
       ...mustFix,
       ...risks.map((risk: any) => risk?.item || risk?.directive),
       ...asArray(brief.items),

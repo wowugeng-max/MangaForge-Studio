@@ -61,7 +61,11 @@ import {
   storyStateReceiptKey,
   type SingleChapterStoryStateReceipt,
 } from './single-chapter-story-state'
-import { createWritingSkillHumanizeMethods } from '../../novel-writing-service/service/writing-skill-humanize-methods'
+import {
+  createWritingSkillHumanizeMethods,
+  WRITING_SKILL_HUMANIZE_DEFER_REASON,
+  WRITING_SKILL_HUMANIZE_VERSION,
+} from '../../novel-writing-service/service/writing-skill-humanize-methods'
 import { applyWritingSkillHumanizeToRevisionCandidate } from './revision-writing-skill-humanize'
 
 const DIAGNOSTIC_CANDIDATE_LIMIT = 60_000
@@ -1033,7 +1037,7 @@ export function createEditorRevisionWorker(
         result: {
           final_text: admitted.text,
           report: {
-            version: 'writing_skill_humanize_v2',
+            version: WRITING_SKILL_HUMANIZE_VERSION,
             fiction_humanizer_mode: 'polish',
             enabled_ids: [],
             enabled: false,
@@ -1048,6 +1052,31 @@ export function createEditorRevisionWorker(
             passes: [],
           },
         },
+      })
+    }
+    const deferWritingSkillHumanize = true
+    if (deferWritingSkillHumanize) {
+      const deferredWritingSkillHumanize = {
+        final_text: admitted.text,
+        report: {
+          version: WRITING_SKILL_HUMANIZE_VERSION,
+          fiction_humanizer_mode: 'polish',
+          enabled_ids: [],
+          enabled: false,
+          skipped: true,
+          accepted: true,
+          changed: false,
+          warnings: [],
+          reason: WRITING_SKILL_HUMANIZE_DEFER_REASON,
+          before_chars: admitted.char_count,
+          after_chars: admitted.char_count,
+          chunk_count: 0,
+          passes: [],
+        },
+      }
+      return applyWritingSkillHumanizeToRevisionCandidate({
+        candidate: admitted,
+        result: deferredWritingSkillHumanize,
       })
     }
     try {

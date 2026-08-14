@@ -297,3 +297,43 @@ describe('quality audit material reclassification', () => {
     expect(linked.issues.some((item: any) => item?.type === 'chapter_handoff_delta' && item?.severity === 'high')).toBe(true)
   })
 })
+
+describe('conflict-structure reference findings', () => {
+  test('keeps conflict-structure issues visible but excludes them from revision directives', () => {
+    const linked = mergeProseQualityWithDeliveryRisks(
+      { passed: true, score: 82, issues: [], revision_directives: [], needs_revision: false },
+      {
+        reviews: [
+          {
+            id: 9,
+            review_type: 'conflict_structure_sync',
+            status: 'warn',
+            payload: {
+              conflict_structure_sync: {
+                status: 'warn',
+                missed_count: 1,
+                label: '冲突结构',
+                summary: '三层矛盾网没有成立',
+                priority_repair: '优先补三层矛盾网',
+                checks: [
+                  {
+                    key: 'conflict_network_layers',
+                    label: '三层矛盾网',
+                    status: 'warn',
+                    delivered: false,
+                    issue: '缺纵向矛盾',
+                    repair_instruction: '补三层矛盾网：先定地图、定阵营、定角色',
+                  },
+                ],
+              },
+            },
+          },
+        ],
+        limit: 5,
+      },
+    )
+    expect(linked.issues.join('｜') + JSON.stringify(linked.issues)).toMatch(/三层矛盾|冲突结构/)
+    expect(linked.revision_directives.join('｜')).not.toMatch(/三层矛盾|定地图|补冲突结构/)
+    expect(linked.revision_directives.length).toBe(0)
+  })
+})

@@ -72,6 +72,8 @@ export type NovelWorkspaceAreaViewProps = {
   proseQualityReports: any
   editorRevisionReports: any
   applyEditorRevision: any
+  ohStoryReview?: any
+  ohStoryDeslop?: any
   refreshActiveProseQuality: any
   repairActiveDeslopGate: any
   repairChapterPreflightMaterials: any
@@ -188,6 +190,8 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     proseQualityReports,
     editorRevisionReports,
     applyEditorRevision,
+    ohStoryReview,
+    ohStoryDeslop,
     refreshActiveProseQuality,
     repairActiveDeslopGate,
     repairChapterPreflightMaterials,
@@ -356,6 +360,8 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
           if (repaired) void refreshActiveProseQuality?.('preflight_repair')
         }}
         onApplyEditorRevision={applyEditorRevision}
+        onOhStoryReview={ohStoryReview}
+        onOhStoryDeslop={ohStoryDeslop}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}
         onLoadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}

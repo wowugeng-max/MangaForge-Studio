@@ -89,8 +89,12 @@ const ACTIONS: Record<string, OhStoryDirectorAction> = {
   generate_prose: { key: 'generate_prose', label: 'Generate prose', mode: 'automatic' },
   repair_pre_draft_materials: { key: 'repair_pre_draft_materials', label: 'Repair pre-draft materials', mode: 'automatic' },
   repair_project_seed: { key: 'repair_project_seed', label: 'Repair project seed', mode: 'automatic' },
+  run_oh_story_deslop: { key: 'run_oh_story_deslop', label: 'oh-story 去AI', mode: 'manual' },
+  run_oh_story_review: { key: 'run_oh_story_review', label: 'oh-story 审稿', mode: 'manual' },
   run_revision: { key: 'run_revision', label: 'Run revision', mode: 'automatic' },
 }
+
+const POST_DRAFT_DESIGN_OMIT = ['outline-conflict', 'genre-core-mechanics', '三层矛盾网']
 
 function hasText(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -210,6 +214,28 @@ function deslopGateFailureCount(diagnostics: RecordLike = {}): number {
     const status = String(gate?.status || '').trim().toLowerCase()
     return status && !['pass', 'ok', 'ready', 'cleared'].includes(status)
   }).length
+}
+
+function fingerprintRejection(quality: RecordLike = {}): { rejected: boolean; reason: string } {
+  const fingerprint = quality?.fingerprint ?? quality?.fingerprint_sync ?? quality?.fingerprintSync
+  if (!fingerprint || typeof fingerprint !== 'object') return { rejected: false, reason: '' }
+  const status = String(fingerprint.status || '').trim().toLowerCase()
+  const rejected = fingerprint.accepted === false || ['fail', 'failed', 'rejected'].includes(status)
+  return {
+    rejected,
+    reason: String(fingerprint.reason ?? fingerprint.detail ?? fingerprint.status ?? 'fingerprint_reference'),
+  }
+}
+
+function conflictStructureNoise(quality: RecordLike = {}): { noisy: boolean; detail: string } {
+  const sync = quality?.conflict_structure_sync ?? quality?.conflictStructureSync
+  if (!sync || typeof sync !== 'object') return { noisy: false, detail: '' }
+  const status = String(sync.status || '').trim().toLowerCase()
+  const missed = asArray(sync.checks).filter((item: any) => item?.delivered === false || item?.ok === false)
+  const noisy = ['warn', 'fail', 'failed'].includes(status) || missed.length > 0
+  const detail = missed.map((item: any) => String(item?.key || item?.detail || item?.label || '')).filter(Boolean).join('; ')
+    || String(sync.summary ?? sync.reason ?? status)
+  return { noisy, detail: detail || 'conflict_structure reference' }
 }
 
 export function classifyOhStoryDirectorBlocker(message: unknown): OhStoryDirectorBlockerCategory {
@@ -533,16 +559,29 @@ export function buildOhStoryDirectorForPostDraft(input: RecordLike): OhStoryDire
   const quality = input?.quality ?? {}
   const receipts = input?.receipts ?? {}
   const blocking_findings: OhStoryDirectorRepair[] = []
+  const scheduled_repairs: OhStoryDirectorRepair[] = []
   const carryover_findings: OhStoryDirectorRepair[] = []
   const resolved_findings: OhStoryDirectorRepair[] = []
   const evidenceItems: OhStoryDirectorEvidence[] = []
   const failedCount = deslopGateFailureCount(quality?.deslop_gate_diagnostics)
+  const fingerprint = fingerprintRejection(quality)
+  const conflictStructure = conflictStructureNoise(quality)
 
   if (failedCount > 0) {
-    blocking_findings.push(repair('deslop_gate', 'quality_revision_required', 'Deslop gate failed', `${failedCount} quality checks failed.`, true))
-    evidenceItems.push(evidence('deslop_gate', 'blocked', 'quality.deslop_gate_diagnostics', `${failedCount} failed checks`))
+    scheduled_repairs.push(repair('deslop_gate', 'quality_revision_required', 'Deslop gate reference', `${failedCount} quality checks failed.`, false))
+    evidenceItems.push(evidence('deslop_gate', 'warn', 'quality.deslop_gate_diagnostics', `${failedCount} failed checks`))
   } else {
     evidenceItems.push(evidence('deslop_gate', 'ready', 'quality.deslop_gate_diagnostics'))
+  }
+
+  if (fingerprint.rejected) {
+    carryover_findings.push(repair('fingerprint', 'quality_revision_required', 'Fingerprint reference', fingerprint.reason || 'fingerprint_reference', false))
+    evidenceItems.push(evidence('fingerprint', 'warn', 'quality.fingerprint', fingerprint.reason))
+  }
+
+  if (conflictStructure.noisy) {
+    carryover_findings.push(repair('conflict_structure', 'quality_revision_required', 'Conflict structure reference', conflictStructure.detail, false))
+    evidenceItems.push(evidence('conflict_structure', 'warn', 'quality.conflict_structure_sync', conflictStructure.detail))
   }
 
   const storyPowerMissed = asArray(quality?.story_power_sync?.missed)
@@ -569,20 +608,30 @@ export function buildOhStoryDirectorForPostDraft(input: RecordLike): OhStoryDire
   }
   evidenceItems.push(evidence('revision_receipts', resolved_findings.length > 0 ? 'resolved' : 'missing', 'receipts.revision_receipts', `${resolved_findings.length} resolved revision receipt${resolved_findings.length === 1 ? '' : 's'}`))
 
-  const needsRevision = blocking_findings.length > 0
+  const qualityNoisy = failedCount > 0 || fingerprint.rejected || conflictStructure.noisy
+  const storyPowerFailed = quality?.story_power_sync?.status === 'fail'
+  const needsRevision = qualityNoisy || storyPowerFailed || blocking_findings.length > 0
   const acceptance: OhStoryDirector['acceptance'] = needsRevision ? 'needs_revision' : carryover_findings.length > 0 ? 'accepted_with_carryover' : 'accepted'
+  const primary_action = failedCount > 0
+    ? ACTIONS.run_oh_story_deslop
+    : needsRevision
+      ? ACTIONS.run_oh_story_review
+      : ACTIONS.continue_next_chapter
+  const required_repairs = [...blocking_findings, ...scheduled_repairs]
 
   return {
     stage: 'post_draft',
     readiness: needsRevision ? 'needs_repair' : 'ready',
     acceptance,
-    primary_action: needsRevision ? ACTIONS.run_revision : ACTIONS.continue_next_chapter,
-    blocking_summary: needsRevision ? summarizeRepairs(blocking_findings, '') : carryover_findings.length > 0 ? 'Accepted with next-chapter carry-over.' : 'Accepted.',
-    required_repairs: blocking_findings,
+    primary_action,
+    blocking_summary: needsRevision
+      ? (blocking_findings.length > 0 ? summarizeRepairs(blocking_findings, '') : 'Quality revision scheduled.')
+      : carryover_findings.length > 0 ? 'Accepted with next-chapter carry-over.' : 'Accepted.',
+    required_repairs,
     deferred_repairs: carryover_findings,
     selected_contracts: [],
     suppressed_contracts: [],
-    prompt_budget_plan: cloneBudget(EMPTY_BUDGET),
+    prompt_budget_plan: cloneBudget({ omit: POST_DRAFT_DESIGN_OMIT }),
     evidence: evidenceItems,
     blocking_findings,
     carryover_findings,

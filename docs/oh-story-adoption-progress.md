@@ -94,7 +94,7 @@ The estimate assumes the current working pattern: one small oh-story increment a
 
 ## Next Priority Queue
 
-No immediate oh-story reference gaps remain. Track future work as real-output tuning, UI surfacing, or platform-specific workflow improvements.
+Phase 0 of `2026-08-14-oh-story-core-skill-shell-design.md` demotes theory gates; do not add more reference-to-prompt migrations.
 
 The 38-reference migration remains complete. The next product slice is orchestration: the oh-story director layer stages existing contracts, gates, receipts, and repairs so the workspace exposes one readiness state, one primary action, and scoped prompt-budget selection instead of raw rule accumulation.
 

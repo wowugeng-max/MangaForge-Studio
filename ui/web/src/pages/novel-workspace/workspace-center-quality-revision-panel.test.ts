@@ -423,3 +423,14 @@ describe('current chapter editor revision status', () => {
     expect(source).not.toContain('useState(editorRevisionForChapter')
   })
 })
+
+describe('oh-story quality panel actions', () => {
+  test('shows review and deslop actions plus a reference-score caption', () => {
+    const html = renderPanel(7, null)
+
+    expect(html).toContain('oh-story 审稿')
+    expect(html).toContain('oh-story 去AI')
+    expect(html).toContain('参考，不自动改稿')
+    expect(html).toContain('一键修订')
+  })
+})

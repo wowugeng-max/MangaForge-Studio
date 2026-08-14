@@ -3175,24 +3175,29 @@ describe('durable editor revision worker', () => {
     await worker.waitForIdle()
 
     expect(harness.run.status).toBe('completed')
-    expect(skillCalls).toHaveLength(1)
-    expect(skillCalls[0][1]).toEqual(harness.project)
-    expect(skillCalls[0][3]).toBe(candidateText)
-    expect(skillCalls[0][5]?.writing_skills).toBeUndefined()
-    expect(skillCalls[0][5]?.writingSkills).toBeUndefined()
+    expect(skillCalls).toHaveLength(0)
     expect(harness.checkpoint().candidate).toMatchObject({
-      text: skilled,
-      hash: revisionTextHash(skilled),
+      text: candidateText,
+      hash: revisionTextHash(candidateText),
     })
     expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
       accepted: true,
-      skipped: false,
-      enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+      changed: false,
+      passes: [],
     })
-    expect(harness.chapter().chapter_text).toBe(skilled)
+    expect(harness.chapter().chapter_text).toBe(candidateText)
     expect(harness.chapter().raw_payload.writing_skill_humanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
       accepted: true,
-      enabled_ids: ['fiction-humanizer-zh', 'remove-ai-flavor'],
+      changed: false,
+      passes: [],
     })
   })
 
@@ -3224,19 +3229,18 @@ describe('durable editor revision worker', () => {
 
     expect(harness.run.status).toBe('completed')
     const progressWrites = harness.writes.filter(write => (write as any).skill_progress)
-    expect(progressWrites).toHaveLength(1)
-    expect((progressWrites[0] as any).skill_progress).toMatchObject({
-      skill_id: 'remove-ai-flavor',
-      index: 2,
-      total: 2,
-    })
-    expect(typeof (progressWrites[0] as any).skill_progress.started_at).toBe('string')
-    expect(progressWrites[0].phase).toBe('generate_candidate')
-    expect(progressWrites[0].phases.generate_candidate.status).toBe('running')
-    const lastWrite = harness.writes.at(-1) as any
-    expect(lastWrite.skill_progress).toBeUndefined()
+    expect(progressWrites).toHaveLength(0)
     expect((harness.checkpoint() as any).skill_progress).toBeUndefined()
-    expect(harness.checkpoint().candidate?.text).toBe(skilled)
+    expect(harness.checkpoint().candidate?.text).toBe(candidateText)
+    expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
+      accepted: true,
+      changed: false,
+      passes: [],
+    })
   })
 
   test('clears leftover skill progress when a resumed claim re-enters the phase', async () => {
@@ -3284,8 +3288,13 @@ describe('durable editor revision worker', () => {
     expect(harness.chapter().chapter_text).toBe(candidateText)
     expect(harness.checkpoint().candidate?.text).toBe(candidateText)
     expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
-      accepted: false,
-      reason: 'writing_skill_humanize_failed',
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
+      accepted: true,
+      changed: false,
+      passes: [],
     })
   })
 
@@ -3301,9 +3310,17 @@ describe('durable editor revision worker', () => {
     await worker.start(workspace)
     await worker.waitForIdle()
 
-    expect(harness.run.status).not.toBe('completed')
-    expect(harness.commitCalls()).toBe(0)
-    expect(harness.checkpoint().writing_skill_humanize).toBeUndefined()
+    expect(harness.run.status).toBe('completed')
+    expect(harness.checkpoint().candidate?.text).toBe(candidateText)
+    expect(harness.checkpoint().writing_skill_humanize).toMatchObject({
+      version: 'writing_skill_humanize_v2',
+      skipped: true,
+      reason: 'deferred_until_oh_story_core_eval',
+      enabled: false,
+      accepted: true,
+      changed: false,
+      passes: [],
+    })
   })
 
   test('uses one frozen chapter task for revision, post-review, and Story State then closes success once', async () => {

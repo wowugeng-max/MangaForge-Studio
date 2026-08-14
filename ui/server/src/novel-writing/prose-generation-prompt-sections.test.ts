@@ -300,7 +300,10 @@ describe('prose generation prompt sections', () => {
     expect(upgradeRhythmPrompt).toContain('upgrade_rhythm_checks')
     expect(conflictStructurePrompt).toContain('【冲突结构合同】')
     expect(conflictStructurePrompt).toContain('三层矛盾：纵向=纵向压力；横向=横向阵营；交叉=交叉利益；编织=地图 -> 阵营 -> 角色')
-    expect(conflictStructurePrompt).toContain('conflict_structure_checks')
+    expect(conflictStructurePrompt).toContain('冲突阶梯：言语压迫 -> 行动阻拦')
+    expect(conflictStructurePrompt).not.toContain('定地图→定阵营→定角色')
+    expect(conflictStructurePrompt).not.toContain('交稿自检必须输出 conflict_structure_checks')
+    expect(conflictStructurePrompt).not.toContain('三层矛盾网必须检查纵向/横向/交叉')
   })
 
   test('builds story loop and emotional arc prompt lines', () => {

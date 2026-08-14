@@ -648,6 +648,43 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     return null
   }
 
+  const ohStoryCoreErrorCode = (error: any) => String(error?.response?.data?.code || error?.code || '')
+
+  const runOhStoryCoreAction = async (action: 'review' | 'deslop') => {
+    const chapterId = Number(activeChapter?.id || 0)
+    if (!chapterId) return message.warning('请先选择章节')
+    if (!projectId) return message.warning('请先选择项目')
+    if (!await flushPendingSave()) return
+    const label = action === 'review' ? 'oh-story 审稿' : 'oh-story 去AI'
+    setProseQualityLoading(true)
+    try {
+      const postAction = () => apiClient.post(`/novel/oh-story/core/${action}`, {
+        project_id: projectId,
+        chapter_id: chapterId,
+      })
+      try {
+        await postAction()
+      } catch (error: any) {
+        if (ohStoryCoreErrorCode(error) !== 'OH_STORY_CORE_NOT_INSTALLED') throw error
+        message.info('正在安装 oh-story 核心套件…')
+        await apiClient.post('/novel/oh-story/core/install')
+        await postAction()
+      }
+      await loadProjectModules()
+      message.success(`${label}完成`)
+    } catch (error: any) {
+      if (ohStoryCoreErrorCode(error) === 'OH_STORY_CORE_NOT_INSTALLED') {
+        message.error('先安装 oh-story 核心套件')
+        return
+      }
+      message.error(error?.response?.data?.error || error?.message || `${label}失败`)
+    } finally {
+      setProseQualityLoading(false)
+    }
+  }
+
+  const ohStoryReview = () => runOhStoryCoreAction('review')
+  const ohStoryDeslop = () => runOhStoryCoreAction('deslop')
 
   return {
     locateRepairTaskChapter,
@@ -665,5 +702,7 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     isSingleChapterRecoveryEvidenceRepairTask,
     recheckRepairTaskConvergence,
     applyEditorRevision,
+    ohStoryReview,
+    ohStoryDeslop,
   }
 }

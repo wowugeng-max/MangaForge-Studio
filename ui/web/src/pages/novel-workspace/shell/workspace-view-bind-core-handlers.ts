@@ -337,7 +337,9 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     closeRepairTaskAfterRevision,
     isSingleChapterRecoveryEvidenceRepairTask,
     recheckRepairTaskConvergence,
-    applyEditorRevision
+    applyEditorRevision,
+    ohStoryReview,
+    ohStoryDeslop,
   } = createRepairTaskHandlers({
     activeChapter,
     apiClient,
@@ -730,6 +732,8 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
   return {
     acceptChapterVersion,
     applyEditorRevision,
+    ohStoryReview,
+    ohStoryDeslop,
     extractStyleSampleCandidates,
     fillDefaultStyleSampleBank,
     fillWritingBibleForm,

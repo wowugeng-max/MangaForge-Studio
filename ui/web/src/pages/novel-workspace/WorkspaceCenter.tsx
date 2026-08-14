@@ -150,6 +150,8 @@ export function WorkspaceCenter({
   onRefreshProseQuality,
   onRepairPreflightGaps,
   onApplyEditorRevision,
+  onOhStoryReview,
+  onOhStoryDeslop,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -229,6 +231,8 @@ export function WorkspaceCenter({
   onRefreshProseQuality?: () => void
   onRepairPreflightGaps?: () => void | Promise<void>
   onApplyEditorRevision?: (report: any, options?: { revisionMode?: string; prompt?: string; skipConfirm?: boolean }) => void
+  onOhStoryReview?: () => void | Promise<void>
+  onOhStoryDeslop?: () => void | Promise<void>
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -886,6 +890,8 @@ export function WorkspaceCenter({
             onRefreshProseQuality={onRefreshProseQuality}
             onRepairPreflightGaps={onRepairPreflightGaps}
             onApplyEditorRevision={onApplyEditorRevision}
+            onOhStoryReview={onOhStoryReview}
+            onOhStoryDeslop={onOhStoryDeslop}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}
             onLoadEditorRevisionDiagnostics={onLoadEditorRevisionDiagnostics}
