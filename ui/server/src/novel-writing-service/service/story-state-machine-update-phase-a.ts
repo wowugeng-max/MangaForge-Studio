@@ -228,7 +228,9 @@ export async function applyStoryStateMachineSyncPhaseA(args: {
     await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: timelineDeltaSync, reviewType: 'timeline_delta_sync', payloadKey: 'timeline_delta_sync', formatIssue: (item: any) => `时间线缺口：${item.label}｜${item.text}` }))
   }
   payload.timeline_delta_sync = timelineDeltaSync
-  const chapterHandoffDeltaSync = buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)
+  // Prefer the prepared report: it carries the auto_recorded disclosure that a plain rebuild would drop.
+  const chapterHandoffDeltaSync = prepared?.sync_reports?.chapter_handoff_delta_sync
+    || buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)
   if (Number(chapterHandoffDeltaSync.planned_count || 0) > 0 || Number(chapterHandoffDeltaSync.recorded_count || 0) > 0) {
     await createNovelReview(activeWorkspace, buildPostDeliverySyncReviewRecord({ projectId: project.id, chapter, sync: chapterHandoffDeltaSync, reviewType: 'chapter_handoff_delta_sync', payloadKey: 'chapter_handoff_delta_sync', formatIssue: (item: any) => `章末交接缺口：${item.label}｜${item.text}` }))
   }

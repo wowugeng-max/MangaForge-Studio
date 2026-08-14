@@ -59,6 +59,7 @@ import {
   buildReaderPayoffSyncReport,
 } from '../post-delivery/core-handoff-sync-reports'
 import {
+  autoRecordMissedChapterHandoff,
   buildAssetStateDeltaSyncReport,
   buildChapterHandoffDeltaSyncReport,
   buildCharacterStateDeltaSyncReport,
@@ -184,9 +185,17 @@ export async function prepareStoryStateUpdate(
         : asArray(rawStateDelta?.established_events || rawStateDelta?.establishedEvents),
     })
     const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
-    const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
+    const stateDeltaWithStyle = styleFingerprintSnapshot
       ? { ...stateDelta, ...styleFingerprintSnapshot }
       : stateDelta
+    // Planned handoff hooks are verbatim quotes vs paraphrased state records; close the gap deterministically.
+    const handoffAutoRecord = autoRecordMissedChapterHandoff(
+      chapter,
+      contextPackage,
+      stateDeltaWithStyle,
+      buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyle),
+    )
+    const stateDeltaWithStyleFingerprint = handoffAutoRecord.stateDelta
     const nextReferenceConfig = {
       ...(project.reference_config || {}),
       story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
@@ -206,7 +215,7 @@ export async function prepareStoryStateUpdate(
     const syncReports = {
       character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, characterUpdates),
       asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates, discoveredAssets),
-      chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
+      chapter_handoff_delta_sync: handoffAutoRecord.report,
       timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, settingUpdates),
       state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
         settingUpdates,
@@ -306,9 +315,16 @@ export async function prepareStoryStateUpdate(
       },
     }
     const styleFingerprintSnapshot = buildStyleFingerprintStateSnapshot(contextPackage, project, project.reference_config?.story_state || {})
-    const stateDeltaWithStyleFingerprint = styleFingerprintSnapshot
+    const stateDeltaWithStyle = styleFingerprintSnapshot
       ? { ...normalizeStoryStateDeltaForStorage(deterministicDelta), ...styleFingerprintSnapshot }
       : normalizeStoryStateDeltaForStorage(deterministicDelta)
+    const handoffAutoRecord = autoRecordMissedChapterHandoff(
+      chapter,
+      contextPackage,
+      stateDeltaWithStyle,
+      buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyle),
+    )
+    const stateDeltaWithStyleFingerprint = handoffAutoRecord.stateDelta
     const nextReferenceConfig = {
       ...(project.reference_config || {}),
       story_state: mergeStoryState(project.reference_config?.story_state || {}, stateDeltaWithStyleFingerprint, chapter),
@@ -316,7 +332,7 @@ export async function prepareStoryStateUpdate(
     const syncReports = {
       character_state_delta_sync: buildCharacterStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, []),
       asset_state_delta_sync: buildAssetStateDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, [], []),
-      chapter_handoff_delta_sync: buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint),
+      chapter_handoff_delta_sync: handoffAutoRecord.report,
       timeline_delta_sync: buildTimelineDeltaSyncReport(chapter, contextPackage, stateDeltaWithStyleFingerprint, []),
       state_delta_completeness: buildStateDeltaCompletenessReport(chapter, chapterText, stateDeltaWithStyleFingerprint, {
         settingUpdates: [],

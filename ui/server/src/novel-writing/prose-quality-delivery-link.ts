@@ -95,6 +95,8 @@ export type PriorityDeliveryDirective = {
   severity: 'high' | 'medium' | 'low'
   label: string
   directive: string
+  /** Material/章纲-class gap: stays visible as an issue but never feeds revision_directives or forces revision. */
+  excludeFromDirectives?: boolean
   issue: {
     severity: string
     type: string
@@ -102,6 +104,7 @@ export type PriorityDeliveryDirective = {
     evidence?: string
     fix?: string
     source?: string
+    category?: string
   }
 }
 
@@ -335,17 +338,22 @@ export function selectPriorityDeliveryDirectives(input: {
     || reviewPayload(byType.get('quality_audit_sync'))
   if (qualityAudit && (qualityAudit.status === 'warn' || qualityAudit.status === 'fail' || Number(qualityAudit.missed_count || 0) > 0)) {
     const priority = compactText(qualityAudit.priority_repair || qualityAudit.summary || '优先清质量硬伤', 120)
+    // quality_audit gaps are checklist-vs-generation-receipt audits: prose revision can
+    // never produce those receipts, so keep them visible as material hints only.
+    const materialFix = (fix: string) => compactText(`材料/章纲缺口，修订正文无法补齐；用「一键补材料」或补章纲处理：${fix}`, 240)
     pushDirective(bag, {
       key: 'quality_audit',
       priority: 3,
-      severity: Number(qualityAudit.missed_count || 0) >= 5 ? 'high' : 'medium',
+      severity: 'medium',
       label: compactText(qualityAudit.label || '质量诊断', 40),
       directive: compactText(`按质量诊断修复：${priority}`, 200),
+      excludeFromDirectives: true,
       issue: {
-        severity: Number(qualityAudit.missed_count || 0) >= 5 ? 'high' : 'medium',
+        severity: 'medium',
         type: 'quality_audit',
+        category: 'material',
         description: compactText(qualityAudit.summary || priority, 180),
-        fix: priority,
+        fix: materialFix(priority),
         source: 'quality_audit_sync',
       },
     })
@@ -356,11 +364,13 @@ export function selectPriorityDeliveryDirectives(input: {
         severity: 'medium',
         label: `质量诊断·${row.label}`,
         directive: compactText(row.fix, 200),
+        excludeFromDirectives: true,
         issue: {
           severity: 'medium',
           type: 'quality_audit_item',
+          category: 'material',
           description: row.issue,
-          fix: row.fix,
+          fix: materialFix(row.fix),
           source: 'quality_audit_sync',
         },
       })
@@ -449,16 +459,19 @@ export function mergeProseQualityWithDeliveryRisks(
   })
 
   const linkedIssues = selected.map(item => item.issue)
-  const linkedDirectives = selected.map(item => item.directive)
+  // Material-class findings (e.g. quality_audit receipts) stay in issues but must not
+  // feed revision directives or force a prose revision loop that can never close them.
+  const actionable = selected.filter(item => !item.excludeFromDirectives)
+  const linkedDirectives = actionable.map(item => item.directive)
   const issues = [...linkedIssues, ...baseIssues].slice(0, 12)
   const revision_directives = uniqueTexts([...linkedDirectives, ...baseDirectives], 8)
 
-  const hasHigh = selected.some(item => item.severity === 'high') || issues.some((item: any) => /high|critical/.test(String(item?.severity || '')))
+  const hasHigh = actionable.some(item => item.severity === 'high') || issues.some((item: any) => /high|critical/.test(String(item?.severity || '')))
   const scoreRaw = Number(review?.score)
   const score = Number.isFinite(scoreRaw) ? scoreRaw : 80
   // Empty model advice + open delivery risks => do not pretend "all good".
   const emptyModelAdvice = baseDirectives.length === 0 && baseIssues.length === 0
-  const forceRevision = selected.length > 0 && (hasHigh || emptyModelAdvice || Boolean(review?.needs_revision))
+  const forceRevision = actionable.length > 0 && (hasHigh || emptyModelAdvice || Boolean(review?.needs_revision))
   const adjustedScore = forceRevision && emptyModelAdvice && score >= 78
     ? Math.min(score, hasHigh ? 72 : 76)
     : score
@@ -474,7 +487,9 @@ export function mergeProseQualityWithDeliveryRisks(
     revision_directives,
     delivery_link: {
       version: 'prose_quality_delivery_link_v1',
-      selected: selected.map(item => ({
+      // Downstream revision builders read selected[].directive/key to build must_fix
+      // and structural-rewrite decisions, so material-class entries must not appear here.
+      selected: actionable.map(item => ({
         key: item.key,
         priority: item.priority,
         severity: item.severity,
@@ -482,6 +497,7 @@ export function mergeProseQualityWithDeliveryRisks(
         directive: item.directive,
       })),
       source_count: selected.length,
+      material_count: selected.length - actionable.length,
       model_issue_count: baseIssues.length,
       model_directive_count: baseDirectives.length,
     },

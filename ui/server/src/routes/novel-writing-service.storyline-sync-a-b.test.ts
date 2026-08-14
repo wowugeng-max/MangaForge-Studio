@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import {
+  autoRecordMissedChapterHandoff,
   buildAssetStateDeltaSyncReport,
   buildChapterHandoffDeltaSyncReport,
   buildCharacterStateDeltaSyncReport,
@@ -136,6 +137,73 @@ describe('storyline sync a b', () => {
     expect(report.status).toBe('ok')
     expect(report.planned.map((item: any) => item.label)).toEqual(expect.arrayContaining(['章末追读', '下一章拉力']))
     expect(report.missed_count).toBe(0)
+  })
+
+  test('auto-records missed chapter handoff hooks verbatim into next_chapter_priorities', () => {
+    const contextPackage = { chapter_target: { ending_hook: '猛地扣上来一只覆满漆黑羽毛的干枯巨手' } }
+    const chapter = { id: 10, chapter_no: 10, title: '竖井之上' }
+    const stateDelta = {
+      open_questions: ['车顶的东西想抓谁'],
+      next_chapter_priorities: ['竖井爬出的黑羽巨手扑向车顶'],
+    }
+    const before = buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)
+    expect(before.status).toBe('warn')
+    expect(before.missed_count).toBe(1)
+
+    const { stateDelta: recorded, report } = autoRecordMissedChapterHandoff(chapter, contextPackage, stateDelta, before)
+
+    expect(recorded.next_chapter_priorities).toEqual([
+      '竖井爬出的黑羽巨手扑向车顶',
+      '猛地扣上来一只覆满漆黑羽毛的干枯巨手',
+    ])
+    expect(report.status).toBe('ok')
+    expect(report.missed_count).toBe(0)
+    expect(report.missed).toEqual([])
+    expect(report.auto_recorded).toEqual(['猛地扣上来一只覆满漆黑羽毛的干枯巨手'])
+  })
+
+  test('does not auto-record when planned chapter handoff items already match', () => {
+    const contextPackage = { chapter_target: { ending_hook: '猛地扣上来一只覆满漆黑羽毛的干枯巨手' } }
+    const chapter = { id: 11, chapter_no: 11, title: '竖井之上' }
+    const stateDelta = { next_chapter_priorities: ['猛地扣上来一只覆满漆黑羽毛的干枯巨手'] }
+    const before = buildChapterHandoffDeltaSyncReport(chapter, contextPackage, stateDelta)
+    expect(before.status).toBe('ok')
+
+    const result = autoRecordMissedChapterHandoff(chapter, contextPackage, stateDelta, before)
+
+    expect(result.stateDelta).toBe(stateDelta)
+    expect(result.report).toBe(before)
+    expect(result.report.auto_recorded).toBeUndefined()
+  })
+
+  test('auto-record dedupes appended handoff texts and caps them at 3', () => {
+    const chapter = { id: 12, chapter_no: 12 }
+    const stateDelta = { next_chapter_priorities: ['已有的追读钩子'] }
+    const syntheticReport = {
+      missed_count: 6,
+      missed: [
+        { label: '章末追读', text: '已有的追读钩子' },
+        { label: '章末追读', text: '巨手拖走了守夜人' },
+        { label: '下一章拉力', text: '巨手拖走了守夜人' },
+        { label: '下一章拉力', text: '车厢广播念出乘客名单' },
+        { label: '最后场景钩子', text: '第十三站没有出现在路线图上' },
+        { label: '最后场景钩子', text: '售票员的制服里露出黑色羽毛' },
+      ],
+    }
+
+    const { stateDelta: recorded, report } = autoRecordMissedChapterHandoff(chapter, {}, stateDelta, syntheticReport)
+
+    expect(report.auto_recorded).toEqual([
+      '巨手拖走了守夜人',
+      '车厢广播念出乘客名单',
+      '第十三站没有出现在路线图上',
+    ])
+    expect(recorded.next_chapter_priorities).toEqual([
+      '已有的追读钩子',
+      '巨手拖走了守夜人',
+      '车厢广播念出乘客名单',
+      '第十三站没有出现在路线图上',
+    ])
   })
 
   test('story state sync persists a chapter_handoff_delta_sync review', () => {

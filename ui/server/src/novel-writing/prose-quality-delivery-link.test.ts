@@ -201,3 +201,99 @@ describe('prose quality delivery link', () => {
     expect(linked.issues.some((item: any) => String(item?.description || '').includes('动作描写偏空'))).toBe(true)
   })
 })
+
+describe('quality audit material reclassification', () => {
+  const MATERIAL_CHAPTER = { id: 80, chapter_no: 20, chapter_text: '守夜人合上账本，把灯芯拨亮了一寸。' }
+  const materialReviews = [
+    {
+      id: 30,
+      review_type: 'quality_audit_sync',
+      payload: {
+        chapter_id: 80,
+        chapter_no: 20,
+        quality_audit_sync: {
+          status: 'warn',
+          missed_count: 8,
+          summary: '章节结构、章纲目的词、详略分配等 8 项缺生成回执',
+          priority_repair: '补齐章纲与生成回执材料',
+          missed: [
+            { status: 'miss', label: '章节结构', fix: '补章节结构生成回执' },
+            { status: 'miss', label: '章纲目的词', fix: '补章纲目的词回执' },
+          ],
+        },
+      },
+    },
+  ]
+
+  test('quality audit gaps stay medium material hints outside revision directives', () => {
+    const selected = selectPriorityDeliveryDirectives({
+      reviews: materialReviews,
+      chapter: MATERIAL_CHAPTER,
+      limit: 5,
+    })
+    const auditItems = selected.filter(item => item.key === 'quality_audit' || item.key.startsWith('quality_audit:'))
+
+    expect(auditItems.length).toBeGreaterThan(0)
+    for (const item of auditItems) {
+      expect(item.severity).toBe('medium')
+      expect(item.issue.severity).toBe('medium')
+      expect(String(item.issue.fix || '')).toMatch(/一键补材料/)
+      expect(item.issue.category).toBe('material')
+    }
+  })
+
+  test('quality audit as the only finding does not force revision on a passed model review', () => {
+    const linked = mergeProseQualityWithDeliveryRisks(
+      { passed: true, score: 82, issues: [], revision_directives: [], needs_revision: false },
+      { reviews: materialReviews, chapter: MATERIAL_CHAPTER, limit: 5 },
+    )
+
+    expect(linked.issues.some((item: any) => String(item?.type || '').startsWith('quality_audit'))).toBe(true)
+    expect(linked.revision_directives).toEqual([])
+    expect(linked.needs_revision).toBe(false)
+    expect(linked.passed).toBe(true)
+    expect(Number(linked.score)).toBe(82)
+  })
+
+  test('material entries stay out of delivery_link.selected so revision builders cannot read them', () => {
+    const linked = mergeProseQualityWithDeliveryRisks(
+      { passed: true, score: 82, issues: [], revision_directives: [], needs_revision: false },
+      { reviews: materialReviews, chapter: MATERIAL_CHAPTER, limit: 5 },
+    )
+    const selected = linked.delivery_link?.selected || []
+    const selectedKeys = selected.map((item: any) => String(item?.key || ''))
+
+    expect(selectedKeys.some((key: string) => key.startsWith('quality_audit'))).toBe(false)
+    expect(selected.map((item: any) => String(item?.directive || '')).filter(Boolean)).toEqual([])
+    expect(linked.delivery_link?.material_count).toBeGreaterThan(0)
+    expect(linked.delivery_link?.source_count).toBeGreaterThan(0)
+  })
+
+  test('chapter handoff delta gap still forces revision when model review passed', () => {
+    const reviews = [
+      {
+        id: 31,
+        review_type: 'chapter_handoff_delta_sync',
+        payload: {
+          chapter_id: 80,
+          chapter_no: 20,
+          chapter_handoff_delta_sync: {
+            status: 'warn',
+            missed_count: 1,
+            priority_repair: '把巨手扣上车顶的钩子写进下一章开篇',
+            missed: [{ status: 'miss', label: '章末追读', fix: '开篇接住巨手扣顶' }],
+          },
+        },
+      },
+    ]
+    const linked = mergeProseQualityWithDeliveryRisks(
+      { passed: true, score: 82, issues: [], revision_directives: [], needs_revision: false },
+      { reviews, chapter: MATERIAL_CHAPTER, limit: 5 },
+    )
+
+    expect(linked.needs_revision).toBe(true)
+    expect(linked.passed).toBe(false)
+    expect(linked.revision_directives.join('｜')).toMatch(/章末交接|巨手/)
+    expect(linked.issues.some((item: any) => item?.type === 'chapter_handoff_delta' && item?.severity === 'high')).toBe(true)
+  })
+})

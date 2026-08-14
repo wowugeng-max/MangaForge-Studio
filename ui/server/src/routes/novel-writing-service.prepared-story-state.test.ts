@@ -143,6 +143,70 @@ describe('prepareStoryStateUpdate', () => {
     expect(memoryCalls).toBe(0)
   })
 
+  test('auto-records missed chapter handoff hooks so the prepared report closes', async () => {
+    const service = createService({
+      parsed: {
+        state_delta: {
+          open_questions: ['车顶的东西想抓谁'],
+          next_chapter_priorities: ['竖井爬出的黑羽巨手扑向车顶'],
+        },
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+      },
+      finish_reason: 'stop',
+    })
+    const prepared = await service.prepareStoryStateUpdate(
+      workspace,
+      { id: 101, reference_config: { story_state: {} } },
+      { id: 22, chapter_no: 22 },
+      { chapter_target: { ending_hook: '猛地扣上来一只覆满漆黑羽毛的干枯巨手' } },
+      '守夜人合上账本，把灯芯拨亮了一寸。',
+    )
+
+    expect(prepared.state_delta.next_chapter_priorities).toContain('猛地扣上来一只覆满漆黑羽毛的干枯巨手')
+    expect(prepared.sync_reports.chapter_handoff_delta_sync.status).toBe('ok')
+    expect(prepared.sync_reports.chapter_handoff_delta_sync.missed_count).toBe(0)
+    expect(prepared.sync_reports.chapter_handoff_delta_sync.auto_recorded).toEqual(['猛地扣上来一只覆满漆黑羽毛的干枯巨手'])
+    expect(prepared.hard_failures.some((item: any) => item.key === 'chapter_handoff_delta_sync')).toBe(false)
+    expect(prepared.next_reference_config.story_state.next_chapter_priorities).toContain('猛地扣上来一只覆满漆黑羽毛的干枯巨手')
+    expect(prepared.payload.chapter_handoff_delta_sync).toBe(prepared.sync_reports.chapter_handoff_delta_sync)
+  })
+
+  test('persists auto_recorded in the stored chapter_handoff_delta_sync review', async () => {
+    const project = await createNovelProject(workspace, { title: '交接自动补记', reference_config: { story_state: {} } })
+    const chapter = await createNovelChapter(workspace, {
+      project_id: project.id,
+      chapter_no: 23,
+      title: '巨手扣顶',
+      chapter_text: '守夜人合上账本，把灯芯拨亮了一寸。',
+    } as any)
+    const service = createService({
+      parsed: {
+        state_delta: {
+          open_questions: ['车顶的东西想抓谁'],
+          next_chapter_priorities: ['竖井爬出的黑羽巨手扑向车顶'],
+        },
+        character_updates: [],
+        setting_updates: [],
+        storyline_updates: [],
+      },
+      finish_reason: 'stop',
+    })
+    const contextPackage = { chapter_target: { ending_hook: '猛地扣上来一只覆满漆黑羽毛的干枯巨手' } }
+    const prepared = await service.prepareStoryStateUpdate(workspace, project, chapter, contextPackage, '守夜人合上账本，把灯芯拨亮了一寸。')
+    expect(prepared.sync_reports.chapter_handoff_delta_sync.auto_recorded).toEqual(['猛地扣上来一只覆满漆黑羽毛的干枯巨手'])
+
+    await service.updateStoryStateMachine(workspace, project, chapter, contextPackage, '守夜人合上账本，把灯芯拨亮了一寸。', 217, { prepared })
+    const stored = (await listNovelReviews(workspace, project.id))
+      .filter(item => item.review_type === 'chapter_handoff_delta_sync')
+      .sort((a: any, b: any) => Number(b?.id || 0) - Number(a?.id || 0))[0]
+    const payload = typeof stored?.payload === 'string' ? JSON.parse(stored.payload) : stored?.payload
+
+    expect(payload?.chapter_handoff_delta_sync?.status).toBe('ok')
+    expect(payload?.chapter_handoff_delta_sync?.auto_recorded).toEqual(['猛地扣上来一只覆满漆黑羽毛的干枯巨手'])
+  })
+
   test('fails closed on incomplete transport before any commit wrapper is called', async () => {
     const service = createService({ parsed: { state_delta: {} }, finish_reason: 'length' })
     const prepared = await service.prepareStoryStateUpdate(workspace, {

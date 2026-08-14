@@ -707,6 +707,42 @@ export function buildChapterHandoffDeltaSyncReport(chapter: any, contextPackage:
   }
 }
 
+/**
+ * Planned handoff hooks are verbatim prose quotes while story-state records are
+ * paraphrases, so the lexical match above can stay open forever even when the
+ * content is covered. Deterministically append missed planned texts verbatim
+ * into next_chapter_priorities and rebuild the report so the persisted
+ * chapter_handoff_delta_sync review reflects closure.
+ */
+export function autoRecordMissedChapterHandoff(chapter: any, contextPackage: any, stateDelta: any = {}, report: any = {}) {
+  const missed = asArray(report?.missed)
+  if (Number(report?.missed_count || 0) === 0 || !missed.length) return { stateDelta, report }
+  const seen = new Set(chapterHandoffRecordedTexts(stateDelta).map(text => compactBriefText(text)))
+  const autoRecorded: string[] = []
+  for (const item of missed) {
+    if (autoRecorded.length >= 3) break
+    const text = compactBriefText(item?.text)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    autoRecorded.push(text)
+  }
+  if (!autoRecorded.length) return { stateDelta, report }
+  const nextStateDelta = {
+    ...stateDelta,
+    next_chapter_priorities: [
+      ...asArray(stateDelta?.next_chapter_priorities || stateDelta?.nextChapterPriorities),
+      ...autoRecorded,
+    ],
+  }
+  return {
+    stateDelta: nextStateDelta,
+    report: {
+      ...buildChapterHandoffDeltaSyncReport(chapter, contextPackage, nextStateDelta),
+      auto_recorded: autoRecorded,
+    },
+  }
+}
+
 export function chapterReceiptProseText(chapter: any = {}) {
   return chapter?.chapter_text || chapter?.chapterText || chapter?.final_text || chapter?.finalText || chapter?.text || ''
 }
