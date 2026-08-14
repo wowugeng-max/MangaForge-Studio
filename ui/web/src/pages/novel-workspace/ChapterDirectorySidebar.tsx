@@ -25,8 +25,8 @@ export function ChapterDirectorySidebar({
   materialScore,
   commercialReadiness,
   activeTaskCount,
-  onOpenProductionDesk,
   onOpenTaskCenter,
+  onOpenExportDelivery,
   onOpenOutlineTree,
   onOpenChapterDrawer,
   onCreateChapter,
@@ -42,8 +42,8 @@ export function ChapterDirectorySidebar({
   materialScore?: any
   commercialReadiness?: any
   activeTaskCount: number
-  onOpenProductionDesk: () => void
   onOpenTaskCenter: () => void
+  onOpenExportDelivery: () => void
   onOpenOutlineTree: () => void
   onOpenChapterDrawer: () => void
   onCreateChapter: () => void
@@ -117,8 +117,8 @@ export function ChapterDirectorySidebar({
               materialScore={materialScore}
               commercialReadiness={commercialReadiness}
               activeTaskCount={activeTaskCount}
-              onOpenProductionDesk={onOpenProductionDesk}
               onOpenTaskCenter={onOpenTaskCenter}
+              onOpenExportDelivery={onOpenExportDelivery}
             />
           </div>
         )}

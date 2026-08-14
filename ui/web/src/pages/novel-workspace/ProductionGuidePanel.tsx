@@ -1,6 +1,6 @@
 import React from 'react'
 import { Button, Progress, Space, Tag, Typography } from 'antd'
-import { AppstoreOutlined, SafetyOutlined } from '@ant-design/icons'
+import { ExportOutlined, SafetyOutlined } from '@ant-design/icons'
 import './ProductionGuidePanel.css'
 
 const { Text } = Typography
@@ -18,8 +18,8 @@ export function ProductionGuidePanel({
   materialScore,
   commercialReadiness,
   activeTaskCount,
-  onOpenProductionDesk,
   onOpenTaskCenter,
+  onOpenExportDelivery,
 }: {
   proseProgress: { current: number; total: number }
   chapterCount: number
@@ -27,16 +27,13 @@ export function ProductionGuidePanel({
   materialScore?: any
   commercialReadiness?: any
   activeTaskCount: number
-  onOpenProductionDesk: () => void
   onOpenTaskCenter: () => void
+  onOpenExportDelivery: () => void
 }) {
   const readinessScore = Number(commercialReadiness?.score ?? 0)
   const materialNumericScore = Number(materialScore?.score ?? commercialReadiness?.score ?? 0)
   const writtenPercent = chapterCount > 0 ? Math.round(proseChapterCount / chapterCount * 100) : 0
   const generationPercent = proseProgress.total > 0 ? Math.round(proseProgress.current / proseProgress.total * 100) : 0
-  const primaryAction = activeTaskCount > 0
-    ? { label: '任务中心', icon: <SafetyOutlined />, onClick: onOpenTaskCenter }
-    : { label: '主功能区', icon: <AppstoreOutlined />, onClick: onOpenProductionDesk }
 
   return (
     <div className="production-guide-summary-panel">
@@ -53,14 +50,26 @@ export function ProductionGuidePanel({
             </Tag>
           )}
         </Space>
-        <Button
-          size="small"
-          type="text"
-          className="production-guide-summary-action"
-          icon={primaryAction.icon}
-          onClick={primaryAction.onClick}>
-          {primaryAction.label}
-        </Button>
+        <Space size={2} className="production-guide-summary-actions">
+          <Button
+            size="small"
+            type="text"
+            className="production-guide-summary-action"
+            icon={<ExportOutlined />}
+            onClick={onOpenExportDelivery}>
+            交付导出
+          </Button>
+          {activeTaskCount > 0 && (
+            <Button
+              size="small"
+              type="text"
+              className="production-guide-summary-action"
+              icon={<SafetyOutlined />}
+              onClick={onOpenTaskCenter}>
+              任务中心
+            </Button>
+          )}
+        </Space>
       </div>
 
       <div className="production-guide-summary-grid">

@@ -66,6 +66,7 @@ export type NovelWorkspaceBodyProps = {
   setCreativeAssistantMode: any
   setCreativeAssistantOpen: any
   setCreativeCardsOpen: any
+  setExportDeliveryOpen: any
   setOutlineTreeOpen: any
   setRightPanelOpen: any
   setRightPanelTab: any
@@ -142,6 +143,7 @@ export function NovelWorkspaceBody(props: NovelWorkspaceBodyProps) {
     setCreativeAssistantMode,
     setCreativeAssistantOpen,
     setCreativeCardsOpen,
+    setExportDeliveryOpen,
     setOutlineTreeOpen,
     setRightPanelOpen,
     setRightPanelTab,
@@ -172,8 +174,8 @@ export function NovelWorkspaceBody(props: NovelWorkspaceBodyProps) {
             materialScore={activeChapterDiagnosticsData?.material_score}
             commercialReadiness={commercialReadiness}
             activeTaskCount={activeTasks.length + activeKnowledgeJobCount}
-            onOpenProductionDesk={() => navigate(`/novel/workspace/${projectId}/production`)}
             onOpenTaskCenter={() => setTaskCenterOpen(true)}
+            onOpenExportDelivery={() => setExportDeliveryOpen(true)}
             onOpenOutlineTree={() => setOutlineTreeOpen(true)}
             onOpenChapterDrawer={() => setChapterDrawerOpen(true)}
             onCreateChapter={() => openEditor('chapter')}
