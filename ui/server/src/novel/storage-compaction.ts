@@ -521,6 +521,7 @@ export function compactQualityIssueForStorage(value: any) {
   for (const key of [
     'key',
     'label',
+    'ok',
     'status',
     'severity',
     'type',

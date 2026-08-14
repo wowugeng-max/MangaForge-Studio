@@ -276,7 +276,13 @@ export function serializeBoundedChapterStageArtifact(value: unknown): string {
         throw new TypeError('Chapter stage artifact field limit exceeded')
       }
       const output = Object.create(null) as Record<string, unknown>
-      for (const key of enumerableKeys) output[key] = copy(descriptors[key]!.value, depth + 1)
+      for (const key of enumerableKeys) {
+        const propertyValue = descriptors[key]!.value
+        // 与 JSON.stringify 语义一致:对象属性为 undefined 时省略。
+        // 流式 provider 结果聚合(如无 usage 块时 raw.usage = undefined)依赖此行为。
+        if (propertyValue === undefined) continue
+        output[key] = copy(propertyValue, depth + 1)
+      }
       return output
     } finally {
       ancestors.delete(current)

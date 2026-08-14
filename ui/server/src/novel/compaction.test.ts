@@ -132,6 +132,7 @@ describe('novel diagnostic payload compaction', () => {
             warnings: ['上下文缺口：追踪/时间线缺失', hugeFinding],
             checks: [
               { key: 'timeline_tracking', label: '追踪/时间线', ok: false, severity: 'medium', fix: hugeFinding },
+              { key: 'ending_hook', label: '章末钩子', ok: true, severity: 'high', fix: '补充本章结尾钩子。' },
             ],
           },
           chapter_target: {
@@ -184,6 +185,9 @@ describe('novel diagnostic payload compaction', () => {
     expect(payload.context_package.chapter_target.title).toBe('第九章')
     expect(payload.context_package.preflight.ready).toBe(false)
     expect(payload.context_package.preflight.warnings[0]).toContain('上下文缺口')
+    // 预检项的 ok 布尔值必须存活压缩，否则质检面板会把所有已备项永远显示为缺口。
+    expect(payload.context_package.preflight.checks[0]).toMatchObject({ key: 'timeline_tracking', ok: false })
+    expect(payload.context_package.preflight.checks[1]).toMatchObject({ key: 'ending_hook', ok: true })
     expect(payload.self_check.review.score).toBe(72)
     expect(payload.self_check.review.issues[0].severity).toBe('high')
     expect(payload.self_check.review.revision_directives[1]).toBe('补足主角动作选择。')

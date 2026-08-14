@@ -474,6 +474,27 @@ describe('chapter stage artifacts', () => {
       .toThrow('Chapter stage artifact field limit exceeded')
   })
 
+  test('omits undefined object properties like JSON.stringify (streamed provider results)', () => {
+    // 回归:grok 等流式接口无 usage 块时,聚合结果带 raw.usage = undefined,
+    // 曾导致修订阶段在 LLM 成功后因序列化被拒而整体失败。
+    expect(serializeBoundedChapterStageArtifact({
+      content: '修订稿',
+      raw: { content: '修订稿', usage: undefined, stream_chunks_tail: [] },
+      usage: { input_tokens: undefined, output_tokens: 5, total_tokens: 5 },
+      finish_reason: 'stop',
+    })).toBe(JSON.stringify({
+      content: '修订稿',
+      raw: { content: '修订稿', stream_chunks_tail: [] },
+      usage: { output_tokens: 5, total_tokens: 5 },
+      finish_reason: 'stop',
+    }))
+    // 数组元素与顶层 undefined 仍然拒绝
+    expect(() => serializeBoundedChapterStageArtifact({ items: [undefined] })).toThrow('Chapter stage artifact value is not supported')
+    expect(() => serializeBoundedChapterStageArtifact(undefined)).toThrow('Chapter stage artifact value is not supported')
+    // 函数属性仍然拒绝(编程错误信号,不静默丢弃)
+    expect(() => serializeBoundedChapterStageArtifact({ callback: () => 1 })).toThrow('Chapter stage artifact value is not supported')
+  })
+
   test('rejects proxies, accessors, cycles, excessive depth, non-finite and unsupported values', () => {
     let proxyTrapRan = false
     const proxy = new Proxy({}, {
