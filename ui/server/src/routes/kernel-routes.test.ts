@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerKernelRoutes } from './kernel-routes'
@@ -72,5 +72,20 @@ describe('kernel contract routes', () => {
     const res = await callRoute(handlers.get('POST /api/kernel/runtime/probe'))
     expect(res.statusCode).toBe(200)
     expect(res.body.probe.skills).toBe('pending')
+  })
+
+  test('GET contracts flips implemented when probe skills failed', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-routes-'))
+    const probe = {
+      checked_at: 'x', binary: { ok: true }, handshake: { ok: true }, providers: {},
+      skills: { ok: false, message: 'pack 未安装' }, agents_spawn: 'pending',
+    }
+    mkdirSync(join(ws, '.mangaforge', 'kernel'), { recursive: true })
+    writeFileSync(join(ws, '.mangaforge', 'kernel', 'probe.json'), JSON.stringify(probe))
+    const handlers = routeHarness(ws)
+    const res = await callRoute(handlers.get('GET /api/kernel/contracts'))
+    const review = res.body.contracts.find((c: any) => c.id === 'oh-story-core.story-review.full')
+    expect(review.implemented).toBe(false)
+    expect(review.implemented_reason).toBe('SKILLS_PROBE_FAILED')
   })
 })

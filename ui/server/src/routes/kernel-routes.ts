@@ -12,12 +12,24 @@ export function registerKernelRoutes(app: Express, deps: KernelRoutesDeps) {
       const runtime = loadKernelRuntime(workspace)
       const binary = await checkKernelBinary(runtime)
       const { contracts, errors } = loadKernelContracts(workspace)
+      const probe = loadKernelProbe(workspace)
+      const annotate = (view: any) => {
+        let implemented = view.implemented
+        let reason: string | undefined = implemented ? undefined : 'CAPABILITY_PENDING'
+        if (probe && typeof probe.skills === 'object' && !probe.skills.ok && view.projection.mounts.includes('skill_tree')) {
+          implemented = false; reason = 'SKILLS_PROBE_FAILED'
+        }
+        if (probe && typeof probe.agents_spawn === 'object' && !probe.agents_spawn.ok && view.gates.includes('require_reviewer_agents')) {
+          implemented = false; reason = 'AGENTS_PROBE_FAILED'
+        }
+        return { ...view, implemented, ...(reason ? { implemented_reason: reason } : {}) }
+      }
       res.json({
         ok: true,
         runtime: binary.ok
           ? { available: true, version: binary.version, supports_chat_wire_api: runtime.supports_chat_wire_api }
           : { available: false, message: binary.message, supports_chat_wire_api: runtime.supports_chat_wire_api },
-        contracts: contracts.map(({ builtin, implemented, id, label, capability, ...rest }) => ({ id, label, capability, builtin, implemented, ...rest })),
+        contracts: contracts.map(({ builtin, implemented, id, label, capability, ...rest }) => annotate({ id, label, capability, builtin, implemented, ...rest })),
         errors,
       })
     } catch (error: any) {
