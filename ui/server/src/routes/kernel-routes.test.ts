@@ -68,10 +68,17 @@ describe('kernel contract routes', () => {
   test('POST /api/kernel/runtime/probe writes and returns probe result', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kernel-routes-'))
     writeFileSync(join(ws, 'providers.json'), '[]')
+    mkdirSync(join(ws, '.mangaforge', 'kernel'), { recursive: true })
+    writeFileSync(join(ws, '.mangaforge', 'kernel', 'runtime.json'), JSON.stringify({
+      binary: 'codex-definitely-missing-binary',
+    }))
     const handlers = routeHarness(ws)
     const res = await callRoute(handlers.get('POST /api/kernel/runtime/probe'))
     expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.probe.binary.ok).toBe(false)
     expect(res.body.probe.skills).toBe('pending')
+    expect(res.body.probe.agents_spawn).toBe('pending')
   })
 
   test('GET contracts flips implemented when probe skills failed', async () => {
