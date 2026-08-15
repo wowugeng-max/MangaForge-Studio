@@ -33,6 +33,7 @@ import { registerVideoLoopRoutes } from './routes/video-loop'
 import { registerDirectTaskRoutes } from './routes/direct-task'
 import { registerMangaCompatRoutes } from './routes/manga-compat'
 import { registerNovelRoutes } from './routes/novel'
+import { registerKernelRoutes } from './routes/kernel-routes'
 import { registerKnowledgeRoutes } from './routes/knowledge'
 import { registerFingerprintContractRoutes } from './routes/fingerprint-contracts'
 import { registerRecommendationRoutes } from './routes/recommendation-rules'
@@ -145,6 +146,7 @@ registerRecommendationRoutes(app, getWorkspace)
 const mcpRuntime = createMcpRuntime(getWorkspace)
 registerMcpRoutes(app, getWorkspace, mcpRuntime)
 const novelLifecycle = registerNovelRoutes(app, getWorkspace, { mcpRuntime })
+registerKernelRoutes(app, { getWorkspace })
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 
