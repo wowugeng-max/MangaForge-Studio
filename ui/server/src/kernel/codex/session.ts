@@ -2,12 +2,13 @@
 import { spawnCodexRpc, type CodexRpcClient, type RpcEventSink } from './rpc'
 
 const SANDBOX_MAP: Record<string, string> = {
-  'workspace-write': 'workspaceWrite',
-  'read-only': 'readOnly',
-  'danger-full-access': 'dangerFullAccess',
+  workspaceWrite: 'workspace-write',
+  readOnly: 'read-only',
+  dangerFullAccess: 'danger-full-access',
 }
 
 export function mapContractSandbox(sandbox: string): string {
+  // Codex 0.147 app-server expects kebab-case (`workspace-write`), not camelCase.
   return SANDBOX_MAP[sandbox] || sandbox
 }
 
@@ -35,7 +36,9 @@ export async function startCodexSession(input: {
   extraEnv?: Record<string, string>
 }): Promise<CodexSession> {
   const rpc: CodexRpcClient = spawnCodexRpc({
-    argv: input.argv ?? [input.binary, 'app-server', '--ignore-user-config'],
+    // 0.147+ `codex app-server` rejects `--ignore-user-config` (that flag is `exec`-only).
+    // Isolation is CODEX_HOME pointing at the job's config.toml, not the user ~/.codex.
+    argv: input.argv ?? [input.binary, 'app-server'],
     cwd: input.projectDir,
     env: { CODEX_HOME: input.codexHome, MANGAFORGE_CODEX_KEY: input.envKey, ...(input.extraEnv || {}) },
     sink: input.sink,
@@ -65,8 +68,12 @@ export async function startCodexSession(input: {
   return {
     threadId,
     async listSkills() {
-      const result = await rpc.request('skills/list', { cwds: [input.projectDir] })
-      const rows = Array.isArray(result?.skills) ? result.skills : Array.isArray(result?.data) ? result.data : []
+      const result = await rpc.request('skills/list', { cwds: [input.projectDir], forceReload: true })
+      const buckets = [
+        ...(Array.isArray(result?.skills) ? result.skills : []),
+        ...(Array.isArray(result?.data) ? result.data : []),
+      ]
+      const rows = buckets.flatMap((entry: any) => Array.isArray(entry?.skills) ? entry.skills : [entry])
       return rows
         .map((row: any) => ({ name: String(row?.name || ''), path: String(row?.path || '') }))
         .filter((row: any) => row.name)

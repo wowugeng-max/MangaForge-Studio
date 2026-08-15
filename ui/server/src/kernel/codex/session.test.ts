@@ -20,9 +20,10 @@ function sessionInput(cwd: string, env: Record<string, string> = {}) {
 
 describe('codex session', () => {
   test('sandbox mapping', () => {
-    expect(mapContractSandbox('workspace-write')).toBe('workspaceWrite')
-    expect(mapContractSandbox('read-only')).toBe('readOnly')
-    expect(mapContractSandbox('danger-full-access')).toBe('dangerFullAccess')
+    expect(mapContractSandbox('workspace-write')).toBe('workspace-write')
+    expect(mapContractSandbox('read-only')).toBe('read-only')
+    expect(mapContractSandbox('danger-full-access')).toBe('danger-full-access')
+    expect(mapContractSandbox('workspaceWrite')).toBe('workspace-write')
   })
 
   test('start → listSkills → runTurn returns last agent message and completed params', async () => {
