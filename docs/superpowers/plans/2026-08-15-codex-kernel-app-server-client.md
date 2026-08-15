@@ -1563,7 +1563,7 @@ git commit -m "feat(kernel): annotate contract implemented flag from probe resul
 - `--fake`：用 fixture 当二进制（`sessionArgv`），并注入 `FAKE_SKILLS`/`FAKE_SPAWN`/`FAKE_WRITE_FILE` 演示全链路 —— 本机无 codex 时的验收方式
 - 输出：job 目录、产物清单（kind + rel_path）、lastMessage 前 200 字、spawn 证据、events.jsonl 行数
 
-- [ ] **Step 1: 实现脚本**
+- [x] **Step 1: 实现脚本**
 
 ```ts
 // ui/server/src/kernel/candidate-dry-run.ts
@@ -1625,7 +1625,7 @@ console.log('spawn evidence:', JSON.stringify(result.spawnEvidence))
 console.log('events lines:', (await Bun.file(result.eventsPath).text()).trim().split('\n').length)
 ```
 
-- [ ] **Step 2: fixture 演练（本机验收）**
+- [x] **Step 2: fixture 演练（本机验收）**
 
 ```bash
 cd /Users/ruiyaosong/MangaForge-Studio/.worktrees/codex-kernel-ledger-projection/ui/server && bun src/kernel/candidate-dry-run.ts --project 3 --chapter 62 --model 217 --fake
@@ -1637,12 +1637,12 @@ Expected（fixture 模式下 model 217 是 gemini/openai_compatible → `PROVIDE
 - `spawn evidence` 含 `story-architect` 子线程
 - `last-message.md` 存在
 
-- [ ] **Step 3: 跑全量内核测试收尾**
+- [x] **Step 3: 跑全量内核测试收尾**
 
 Run: `cd /Users/ruiyaosong/MangaForge-Studio/.worktrees/codex-kernel-ledger-projection/ui/server && bun test src/kernel/ src/routes/kernel-routes.test.ts src/novel-writing/oh-story-core/`
 Expected: 全部 PASS
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add ui/server/src/kernel/candidate-dry-run.ts
