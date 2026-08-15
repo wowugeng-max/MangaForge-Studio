@@ -25,6 +25,11 @@ describe('kernel template', () => {
     expect(() => renderKernelTemplate('{{bogus_var}}', vars)).toThrow(/bogus_var/)
   })
 
+  test('flags digit and uppercase tokens that the lowercase charset would miss', () => {
+    expect(findUnknownVariables('x {{chapter2}} y {{Chapter_Pad}} z')).toEqual(['chapter2', 'Chapter_Pad'])
+    expect(() => renderKernelTemplate('{{chapter2}}', vars)).toThrow(/chapter2/)
+  })
+
   test('artifact kind registry is locked', () => {
     expect([...REGISTERED_ARTIFACT_KINDS]).toEqual(['review_report', 'tracking_doc', 'chapter_text', 'outline_doc', 'attachment'])
     expect([...IMPLEMENTED_CAPABILITIES]).toEqual(['review', 'rewrite', 'tracking', 'attachment'])
