@@ -763,18 +763,29 @@ export async function startCodexSession(input: {
     async runTurn({ text, skill, idleTimeoutMs = 120_000, hardTimeoutMs = 1_800_000 }) {
       const inputItems: any[] = [{ type: 'text', text }]
       if (skill) inputItems.push({ type: 'skill', name: skill.name, path: skill.path })
+      // 状态与 collector 必须在发 turn/start 之前就位：
+      // 应答行与后续通知行可能挤进同一次 stdout 读取（质量评审 40 次试验实测过 miss），
+      // 事后注册的 waiter 会错过终局事件，事后声明的 let 会在 collector 里触发 TDZ。
+      let lastAgentMessage = ''
+      let lastActivity = Date.now()
+      let completedParams: any = null
+      let resolveCompleted!: (params: any) => void
+      const completed = new Promise<any>(resolve => { resolveCompleted = resolve })
       const collector = (method: string, params: any) => {
         if (String(params?.threadId || '') === threadId || method.startsWith('item/')) lastActivity = Date.now()
         if (method.startsWith('item/') && isAgentMessageItem(params?.item)) lastAgentMessage = params.item.text
+        if (method === 'turn/completed' && String(params?.threadId || '') === threadId && !completedParams) {
+          completedParams = params
+          resolveCompleted(params)
+        }
       }
       rpc.onNotification(collector)
       const turnResult = await rpc.request('turn/start', { threadId, input: inputItems })
       const turnId = String(turnResult?.turnId ?? turnResult?.turn?.id ?? '')
       const hardDeadline = Date.now() + hardTimeoutMs
-      let lastAgentMessage = ''
-      let lastActivity = Date.now()
 
       while (true) {
+        if (completedParams) return { turnId, lastAgentMessage, completedParams }
         const idleRemaining = lastActivity + idleTimeoutMs - Date.now()
         const hardRemaining = hardDeadline - Date.now()
         const budget = Math.min(idleRemaining, hardRemaining)
@@ -782,19 +793,8 @@ export async function startCodexSession(input: {
           try { await rpc.request('turn/interrupt', { threadId, turnId }, 2000) } catch { /* 进程可能已死 */ }
           throw Object.assign(new Error('turn timeout'), { code: 'ENGINE_FAILED' })
         }
-        try {
-          const done = await rpc.waitForNotification(
-            (method, params) => method === 'turn/completed' && String(params?.threadId || '') === threadId,
-            budget,
-          )
-          return { turnId, lastAgentMessage, completedParams: done.params }
-        } catch {
-          // waitForNotification 超时：回到循环重算预算（期间 collector 可能刷新过 lastActivity）
-          if (lastActivity + idleTimeoutMs - Date.now() <= 0 || hardDeadline - Date.now() <= 0) {
-            try { await rpc.request('turn/interrupt', { threadId, turnId }, 2000) } catch { /* 忽略 */ }
-            throw Object.assign(new Error('turn timeout'), { code: 'ENGINE_FAILED' })
-          }
-        }
+        // 让 completed 与预算切片竞速；醒来后回到循环重算预算（collector 可能刷新过 lastActivity）
+        await Promise.race([completed, new Promise(resolve => setTimeout(resolve, Math.min(budget, 1000)))])
       }
     },
     async interrupt(turnId: string) {
