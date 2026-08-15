@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { registerKernelRoutes } from './kernel-routes'
@@ -55,5 +55,22 @@ describe('kernel contract routes', () => {
     expect(builtin.statusCode).toBe(400)
     const missing = await callRoute(handlers.get('DELETE /api/kernel/contracts/:id'), { params: { id: 'a.b.c' } })
     expect(missing.statusCode).toBe(404)
+  })
+
+  test('GET /api/kernel/runtime reports availability and null probe initially', async () => {
+    const handlers = routeHarness(mkdtempSync(join(tmpdir(), 'kernel-routes-')))
+    const res = await callRoute(handlers.get('GET /api/kernel/runtime'))
+    expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.probe).toBeNull()
+  })
+
+  test('POST /api/kernel/runtime/probe writes and returns probe result', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-routes-'))
+    writeFileSync(join(ws, 'providers.json'), '[]')
+    const handlers = routeHarness(ws)
+    const res = await callRoute(handlers.get('POST /api/kernel/runtime/probe'))
+    expect(res.statusCode).toBe(200)
+    expect(res.body.probe.skills).toBe('pending')
   })
 })
