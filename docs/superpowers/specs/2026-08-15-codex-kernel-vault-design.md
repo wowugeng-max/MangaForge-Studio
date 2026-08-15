@@ -1,7 +1,7 @@
 # Codex 内核 + 资产账本（可扩展接口）
 
 日期：2026-08-15  
-状态：待用户审阅  
+状态：待用户审阅（v1.1，2026-08-15 按同日核对分析修订）  
 前置：
 
 - `2026-08-14-oh-story-core-skill-shell-design.md`（方案 B：oh-story 出能力，工作台出账本；当时用 solo 一次补全，本 spec 废止该运行时）
@@ -10,6 +10,16 @@
 - `2026-08-14-oh-story-deslop-file-mode-design.md`
 - `2026-08-14-writing-skill-marketplace-design.md`
 - `2026-08-09-canvas-prompt-skill-pack-design.md`（画布仍是提示词编译器，本 spec 定义它以后如何升级为内核合同，本期不改画布运行时）
+
+### v1.1 修订要点（按 2026-08-15 核对分析）
+
+1. 供应商翻译改「按锁定版本能力」：上游主线已把 `wire_api` 收缩为 `responses` 唯一值，`openai_compatible` 供应商能否走内核取决于锁定发行版；新增运行时探针，先验证再放行（7.5、磁盘与库·探针）。
+2. custom agent 注册纠正：`.codex/agents/*.toml` 只是 oh-story 的存在性检查面，真正注册是隔离 `CODEX_HOME/config.toml` 的 `[agents.<name>]`（6.1、7.5）。
+3. skill 调用改显式注入：`turn/start` 附 `{type:"skill", name, path}`，启动前 `skills/list` 预检，新增 `SKILL_NOT_FOUND`（7.2）。
+4. 错误码回归现网命名：`OH_STORY_APPLY_STALE_REVIEW` / `OH_STORY_APPLY_NO_REVIEW`（废除草稿中的 `REVIEW_HASH_MISMATCH`）；错误码表拆「同步 / 终态」两类并补 `CHAPTER_FILE_MISSING`（第 9 节、10.5）。
+5. 收存补语义：范围内未匹配 glob 的变更收为 `attachment`；新增合同 `ignore` 字段；glob / `write_scope` 支持 7.3 变量；`rewrite` 类章文件未变化视为产物缺失（合同 JSON、6.2、第一批合同）。
+6. app-server 方法白名单补全：`initialized` 通知、`turn/interrupt`、`skills/list`（7.2、风险）。
+7. agents bundle 落地路径：安装管线补抓上游归档（现只拷 `skills/`）；`.story-deployed` 写入与 bundle 一致的 `agents_version`；deslop 多轮质量闭环随 skill 脚本进沙箱，`payload.rounds / script_logs / file_mode` 不再产生（6.1、第一批合同）。
 
 ## 目标
 
@@ -157,6 +167,7 @@ codex app-server     ← 官方内核，不改源码
     }
   ],
   "write_scope": ["审稿/", "追踪/"],
+  "ignore": [".story-review/"],
   "gates": ["reject_solo_fallback", "require_reviewer_agents"],
   "commit": { "mode": "auto_if_single", "domain_writes": ["reviews"] },
   "sandbox": "workspace-write",
@@ -167,11 +178,13 @@ codex app-server     ← 官方内核，不改源码
 字段规则：
 
 - `schema_version` 现为 `1`。增字段必须可选并有默认；删字段或改语义必须升到 `2`，旧合同继续按 v1 读。
-- `mention` 必须是 Codex 显式 skill 引用（`$name`），与 Pack 内 `SKILL.md` 的 `name` 一致。
+- `mention` 必须是 Codex 显式 skill 引用（`$name`），与 Pack 内 `SKILL.md` 的 `name` 一致；仅工作台合同（如 `story-apply`）允许为空。
 - `prompt` 只允许第 7.3 节列出的变量。禁止把整章正文再嵌进 prompt。
+- `outputs[].glob`、`write_scope`、`ignore` 同样只允许 7.3 变量，投影前渲染完再参与匹配。
 - `projection.mounts` 取自第 6 节封闭集合。
 - `outputs[].artifact_kind` 必须已注册（第 8 节）。未注册则合同校验失败，不能创建任务。
-- `write_scope` 是投影目录相对路径前缀。范围外的新文件只记警告，不收、不入库。
+- `write_scope` 是投影目录相对路径前缀。范围内未匹配任何 `outputs[].glob` 的变更收为 `attachment`（binding=`kernel_only`）；范围外的新文件只记警告，不收、不入库。
+- `ignore`：可选路径前缀，其内变更不收、不警告。oh-story 合同默认含 `.story-review/`（skill 的分批审查状态目录）。
 - `gates` 取自第 9 节封闭集合。
 - `commit.mode`：`manual` | `auto_if_single` | `never`。`never` 只留候选，工作台必须再点提交（用于实验合同）。
 
@@ -184,6 +197,12 @@ codex app-server     ← 官方内核，不改源码
 | `oh-story-core.story-apply.surgical` | `rewrite` | `require_matching_review`、`paragraph_retention_70`、`require_chapter_file` | `auto_if_single` → 章节新版本，`source=oh_story_apply` |
 
 `story-apply` 不是 oh-story 原包 skill。它是工作台合同：`invoke.mention` 允许为空；投影必须写出 `改稿/指令.md`（只含可执行「修改建议」+ 禁止整章重写），prompt 只引用该路径和 `{{review_path}}`。能力仍由 Codex 工具环改当前章文件，不得退回 `executeNovelAgent`。
+
+两个 `rewrite` 合同的产物细则：
+
+- 共同：`write_scope=["正文/"]`；required 产物 `artifact_kind=chapter_text`，glob `正文/第{{chapter_pad}}章_*.md`，且必须相对快照有变化——文件未变视为 required 缺失（`OUTPUT_MISSING`），防止「跑完但什么都没改」入库。
+- `story-deslop.file`：现网 runner 的「脚本预扫 → 多轮润色 → 归一化」闭环随 skill 自带 `scripts/` 进入沙箱，由 Codex 按 SKILL.md 自跑，网关不再复刻，也不再有 `OH_STORY_CORE_NOT_PROSE` 检查。代价明示：质量闭环从壳层代码移到 skill 约定；`reviews.oh_story_deslop.payload` 不再产生 `rounds` / `script_logs` / `file_mode`，UI 不得依赖这三个字段。
+- `story-apply.surgical`：投影额外挂 `review_report`（`审稿/第{{chapter_pad}}章.md`）。
 
 `story-long-write` 的设计阶段登记为 `outline` 合同，第一期网关返回 `CONTRACT_NOT_IMPLEMENTED`，不跑。
 
@@ -223,6 +242,16 @@ codex app-server     ← 官方内核，不改源码
 ```
 
 找不到二进制或版本不符，创建任务失败，错误码 `KERNEL_RUNTIME_UNAVAILABLE`。禁止静默改走 solo LLM。
+
+**运行时探针**（`POST /api/kernel/runtime/probe`，结果缓存并随 `GET /api/kernel/contracts` 暴露）依次验证：
+
+1. 二进制存在且版本与 `runtime.json` 一致；
+2. app-server 握手（`initialize` + `initialized` 通知）；
+3. `skills/list`（cwds=[样例投影]）能发现投影 skill；
+4. `[agents.<name>]` spawn 探测：临时线程 spawn 一个空转角色，观察到 subagent thread 即通过（消耗一次极小 turn）；
+5. 目标供应商线协议翻译：`codex_responses` 必须通过；`openai_compatible` 仅当锁定版本仍支持 `wire_api="chat"`。
+
+③④⑤ 任一失败，依赖该能力的合同在合同列表里 `implemented=false` 并附原因码。分期 2、3 的验收前置就是探针对应项全绿。当前开发机未装 codex，探针 ① 即红——这是部署前置，不是代码问题。
 
 Job 目录在任务进入终态（`committed` / `failed` / `cancelled`）且产物已复制到 `vault/` 后，可删 `project/` 与 `codex-home/`。`events.jsonl` 与 `artifacts/` 至少保留到对应 `kernel_jobs` 行还在。
 
@@ -265,6 +294,7 @@ CREATE TABLE IF NOT EXISTS kernel_candidates (
   error_code TEXT DEFAULT '',
   last_message_excerpt TEXT DEFAULT '',
   gate_results TEXT NOT NULL DEFAULT '[]',
+  metadata TEXT NOT NULL DEFAULT '{}',
   FOREIGN KEY (job_id) REFERENCES kernel_jobs(id) ON DELETE CASCADE
 );
 
@@ -296,6 +326,7 @@ CREATE TABLE IF NOT EXISTS kernel_commits (
 
 ```text
 job:        queued → running → awaiting_selection → committed
+                              ↘ committed   （恰 1 个 succeeded 且 auto_if_single，跳过等选）
                               ↘ failed
                               ↘ cancelled
 candidate:  queued → running → succeeded → committed
@@ -338,8 +369,8 @@ Codex 只认文件。小说数据在 SQLite。每次候选运行前，网关把�
 | `characters` | `设定/角色/{name}.md` |
 | `world` | `设定/世界观.md` |
 | `tracking` | `追踪/伏笔.md`、`追踪/逐章记录/第{NNN}章.md`；库中无记录则写最小空模板（标题 +「开放项：无」） |
-| `skill_tree` | `.agents/skills/{skill_name}` → 符号链接或只读复制到已安装 Pack 的 skill 目录 |
-| `agents` | `.codex/agents/*.toml` 与 `.story-deployed`。文件来自 Pack 归档里的 `agents/` / `.codex/agents/`，或仓库内置的四份 reviewer 模板。第一期不自动跑 `/story-setup`。仍缺则候选不启动，`REVIEWERS_MISSING` |
+| `skill_tree` | `.agents/skills/{skill_name}` → 符号链接到已安装 Pack 的 skill 目录（官方文档确认技能扫描跟随符号链接；备选 `skills/extraRoots/set`）。注意 `$HOME/.agents/skills` 不受 `CODEX_HOME` 隔离，同名个人技能会一并被发现——必须配合 7.2 的显式 skill item 锚定路径 |
+| `agents` | `.codex/agents/*.toml` 与 `.story-deployed`（内容含与 bundle 一致的 `agents_version`，免去报告里的版本 Notice）。toml 来自安装管线抓取的上游 agents 归档（锁定 revision；当前安装管线只拷 `skills/`，需扩展并在 pack.json 登记 agents 清单与 `agents_version`），缺则用仓库内置四份 reviewer 模板（待新增）。注意：投影这些文件只满足 oh-story 的存在性预检和本方 `require_reviewer_agents` 门；让 Codex 真正认得 `agent_type` 的是隔离 config.toml 的 `[agents.<name>]` 声明（见 7.5）。第一期不自动跑 `/story-setup`。仍缺则候选不启动，`REVIEWERS_MISSING` |
 | `review_report` | 改稿合同：把匹配的审稿写成 `审稿/第{NNN}章.md` |
 | `canvas_node` | 第一期拒绝 |
 
@@ -350,9 +381,9 @@ Codex 只认文件。小说数据在 SQLite。每次候选运行前，网关把�
 运行前写 `snapshot/manifest.json`：每个相对路径的 sha256。  
 运行后：
 
-1. 对 `write_scope` 内、且相对快照有变化或新增的文件，收入 `kernel_artifacts`。
-2. 范围外变更记入候选 `gate_results` 警告 `write_outside_scope`，不收。
-3. 合同 `required` 产物缺失：先看 `fallback`（只允许 `last_message`）。仍无则候选 `failed`，`OUTPUT_MISSING`。
+1. 对 `write_scope` 内、且相对快照有变化或新增的文件：匹配某 `outputs[].glob` 的按其 `artifact_kind` 收；未匹配的收为 `attachment`（binding=`kernel_only`）。
+2. `ignore` 前缀内的变更跳过，不收、不警告；范围外变更记入候选 `gate_results` 警告 `write_outside_scope`，不收。
+3. 合同 `required` 产物缺失（含 `rewrite` 类「章文件相对快照未变化」）：先看 `fallback`（只允许 `last_message`）。仍无则候选 `failed`，`OUTPUT_MISSING`。
 
 ### 6.3 大纲进度不齐
 
@@ -367,22 +398,24 @@ Codex 只认文件。小说数据在 SQLite。每次候选运行前，网关把�
 
 - `CODEX_HOME={job}/codex-home`
 - `MANGAFORGE_CODEX_KEY`（及合同需要的其它 key）
-- 不继承用户交互式 `~/.codex` 登录；使用 `--ignore-user-config` 或只读隔离家目录
+- 不继承用户交互式 `~/.codex` 登录：`--ignore-user-config`（上游已确认存在的全局旗标）+ 隔离家目录双保险
+- 可选硬隔离：把子进程 `HOME` 指向 job 目录，切断 `$HOME/.agents/skills` 的个人技能发现（先过探针再启用）
 
-`codex exec --json` 只允许作为启动自检或 app-server 不可用时的显式降级，且必须写进 `kernel_candidates.metadata`（实现时放在 `gate_results` 一条 `engine=exec`）。产品路径是 app-server。禁止第三种「自己实现 tool loop」。
+`codex exec --json` 只允许作为启动自检或 app-server 不可用时的显式降级，需带 `--skip-git-repo-check`（投影目录不是 git 仓库），且必须记入 `kernel_candidates.metadata`（`{"engine":"exec"}`）。产品路径是 app-server。禁止第三种「自己实现 tool loop」。
 
 ### 7.2 会话调用
 
 对每个候选，顺序固定：
 
-1. `initialize`，`clientInfo.name = mangaforge`，`title = MangaForge Studio`，`version` = 应用版本
-2. 如需：把隔离 `config.toml` 配好再 initialize（供应商不能写在项目 `.codex/config.toml`，官方会忽略）
-3. `thread/start`，cwd = 投影根
-4. `turn/start`，用户文本 = `invoke.mention + "\n" + 渲染后的 invoke.prompt`
-5. 收通知直到 turn 结束
-6. 若 skill 要写文件：sandbox = 合同 `workspace-write`，审批 = `never`（无人值守）。审稿合同若将来改为只读，用 `read-only`，此时 `write_scope` 必须为空，报告走 `last_message`
+1. 先写好隔离 `config.toml`（供应商 + `[agents.<name>]`，见 7.5）再拉起进程。官方不读取项目级 `.codex/config.toml`，投影内不放它
+2. `initialize`，`clientInfo.name = mangaforge`，`title = MangaForge Studio`，`version` = 应用版本；随后必须发 `initialized` 通知，否则后续请求被拒
+3. `thread/start`，cwd = 投影根，sandbox = `workspaceWrite`、approvalPolicy = `never`（无人值守；app-server JSON 用驼峰枚举，合同里的 `workspace-write` 由客户端映射）。官方行为：此调用会把 cwd 写入 config.toml 的 trusted 列表——隔离家目录恰好吸收该副作用
+4. `skills/list`（cwds=[投影根]）预检：合同 `mention` 指向的 skill 未被发现 → 候选 `failed`，`SKILL_NOT_FOUND`，不发 turn
+5. `turn/start`，input 两项：text = `invoke.mention + "\n" + 渲染后的 invoke.prompt`；外加 `{type:"skill", name, path}`（path 取 `skills/list` 返回的投影内路径）。显式注入是官方推荐做法，规避 `$名` 模型解析歧义与 `$HOME/.agents/skills` 同名冲突
+6. 收 `turn/started` / `item/*` / `turn/completed` 通知直到 turn 结束
+7. 审稿合同若将来改为只读，用 `read-only`，此时 `write_scope` 必须为空，报告走 `last_message`
 
-取消：工作台 `POST .../cancel` → 网关中止 turn / 杀子进程 → job `cancelled`，不 commit。
+取消：工作台 `POST .../cancel` → 网关调 `turn/interrupt` / 杀子进程 → job `cancelled`，不 commit。
 
 ### 7.3 Prompt 变量
 
@@ -424,11 +457,11 @@ HTTP：`GET /api/kernel/jobs/:id` 返回该对象。UI 现有「审稿中 · 12s
 从当前工作台选中的 `providers.json` + `model_id` 写成隔离 `CODEX_HOME/config.toml`：
 
 - `api_format=codex_responses` → `wire_api = "responses"`
-- `api_format=openai_compatible` → `wire_api = "chat"`
-- 自定义 header（如 `jun` 的 User-Agent）写入 `http_headers`
-- key 只进环境变量，不进 git、不进 `vault/`
+- `api_format=openai_compatible` → `wire_api = "chat"`，**仅当锁定发行版仍支持**。上游主线已把 `wire_api` 收缩为「`responses` 是唯一合法值」；锁定版本不支持时，该供应商创建任务直接 400 `PROVIDER_TRANSLATE_FAILED`，不得静默换供应商、不得静默降级。锁定版本决策必须先过探针 ⑤；第一批验收用 `codex_responses` 供应商（`any` / `jun` / `free`）兜底
+- 自定义 header（如 `jun` 的 User-Agent）写入 `http_headers`；key 只进环境变量（`env_key`），不进 git、不进 `vault/`
+- 同一份隔离 config.toml 还写入：四条 `[agents.<name>]`（`description` + `config_file` 指向投影内 `.codex/agents/<name>.toml`，相对路径从声明它的配置文件解析）——这是 Codex 认得 `agent_type` 的正式入口；以及 `memories.generate_memories=false`、`memories.use_memories=false`，保证一次性运行不受记忆注入、不留记忆
 
-项目级 `.codex/config.toml` 只放 skill/agent 发现所需的非供应商项。供应商、鉴权、`model_provider` 只出现在隔离家目录。
+供应商、鉴权、`model_provider`、agents 注册只出现在隔离家目录；投影目录不放 `.codex/config.toml`（官方不读）。
 
 ## 扩展规范
 
@@ -500,14 +533,19 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 | id | 失败码 | 行为 |
 |---|---|---|
-| `reject_solo_fallback` | `SOLO_FALLBACK` | 报告首 2KiB 匹配 `Fallback:` 且含 `solo` → 候选 `gated` |
+| `reject_solo_fallback` | `SOLO_FALLBACK` | 报告首 2KiB 内，`Fallback:` 行含 `solo`，或 `Effective Mode:` 行为 `solo` → 候选 `gated`。锚定行首 key（skill 报告头部强制逐行英文 key），避免 `Fallback: none` 与他处「solo」字样误伤 |
 | `require_reviewer_agents` | `REVIEWERS_MISSING` | 投影缺少 `story-architect` / `character-designer` / `narrative-writer` / `consistency-checker` 四个 toml → 不启动，候选 `failed` |
 | `require_chapter_file` | `CHAPTER_FILE_MISSING` | 收回后当前章文件不在或哈希与空文件相同 |
-| `require_matching_review` | `REVIEW_HASH_MISMATCH` | 改稿时审稿 payload 的 `chapter_text_hash` ≠ 当前正文 |
+| `require_matching_review` | `OH_STORY_APPLY_NO_REVIEW` / `OH_STORY_APPLY_STALE_REVIEW` | 全无匹配审稿 → 前者，投影前即失败、候选不启动；审稿 payload 的 `chapter_text_hash` ≠ 当前正文 → 后者。启动前检一次，commit 前重跑 |
 | `paragraph_retention_70` | `OH_STORY_APPLY_REWROTE_TOO_MUCH` | 沿用现有算法；原文 ≥8 段且 verbatim 段 <70% → 409 / 候选 `gated` |
 | `write_outside_scope` | 警告，不单独失败 | 见投影 |
 
-门在收存之后、commit 之前跑。`gated` 产物仍进 `kernel_artifacts`，便于排错，不写领域表。
+门默认在收存之后、commit 之前跑；`require_reviewer_agents` 与 `require_matching_review` 的前提检查在投影后、启动前即执行（表内已注）。`gated` 产物仍进 `kernel_artifacts`，便于排错，不写领域表。
+
+两点说明：
+
+- `OH_STORY_APPLY_*` 沿用现网错误码是有意的（同决议 10 对 `REWROTE_TOO_MUCH` 的处理）：旧路由零映射。通用合同需要中性别名时到 schema v2 再加。
+- skill 自报不可尽信：网关把 app-server 的 subagent thread 事件（spawn 证据，`parentThreadId` / agent 名）记入 `events.jsonl` 与候选 `metadata`。第一期只记录、供人工与 `Fallback:` 行比对；后续可升级为结构门（full 审稿须 ≥1 次 spawn 证据）。
 
 ## HTTP 接口
 
@@ -553,7 +591,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | oh-story 去AI | `["oh-story-core.story-deslop.file"]` |
 | 按建议改稿 | `["oh-story-core.story-apply.surgical"]` |
 
-旧路由 `POST /api/novel/oh-story/core/{review,deslop,apply}` 第一期改为内部转调内核创建任务，响应形状保持现有前端能用（`review` / `chapter` / 错误码），同时带上 `kernel_job_id`。新 UI 直接打 `/api/kernel/jobs`。
+旧路由 `POST /api/novel/oh-story/core/{review,deslop,apply}` 第一期改为内部转调内核创建任务，并**阻塞至 job 终态**再回包（现有前端是同步语义），形状保持现有前端能用（`review` / `chapter` / 错误码——门码已直接沿用现网名，无需映射），同时带上 `kernel_job_id`。新 UI 直接打 `/api/kernel/jobs`。
 
 ### 10.3 查询与取消
 
@@ -566,11 +604,13 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 `POST /api/kernel/jobs/:id/commit` body `{ "candidate_id": "..." }`
 
 - 候选必须 `succeeded`
-- 再跑该候选的门（防止提交时正文已变：改稿须重算哈希）
+- 再跑该候选的门（防止提交时正文已变：改稿须重算哈希，失败即 409 `OH_STORY_APPLY_STALE_REVIEW`）
 - 事务：领域写入 + `kernel_commits` + job `committed`
 - 改稿过大：409，错误码与现网一致 `OH_STORY_APPLY_REWROTE_TOO_MUCH`，文案不变
 
 ### 10.5 错误码
+
+同步错误（`POST /jobs` 等请求即返回）：
 
 | 码 | HTTP | 含义 |
 |---|---|---|
@@ -579,24 +619,34 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | `CONTRACT_NOT_IMPLEMENTED` | 400 | 能力未落地 |
 | `CONTRACT_BUILTIN` | 400 | 不能覆盖内置合同 |
 | `CAPABILITY_MIXED` | 400 | 并跑了不同 capability |
+| `PROVIDER_TRANSLATE_FAILED` | 400 | 供应商线协议无法翻译（锁定版不支持该 `api_format`） |
+| `JOB_ALREADY_COMMITTED` | 409 | 不能取消/重复提交 |
+
+终态错误（写入候选 / 任务 `error_code`；旧路由阻塞桥接与 `commit` 接口按本表映射 HTTP）：
+
+| 码 | HTTP | 含义 |
+|---|---|---|
+| `SKILL_NOT_FOUND` | 409 | `skills/list` 预检未发现合同 skill |
 | `REVIEWERS_MISSING` | 409 | 未部署四个 reviewer |
 | `SOLO_FALLBACK` | 409 | 完整审稿降级 solo |
-| `REVIEW_HASH_MISMATCH` | 409 | 先重新审稿 |
+| `OH_STORY_APPLY_NO_REVIEW` | 409 | 没有可用审稿，先审稿 |
+| `OH_STORY_APPLY_STALE_REVIEW` | 409 | 审稿过期，先重新审稿 |
 | `OH_STORY_APPLY_REWROTE_TOO_MUCH` | 409 | 改动过大 |
+| `CHAPTER_FILE_MISSING` | 500 | 收回后章文件缺失或为空 |
 | `OUTPUT_MISSING` | 500 | 约定产物没有 |
-| `JOB_ALREADY_COMMITTED` | 409 | 不能取消/重复提交 |
-| `PROVIDER_TRANSLATE_FAILED` | 400 | 供应商线协议无法翻译 |
+
+创建任务返回 202 之后发生的失败（投影、启动、门）都是终态错误，不是 HTTP 响应；只有旧路由桥接和 `commit` 才把它们映射回 HTTP。
 
 ## Codex 源码：默认不动，只允许这六处补丁
 
 补丁必须单独开短 spec，基于锁定的 `openai/codex` release，附回归。除此之外改 Codex 视为违规。
 
-1. 供应商线协议对不上（Responses vs chat、代理路径）。
-2. 自定义 header / User-Agent 被丢掉。
-3. 隔离 `CODEX_HOME` 仍去读 `~/.codex` 或弹 ChatGPT 登录。
-4. `.codex/agents/*.toml` 的 `agent_type` 不可用，导致 oh-story 降级 solo。
-5. skill 发现不认 `.agents/skills` 符号链接，且我们无法改用官方支持的目录。
-6. JSONL / app-server 完全没有文件变更信息，且目录 diff 也无法实现收存（先做 diff；本条是最后手段）。
+1. 供应商线协议对不上（上游主线已收缩为 responses-only；先考虑锁仍支持 chat 的旧版、或第一期只用 `codex_responses` 供应商，补丁是最后手段）。
+2. 自定义 header / User-Agent 被丢掉（`http_headers` 已见于当前 config 参考，预计不触发）。
+3. 隔离 `CODEX_HOME` + `--ignore-user-config` 仍去读 `~/.codex` 或弹 ChatGPT 登录。
+4. 按 7.5 写入 `[agents.<name>]` 注册后 `agent_type` 仍不可用，导致 oh-story 降级 solo。
+5. skill 发现不认 `.agents/skills` 符号链接（官方文档已确认支持符号链接，另有 `skills/extraRoots/set` 备选，预计不触发）。
+6. JSONL / app-server 完全没有文件变更信息，且目录 diff 也无法实现收存（item 事件已含 file edit，且先做 diff；本条是最后手段）。
 
 ## 工作台仍要做的事（不是内核会送的）
 
@@ -604,14 +654,15 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 1. **合同注册与校验** — 能力目录、按钮挂哪个 id。
 2. **项目投影与收回** — SQLite ↔ 文件。
-3. **隔离供应商配置** — `providers.json` → `CODEX_HOME`。
+3. **隔离供应商配置** — `providers.json` → `CODEX_HOME`（含 `[agents.<name>]` 注册与 memories 关闭）。
 4. **任务编排与取消** — 含并跑上限 8。
 5. **门** — solo、哈希、70% 保留、reviewer 文件。
 6. **选优** — UI 展示各候选摘要，人点采纳。
 7. **领域入库** — 章节版本、审稿、导出仍走现有壳。
-8. **Pack 锁定与升级** — 享受更新 = 换 revision + 必要时新合同，不是热补提示词。
+8. **Pack 锁定与升级** — 享受更新 = 换 revision + 必要时新合同，不是热补提示词；安装管线除 `skills/` 外还抓 agents 归档。
 9. **参考分展示** — 朱雀/指纹继续挂在章节上，文案「参考，不自动改稿」。
 10. **权限与安全** — cwd 只有投影；不把整个 git 仓库交给 Codex；job 目录不进 git。
+11. **运行时探针** — 版本、握手、技能发现、agent spawn、线协议五检；探针不绿，对应合同 `implemented=false`。
 
 ## 与现有子系统的关系
 
@@ -637,6 +688,8 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 6. 新增一份「假审稿」合同（同类 `review_report` 路径）只需加 JSON、无需改网关主环，测试锁定这一点。
 7. 朱雀/指纹不回退入库。
 8. 不出现新的 solo 提示词路径。
+9. `skills/list` 预检生效：移除投影 skill 后创建任务 → `SKILL_NOT_FOUND`，未发 turn。
+10. events.jsonl 里有 spawn 证据（subagent thread 事件），且与报告 `Fallback:` 行自洽；不一致时以门为准并留档排查。
 
 ## 非目标
 
@@ -652,16 +705,16 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 本文件是平台规范。编码不得一次做完所有 capability。实现计划必须按下列切片，每片有独立验收：
 
 1. **账本与合同** — 表、磁盘、校验、HTTP 读合同；不接 Codex。
-2. **投影与供应商翻译** — 能对项目 3 第 2 章落盘，隔离 `CODEX_HOME` 可人工打开检查。
-3. **app-server 客户** — 一个候选跑通 `$story-review`，事件进 `events.jsonl`。
+2. **投影与供应商翻译** — 能对项目 3 第 2 章落盘，隔离 `CODEX_HOME` 可人工打开检查（含 `[agents.<name>]`）；探针 ①②⑤ 绿（⑤ 按所选供应商，据此定锁定版本）。
+3. **app-server 客户** — 探针 ③④ 绿；一个候选跑通 `$story-review`（显式 skill item），事件与 spawn 证据进 `events.jsonl`。
 4. **第一批三合同 + 旧按钮转调** — 第 2 章完整审稿验收。
 5. **并跑选优** — 两个 review 合同。
 6. **（另开）** outline / 画布 prompt 合同。
 
 ## 风险
 
-- app-server 协议仍有实验字段。客户只使用本 spec 点名的方法：`initialize`、`thread/start`、`turn/start`、取消/结束通知。新方法未写入本文件不得调用。
-- oh-story 在 Codex 上若 custom agent 不可用会自己 solo。必须靠 `require_reviewer_agents` + `reject_solo_fallback` 挡住，不能信 skill 自己汇报成功。
+- app-server 协议仍有实验字段。客户只使用本 spec 点名的方法：`initialize`（+ `initialized` 通知）、`thread/start`、`turn/start`、`turn/interrupt`、`skills/list`，以及被动消费 `thread/started` / `turn/started` / `item/*` / `turn/completed`。新方法未写入本文件不得调用。
+- oh-story 在 Codex 上若 custom agent 不可用会自己 solo。必须靠 `require_reviewer_agents` + `reject_solo_fallback` 挡住，不能信 skill 自己汇报成功；spawn 证据记录（见门一节）用于事后比对。最大不确定点是锁定版本的 `[agents.<name>]` 行为——探针 ④ 不绿之前不进分期 4。
 - 投影与库双写可能漂移。领域表是用户真相；投影是一次性输入。提交后以领域表为准，不要反向用旧投影覆盖库。
 - Pack 更新导致报告格式变化。收存认路径和门，不认「=== 故事审查报告」这种标题。
 
