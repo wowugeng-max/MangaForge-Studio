@@ -40,19 +40,26 @@ export async function startCodexSession(input: {
     env: { CODEX_HOME: input.codexHome, MANGAFORGE_CODEX_KEY: input.envKey, ...(input.extraEnv || {}) },
     sink: input.sink,
   })
-  await rpc.request('initialize', {
-    clientInfo: { name: 'mangaforge', title: 'MangaForge Studio', version: input.appVersion || 'dev' },
-  })
-  rpc.notify('initialized')
-  const threadResult = await rpc.request('thread/start', {
-    cwd: input.projectDir,
-    sandbox: mapContractSandbox(input.sandbox || 'workspace-write'),
-    approvalPolicy: 'never',
-  })
-  const threadId = String(threadResult?.threadId ?? threadResult?.thread?.id ?? '')
-  if (!threadId) {
+  let threadId: string
+  try {
+    await rpc.request('initialize', {
+      clientInfo: { name: 'mangaforge', title: 'MangaForge Studio', version: input.appVersion || 'dev' },
+    })
+    rpc.notify('initialized')
+    const threadResult = await rpc.request('thread/start', {
+      cwd: input.projectDir,
+      sandbox: mapContractSandbox(input.sandbox || 'workspace-write'),
+      approvalPolicy: 'never',
+    })
+    threadId = String(threadResult?.threadId ?? threadResult?.thread?.id ?? '')
+    if (!threadId) {
+      rpc.kill()
+      throw Object.assign(new Error('thread/start returned no thread id'), { code: 'ENGINE_FAILED' })
+    }
+  } catch (error: any) {
     rpc.kill()
-    throw Object.assign(new Error('thread/start returned no thread id'), { code: 'ENGINE_FAILED' })
+    if (error && !error.code) error.code = 'ENGINE_FAILED'
+    throw error
   }
 
   return {
@@ -87,9 +94,12 @@ export async function startCodexSession(input: {
       const turnResult = await rpc.request('turn/start', { threadId, input: inputItems })
       const turnId = String(turnResult?.turnId ?? turnResult?.turn?.id ?? '')
       const hardDeadline = Date.now() + hardTimeoutMs
+      let exited = false
+      rpc.exited.then(() => { exited = true })
 
       while (true) {
         if (completedParams) return { turnId, lastAgentMessage, completedParams }
+        if (exited) throw Object.assign(new Error('app-server exited before turn/completed'), { code: 'ENGINE_FAILED' })
         const idleRemaining = lastActivity + idleTimeoutMs - Date.now()
         const hardRemaining = hardDeadline - Date.now()
         const budget = Math.min(idleRemaining, hardRemaining)
@@ -97,8 +107,8 @@ export async function startCodexSession(input: {
           try { await rpc.request('turn/interrupt', { threadId, turnId }, 2000) } catch { /* 进程可能已死 */ }
           throw Object.assign(new Error('turn timeout'), { code: 'ENGINE_FAILED' })
         }
-        // 让 completed 与预算切片竞速；醒来后回到循环重算预算（collector 可能刷新过 lastActivity）
-        await Promise.race([completed, new Promise(resolve => setTimeout(resolve, Math.min(budget, 1000)))])
+        // 让 completed、预算切片、进程退出竞速；醒来后回到循环重算预算（collector 可能刷新过 lastActivity）
+        await Promise.race([completed, new Promise(resolve => setTimeout(resolve, Math.min(budget, 1000))), rpc.exited])
       }
     },
     async interrupt(turnId: string) {
