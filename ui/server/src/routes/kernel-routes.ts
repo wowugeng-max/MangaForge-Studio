@@ -37,9 +37,10 @@ export function registerKernelRoutes(app: Express, deps: KernelRoutesDeps) {
     res.json({ ok: true })
   })
 
-  app.post('/api/kernel/runtime/probe', async (_req, res) => {
+  app.post('/api/kernel/runtime/probe', async (req, res) => {
     try {
-      res.json({ ok: true, probe: await runKernelProbe(deps.getWorkspace()) })
+      const modelId = Number((req as any).body?.model_id || 0) || undefined
+      res.json({ ok: true, probe: await runKernelProbe(deps.getWorkspace(), { modelId }) })
     } catch (error: any) {
       res.status(500).json({ error: String(error?.message || error) })
     }

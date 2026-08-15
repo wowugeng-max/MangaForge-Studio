@@ -1,17 +1,26 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { readKeys } from '../key-store'
+import { readModels } from '../model-store'
 import { readProviders } from '../provider-store'
+import { createKernelEventsRecorder, readKernelEvents } from './codex/events'
+import { startCodexSession } from './codex/session'
+import { extractSpawnEvidence } from './codex/spawn-evidence'
 import { kernelProbePath } from './paths'
-import { buildCodexConfigToml } from './providers/translate'
-import { checkKernelBinary, loadKernelRuntime } from './runtime'
+import { deployKernelPackMounts } from './projection/pack-mounts'
+import { buildCodexConfigToml, writeCodexHome } from './providers/translate'
+import { checkKernelBinary, loadKernelRuntime, type KernelRuntimeInfo } from './runtime'
+
+export type KernelProbeStage = { ok: boolean; message?: string } | 'pending'
 
 export type KernelProbeResult = {
   checked_at: string
   binary: { ok: boolean; version?: string; message?: string }
   handshake: { ok: boolean; message?: string }
   providers: Record<string, { ok: boolean; error_code?: string }>
-  skills: 'pending'
-  agents_spawn: 'pending'
+  skills: KernelProbeStage
+  agents_spawn: KernelProbeStage
 }
 
 async function readWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -62,6 +71,9 @@ export async function runKernelProbe(
     runVersion?: (binary: string) => Promise<string>
     runHandshake?: (binary: string) => Promise<void>
     now?: () => string
+    modelId?: number
+    runSkillsProbe?: () => Promise<{ ok: boolean; message?: string }>
+    runAgentsSpawnProbe?: () => Promise<{ ok: boolean; message?: string }>
   } = {},
 ): Promise<KernelProbeResult> {
   const runtime = loadKernelRuntime(activeWorkspace)
@@ -93,9 +105,81 @@ export async function runKernelProbe(
     })
     result.providers[String((provider as any).id)] = built.ok ? { ok: true } : { ok: false, error_code: built.error_code }
   }
+  if (result.binary.ok && result.handshake.ok) {
+    const skillsProbe = opts.runSkillsProbe || (() => defaultRunSkillsProbe(activeWorkspace, runtime))
+    try {
+      result.skills = await skillsProbe()
+    } catch (error: any) {
+      result.skills = { ok: false, message: String(error?.message || error) }
+    }
+    if (typeof result.skills === 'object' && result.skills.ok && opts.modelId) {
+      const agentsProbe = opts.runAgentsSpawnProbe || (() => defaultRunAgentsSpawnProbe(activeWorkspace, runtime, opts.modelId!))
+      try {
+        result.agents_spawn = await agentsProbe()
+      } catch (error: any) {
+        result.agents_spawn = { ok: false, message: String(error?.message || error) }
+      }
+    }
+  }
   mkdirSync(dirname(kernelProbePath(activeWorkspace)), { recursive: true })
   writeFileSync(kernelProbePath(activeWorkspace), JSON.stringify(result, null, 2))
   return result
+}
+
+async function defaultRunSkillsProbe(ws: string, runtime: KernelRuntimeInfo): Promise<{ ok: boolean; message?: string }> {
+  const dir = mkdtempSync(join(tmpdir(), 'kernel-probe3-'))
+  const mounts = deployKernelPackMounts({ workspace: ws, projectDir: dir, skillName: 'story-review', mounts: ['skill_tree'] })
+  if (!mounts.skillPath) return { ok: false, message: 'oh-story pack 未安装' }
+  const provider = (await readProviders(ws)).find(p => p.api_format === 'codex_responses' && p.is_active !== false)
+  if (!provider) return { ok: false, message: '无 codex_responses 供应商' }
+  const built = buildCodexConfigToml({
+    provider: provider as any, model: { model_name: 'probe' }, agents: [],
+    supportsChatWireApi: runtime.supports_chat_wire_api,
+  })
+  if (!built.ok) return { ok: false, message: built.message }
+  const home = join(dir, 'codex-home')
+  mkdirSync(home, { recursive: true })
+  writeFileSync(join(home, 'config.toml'), built.toml)
+  const session = await startCodexSession({ binary: runtime.binary, projectDir: dir, codexHome: home, envKey: 'probe' })
+  try {
+    const skills = await session.listSkills()
+    return skills.some(skill => skill.name === 'story-review')
+      ? { ok: true }
+      : { ok: false, message: 'skills/list 未发现投影 skill' }
+  } finally {
+    session.close()
+  }
+}
+
+async function defaultRunAgentsSpawnProbe(ws: string, runtime: KernelRuntimeInfo, modelId: number): Promise<{ ok: boolean; message?: string }> {
+  const jobDir = mkdtempSync(join(tmpdir(), 'kernel-probe4-'))
+  const projectDir = join(jobDir, 'project')
+  mkdirSync(projectDir, { recursive: true })
+  const mounts = deployKernelPackMounts({ workspace: ws, projectDir, skillName: '', mounts: ['agents'] })
+  if (mounts.missingReviewers.length) return { ok: false, message: `缺 reviewer：${mounts.missingReviewers.join(', ')}` }
+  const model = (await readModels(ws)).find(m => Number(m.id) === Number(modelId))
+  if (!model) return { ok: false, message: `model ${modelId} not found` }
+  const key = (await readKeys(ws)).find(k => Number(k.id) === Number(model.api_key_id))
+  if (!key?.key) return { ok: false, message: 'api key 缺失' }
+  const home = await writeCodexHome({
+    workspace: ws, jobDir, modelId,
+    agents: mounts.deployedAgents.map(name => ({ name, configFile: join(projectDir, '.codex', 'agents', `${name}.toml`) })),
+    supportsChatWireApi: runtime.supports_chat_wire_api,
+  })
+  if (!home.ok) return { ok: false, message: home.message }
+  const recorder = createKernelEventsRecorder(jobDir)
+  const session = await startCodexSession({
+    binary: runtime.binary, projectDir, codexHome: join(jobDir, 'codex-home'), envKey: key.key, sink: recorder.sink,
+  })
+  try {
+    await session.runTurn({ text: '请让 consistency-checker 子代理只回复 OK，然后立即结束本回合。', idleTimeoutMs: 60_000, hardTimeoutMs: 120_000 })
+    const evidence = extractSpawnEvidence(readKernelEvents(jobDir))
+    return evidence.subagent_threads.length > 0
+      ? { ok: true }
+      : { ok: false, message: '未观察到 subagent thread' }
+  } finally {
+    session.close()
+  }
 }
 
 export function loadKernelProbe(activeWorkspace: string): KernelProbeResult | null {

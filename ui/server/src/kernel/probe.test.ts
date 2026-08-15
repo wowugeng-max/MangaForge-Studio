@@ -37,9 +37,49 @@ describe('kernel probe', () => {
     const probe = await runKernelProbe(ws, {
       runVersion: async () => 'codex-cli 1.0.0',
       runHandshake: async () => {},
+      runSkillsProbe: async () => ({ ok: true }),
     })
     expect(probe.binary).toEqual({ ok: true, version: '1.0.0' })
     expect(probe.handshake.ok).toBe(true)
+  })
+
+  test('healthy binary runs skills probe; agents probe pending without model', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'probe-ws-'))
+    seedProviders(ws)
+    const probe = await runKernelProbe(ws, {
+      runVersion: async () => 'codex-cli 1.0.0',
+      runHandshake: async () => {},
+      runSkillsProbe: async () => ({ ok: true }),
+    })
+    expect(probe.skills).toEqual({ ok: true })
+    expect(probe.agents_spawn).toBe('pending')
+  })
+
+  test('skills probe pass + modelId runs agents spawn probe', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'probe-ws-'))
+    seedProviders(ws)
+    const probe = await runKernelProbe(ws, {
+      runVersion: async () => 'codex-cli 1.0.0',
+      runHandshake: async () => {},
+      modelId: 9,
+      runSkillsProbe: async () => ({ ok: true }),
+      runAgentsSpawnProbe: async () => ({ ok: false, message: '未观察到 subagent thread' }),
+    })
+    expect(probe.agents_spawn).toEqual({ ok: false, message: '未观察到 subagent thread' })
+  })
+
+  test('skills probe failure keeps agents probe pending', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'probe-ws-'))
+    seedProviders(ws)
+    const probe = await runKernelProbe(ws, {
+      runVersion: async () => 'codex-cli 1.0.0',
+      runHandshake: async () => {},
+      modelId: 9,
+      runSkillsProbe: async () => ({ ok: false, message: 'pack 未安装' }),
+      runAgentsSpawnProbe: async () => ({ ok: true }),
+    })
+    expect(probe.skills).toEqual({ ok: false, message: 'pack 未安装' })
+    expect(probe.agents_spawn).toBe('pending')
   })
 
   test('handshake times out when the process produces no stdout', async () => {
