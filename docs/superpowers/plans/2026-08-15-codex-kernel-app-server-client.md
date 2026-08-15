@@ -549,18 +549,20 @@ function handleTurnStart(id: number, params: any) {
   const turnId = 'fake-turn-1'
   reply(id, { turnId })
   if (process.env.FAKE_HANG_TURN === '1') return
-  notifyPeer('turn/started', { threadId, turnId })
-  if (process.env.FAKE_SPAWN === '1') {
-    notifyPeer('thread/started', { threadId: 'fake-sub-1', parentThreadId: threadId, agent: 'story-architect' })
-  }
-  const relFile = process.env.FAKE_WRITE_FILE || ''
-  if (relFile) {
-    const target = join(process.cwd(), relFile)
-    mkdirSync(dirname(target), { recursive: true })
-    writeFileSync(target, process.env.FAKE_WRITE_CONTENT || '')
-  }
-  notifyPeer('item/completed', { threadId, turnId, item: { type: 'agentMessage', text: process.env.FAKE_AGENT_MESSAGE || 'done' } })
-  notifyPeer('turn/completed', { threadId, turnId })
+  setImmediate(() => {
+    notifyPeer('turn/started', { threadId, turnId })
+    if (process.env.FAKE_SPAWN === '1') {
+      notifyPeer('thread/started', { threadId: 'fake-sub-1', parentThreadId: threadId, agent: 'story-architect' })
+    }
+    const relFile = process.env.FAKE_WRITE_FILE || ''
+    if (relFile) {
+      const target = join(process.cwd(), relFile)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, process.env.FAKE_WRITE_CONTENT || '')
+    }
+    notifyPeer('item/completed', { threadId, turnId, item: { type: 'agentMessage', text: process.env.FAKE_AGENT_MESSAGE || 'done' } })
+    notifyPeer('turn/completed', { threadId, turnId })
+  })
 }
 
 const decoder = new TextDecoder()
@@ -761,17 +763,16 @@ export async function startCodexSession(input: {
     async runTurn({ text, skill, idleTimeoutMs = 120_000, hardTimeoutMs = 1_800_000 }) {
       const inputItems: any[] = [{ type: 'text', text }]
       if (skill) inputItems.push({ type: 'skill', name: skill.name, path: skill.path })
-      const turnResult = await rpc.request('turn/start', { threadId, input: inputItems })
-      const turnId = String(turnResult?.turnId ?? turnResult?.turn?.id ?? '')
-      const hardDeadline = Date.now() + hardTimeoutMs
-      let lastAgentMessage = ''
-      let lastActivity = Date.now()
-
       const collector = (method: string, params: any) => {
         if (String(params?.threadId || '') === threadId || method.startsWith('item/')) lastActivity = Date.now()
         if (method.startsWith('item/') && isAgentMessageItem(params?.item)) lastAgentMessage = params.item.text
       }
       rpc.onNotification(collector)
+      const turnResult = await rpc.request('turn/start', { threadId, input: inputItems })
+      const turnId = String(turnResult?.turnId ?? turnResult?.turn?.id ?? '')
+      const hardDeadline = Date.now() + hardTimeoutMs
+      let lastAgentMessage = ''
+      let lastActivity = Date.now()
 
       while (true) {
         const idleRemaining = lastActivity + idleTimeoutMs - Date.now()

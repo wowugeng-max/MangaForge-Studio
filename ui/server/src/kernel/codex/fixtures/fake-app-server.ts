@@ -18,18 +18,20 @@ function handleTurnStart(id: number, params: any) {
   const turnId = 'fake-turn-1'
   reply(id, { turnId })
   if (process.env.FAKE_HANG_TURN === '1') return
-  notifyPeer('turn/started', { threadId, turnId })
-  if (process.env.FAKE_SPAWN === '1') {
-    notifyPeer('thread/started', { threadId: 'fake-sub-1', parentThreadId: threadId, agent: 'story-architect' })
-  }
-  const relFile = process.env.FAKE_WRITE_FILE || ''
-  if (relFile) {
-    const target = join(process.cwd(), relFile)
-    mkdirSync(dirname(target), { recursive: true })
-    writeFileSync(target, process.env.FAKE_WRITE_CONTENT || '')
-  }
-  notifyPeer('item/completed', { threadId, turnId, item: { type: 'agentMessage', text: process.env.FAKE_AGENT_MESSAGE || 'done' } })
-  notifyPeer('turn/completed', { threadId, turnId })
+  setImmediate(() => {
+    notifyPeer('turn/started', { threadId, turnId })
+    if (process.env.FAKE_SPAWN === '1') {
+      notifyPeer('thread/started', { threadId: 'fake-sub-1', parentThreadId: threadId, agent: 'story-architect' })
+    }
+    const relFile = process.env.FAKE_WRITE_FILE || ''
+    if (relFile) {
+      const target = join(process.cwd(), relFile)
+      mkdirSync(dirname(target), { recursive: true })
+      writeFileSync(target, process.env.FAKE_WRITE_CONTENT || '')
+    }
+    notifyPeer('item/completed', { threadId, turnId, item: { type: 'agentMessage', text: process.env.FAKE_AGENT_MESSAGE || 'done' } })
+    notifyPeer('turn/completed', { threadId, turnId })
+  })
 }
 
 const decoder = new TextDecoder()

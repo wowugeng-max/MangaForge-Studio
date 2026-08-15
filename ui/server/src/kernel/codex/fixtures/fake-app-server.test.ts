@@ -40,9 +40,7 @@ describe('fake app-server', () => {
     const turn = await rpc.request('turn/start', { threadId: thread.threadId, input: [{ type: 'text', text: 'x' }] })
     expect(turn.turnId).toBe('fake-turn-1')
     await completed
-    expect(seen).toContain('turn/started')
-    expect(seen).toContain('thread/started')
-    expect(seen).toContain('item/completed')
+    expect(seen).toEqual(['turn/started', 'thread/started', 'item/completed', 'turn/completed'])
     expect(existsSync(join(cwd, '审稿/第002章.md'))).toBe(true)
     expect(readFileSync(join(cwd, '审稿/第002章.md'), 'utf8')).toContain('Fallback: none')
     rpc.kill()
