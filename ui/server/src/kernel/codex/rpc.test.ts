@@ -22,6 +22,12 @@ process.stdin.on('data', (chunk) => {
     if (msg.method === 'boom') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: 'boom!' } }) + '\\n')
     if (msg.method === 'silent') { /* never answers */ }
     if (msg.method === 'garbage') process.stdout.write('not json at all\\n')
+    if (msg.method === 'chinese') {
+      const payload = JSON.stringify({ jsonrpc: '2.0', method: 'cjk', params: { text: '你好世界'.repeat(50) } }) + '\\n'
+      const bytes = Buffer.from(payload, 'utf8')
+      process.stdout.write(bytes.subarray(0, 51)); setTimeout(() => process.stdout.write(bytes.subarray(51)), 10)
+    }
+    if (msg.method === 'die') process.exit(0)
   }
 })
 `
@@ -71,6 +77,32 @@ describe('spawnCodexRpc', () => {
     expect(lines.some(l => l.direction === 'meta' && String(l.message.raw).includes('not json'))).toBe(true)
     const result = await client.request('echo', { x: 2 })
     expect(result.echoed).toBe(2)
+    client.kill()
+  })
+
+  test('utf-8 chunk split does not corrupt chinese text', async () => {
+    const client = spawnPeer([])
+    const waiter = client.waitForNotification((method) => method === 'cjk', 5000)
+    const pending = client.request('chinese', {}, 5000)
+    const note = await waiter
+    expect(note.params.text).toBe('你好世界'.repeat(50))
+    expect(String(note.params.text).includes('\uFFFD')).toBe(false)
+    client.kill()
+    await pending.catch(() => {})
+  })
+
+  test('kill rejects waitForNotification waiters', async () => {
+    const client = spawnPeer([])
+    const waiter = client.waitForNotification(() => false, 30_000)
+    client.kill()
+    await expect(waiter).rejects.toThrow(/rpc client killed/)
+  })
+
+  test('child exit fails in-flight requests', async () => {
+    const client = spawnPeer([])
+    const started = Date.now()
+    await expect(client.request('die', {}, 5000)).rejects.toThrow(/rpc stdout closed/)
+    expect(Date.now() - started).toBeLessThan(2000)
     client.kill()
   })
 })

@@ -143,6 +143,8 @@ describe('spawnCodexRpc', () => {
 })
 ```
 
+> 修订：实际测试文件另含 UTF-8 分块/kill 拒 waiter/子进程退出三个回归用例（质量评审补）。
+
 - [ ] **Step 2: 跑测试确认失败**
 
 Run: `cd /Users/ruiyaosong/MangaForge-Studio/.worktrees/codex-kernel-ledger-projection/ui/server && bun test src/kernel/codex/rpc.test.ts`
@@ -181,6 +183,7 @@ export function spawnCodexRpc(input: {
   let nextId = 1
   const pending = new Map<number, { resolve: (v: any) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   const notificationHandlers: Array<(method: string, params: any) => void> = []
+  const waiters: Array<{ handler: (method: string, params: any) => void; timer: ReturnType<typeof setTimeout>; reject: (e: Error) => void }> = []
 
   function dispatch(message: Record<string, any>) {
     sink('recv', message)
@@ -198,24 +201,53 @@ export function spawnCodexRpc(input: {
     }
   }
 
+  function failAllPending(reason: string) {
+    for (const [, entry] of pending) {
+      clearTimeout(entry.timer)
+      entry.reject(new Error(reason))
+    }
+    pending.clear()
+    for (const waiter of waiters) {
+      clearTimeout(waiter.timer)
+      const at = notificationHandlers.indexOf(waiter.handler)
+      if (at >= 0) notificationHandlers.splice(at, 1)
+      waiter.reject(new Error(reason))
+    }
+    waiters.length = 0
+  }
+
   ;(async () => {
     const decoder = new TextDecoder()
     let buffer = ''
-    for await (const chunk of proc.stdout) {
-      buffer += decoder.decode(chunk)
+    const consumeLines = () => {
       let idx
       while ((idx = buffer.indexOf('\n')) >= 0) {
         const line = buffer.slice(0, idx).trim()
         buffer = buffer.slice(idx + 1)
         if (!line) continue
+        let parsed: Record<string, any>
         try {
-          dispatch(JSON.parse(line))
+          parsed = JSON.parse(line)
         } catch {
           sink('meta', { raw: line })
+          continue
         }
+        dispatch(parsed)
       }
     }
+    try {
+      for await (const chunk of proc.stdout) {
+        buffer += decoder.decode(chunk, { stream: true })
+        consumeLines()
+      }
+      buffer += decoder.decode()
+      consumeLines()
+    } finally {
+      failAllPending('rpc stdout closed')
+    }
   })()
+
+  ;(async () => { for await (const _ of proc.stderr) { /* drain */ } })().catch(() => {})
 
   function send(message: Record<string, any>) {
     sink('send', message)
@@ -223,20 +255,12 @@ export function spawnCodexRpc(input: {
     proc.stdin.flush()
   }
 
-  function failAllPending(reason: string) {
-    for (const [, entry] of pending) {
-      clearTimeout(entry.timer)
-      entry.reject(new Error(reason))
-    }
-    pending.clear()
-  }
-
   return {
     request(method, params = {}, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS) {
       const id = nextId++
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
-          pending.delete(id)
+          if (!pending.delete(id)) return
           reject(new Error(`rpc timeout: ${method}`))
         }, timeoutMs)
         pending.set(id, { resolve, reject, timer })
@@ -251,18 +275,24 @@ export function spawnCodexRpc(input: {
     },
     waitForNotification(match, timeoutMs) {
       return new Promise((resolve, reject) => {
-        const timer = setTimeout(() => {
-          const at = notificationHandlers.indexOf(handler)
-          if (at >= 0) notificationHandlers.splice(at, 1)
-          reject(new Error('notification timeout'))
-        }, timeoutMs)
         function handler(method: string, params: any) {
           if (!match(method, params)) return
           clearTimeout(timer)
-          const at = notificationHandlers.indexOf(handler)
-          if (at >= 0) notificationHandlers.splice(at, 1)
+          removeWaiter()
           resolve({ method, params })
         }
+        const timer = setTimeout(() => {
+          removeWaiter()
+          reject(new Error('notification timeout'))
+        }, timeoutMs)
+        const waiter = { handler, timer, reject }
+        function removeWaiter() {
+          const at = notificationHandlers.indexOf(handler)
+          if (at >= 0) notificationHandlers.splice(at, 1)
+          const wi = waiters.indexOf(waiter)
+          if (wi >= 0) waiters.splice(wi, 1)
+        }
+        waiters.push(waiter)
         notificationHandlers.push(handler)
       })
     },
