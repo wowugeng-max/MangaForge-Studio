@@ -13,4 +13,5 @@ export type OhStoryCoreSuite = {
   revision: string
   installed_at: string
   skills: Record<string, OhStoryCoreSkill>
+  agents_version?: number
 }
