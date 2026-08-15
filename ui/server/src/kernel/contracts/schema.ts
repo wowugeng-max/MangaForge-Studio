@@ -12,7 +12,7 @@ export const KERNEL_GATES = [
   'require_matching_review', 'paragraph_retention_70', 'write_outside_scope',
 ] as const
 
-const CONTRACT_ID_PATTERN = /^[a-z0-9][a-z0-9.-]{2,127}$/
+export const CONTRACT_ID_PATTERN = /^[a-z0-9][a-z0-9.-]{2,127}$/
 
 const outputSchema = z.object({
   artifact_kind: z.enum(REGISTERED_ARTIFACT_KINDS as unknown as [string, ...string[]]),

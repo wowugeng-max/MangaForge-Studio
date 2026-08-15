@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { IMPLEMENTED_CAPABILITIES } from '../artifact-kinds'
 import { kernelContractsDir } from '../paths'
 import { BUILTIN_KERNEL_CONTRACTS, isBuiltinKernelContractId } from './builtin'
-import { validateKernelContract, type KernelContract } from './schema'
+import { CONTRACT_ID_PATTERN, validateKernelContract, type KernelContract } from './schema'
 
 export type KernelContractView = KernelContract & { builtin: boolean; implemented: boolean }
 
@@ -59,6 +59,7 @@ export function saveUserKernelContract(activeWorkspace: string, input: unknown):
 export function deleteUserKernelContract(activeWorkspace: string, id: string):
   | { ok: true }
   | { ok: false; status: 400 | 404; code: string } {
+  if (!CONTRACT_ID_PATTERN.test(id)) return { ok: false, status: 404, code: 'CONTRACT_NOT_FOUND' }
   if (isBuiltinKernelContractId(id)) return { ok: false, status: 400, code: 'CONTRACT_BUILTIN' }
   const path = join(kernelContractsDir(activeWorkspace), `${id}.json`)
   if (!existsSync(path)) return { ok: false, status: 404, code: 'CONTRACT_NOT_FOUND' }

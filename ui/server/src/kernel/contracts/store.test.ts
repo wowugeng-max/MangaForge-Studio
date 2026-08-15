@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BUILTIN_KERNEL_CONTRACTS } from './builtin'
@@ -74,5 +74,14 @@ describe('contract store', () => {
     seedBuiltinKernelContracts(ws)
     expect(deleteUserKernelContract(ws, 'oh-story-core.story-review.full')).toEqual({ ok: false, status: 400, code: 'CONTRACT_BUILTIN' })
     expect(deleteUserKernelContract(ws, 'nope.nope.nope')).toEqual({ ok: false, status: 404, code: 'CONTRACT_NOT_FOUND' })
+  })
+
+  test('delete rejects path-traversal ids and leaves files outside contracts dir', () => {
+    const ws = tempWs()
+    mkdirSync(join(ws, '.mangaforge'), { recursive: true })
+    const sentinel = join(ws, '.mangaforge', 'providers.json')
+    writeFileSync(sentinel, '{"ok":true}')
+    expect(deleteUserKernelContract(ws, '../../providers')).toEqual({ ok: false, status: 404, code: 'CONTRACT_NOT_FOUND' })
+    expect(existsSync(sentinel)).toBe(true)
   })
 })
