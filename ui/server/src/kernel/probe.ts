@@ -14,8 +14,23 @@ export type KernelProbeResult = {
   agents_spawn: 'pending'
 }
 
-async function defaultRunHandshake(binary: string): Promise<void> {
-  const proc = Bun.spawn([binary, 'app-server'], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
+async function readWithTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('no initialize response before timeout')), ms)
+  })
+  try {
+    return await Promise.race([promise, timeout])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+export async function defaultRunHandshake(
+  binary: string,
+  { timeoutMs = 8000, argv }: { timeoutMs?: number; argv?: string[] } = {},
+): Promise<void> {
+  const proc = Bun.spawn(argv ?? [binary, 'app-server'], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
   const request = JSON.stringify({
     id: 0,
     method: 'initialize',
@@ -24,11 +39,13 @@ async function defaultRunHandshake(binary: string): Promise<void> {
   proc.stdin.write(request)
   proc.stdin.flush()
   const reader = proc.stdout.getReader()
-  const deadline = Date.now() + 8000
+  const deadline = Date.now() + timeoutMs
   let buffer = ''
   try {
     while (Date.now() < deadline) {
-      const { value, done } = await reader.read()
+      const remaining = deadline - Date.now()
+      if (remaining <= 0) throw new Error('no initialize response before timeout')
+      const { value, done } = await readWithTimeout(reader.read(), remaining)
       if (done) break
       buffer += new TextDecoder().decode(value)
       if (buffer.split('\n').some(line => line.includes('"id":0') || line.includes('"id": 0'))) return

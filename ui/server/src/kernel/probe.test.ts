@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { kernelProbePath } from './paths'
-import { loadKernelProbe, runKernelProbe } from './probe'
+import { defaultRunHandshake, loadKernelProbe, runKernelProbe } from './probe'
 
 function seedProviders(ws: string) {
   writeFileSync(join(ws, 'providers.json'), JSON.stringify([
@@ -40,5 +40,11 @@ describe('kernel probe', () => {
     })
     expect(probe.binary).toEqual({ ok: true, version: '1.0.0' })
     expect(probe.handshake.ok).toBe(true)
+  })
+
+  test('handshake times out when the process produces no stdout', async () => {
+    const started = Date.now()
+    await expect(defaultRunHandshake('sleep', { timeoutMs: 200, argv: ['sleep', '5'] })).rejects.toThrow(/timeout/)
+    expect(Date.now() - started).toBeLessThan(2000)
   })
 })
