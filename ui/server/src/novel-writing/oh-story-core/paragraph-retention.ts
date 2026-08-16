@@ -8,8 +8,8 @@ export function splitOhStoryParagraphs(text: string): string[] {
 export function ohStoryParagraphRetention(original: string, next: string): number {
   const source = splitOhStoryParagraphs(original)
   if (source.length === 0) return 1
-  const kept = new Set(splitOhStoryParagraphs(next))
-  return source.filter(paragraph => kept.has(paragraph)).length / source.length
+  const haystack = String(next || '')
+  return source.filter(paragraph => haystack.includes(paragraph)).length / source.length
 }
 
 export function ohStoryApplyRewroteTooMuch(original: string, next: string): boolean {
