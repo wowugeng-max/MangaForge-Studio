@@ -27,6 +27,8 @@ export type RunKernelCandidateInput = {
   hardTimeoutMs?: number
   sessionArgv?: string[]
   sessionExtraEnv?: Record<string, string>
+  onSession?: (session: CodexSession) => void
+  onPhase?: (phase: 'projecting' | 'starting' | 'running' | 'harvesting') => void
 }
 
 export type RunKernelCandidateResult =
@@ -57,6 +59,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
   mkdirSync(projectDir, { recursive: true })
 
   // 1. 投影
+  input.onPhase?.('projecting')
   let vars
   try {
     ;({ vars } = await projectKernelSubject({ workspace, projectId, chapterId, contract, projectDir }))
@@ -92,6 +95,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
   const recorder = createKernelEventsRecorder(jobDir)
   const runtime = loadKernelRuntime(workspace)
   let session: CodexSession
+  input.onPhase?.('starting')
   try {
     session = await startCodexSession({
       binary: runtime.binary,
@@ -106,6 +110,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
   } catch (error: any) {
     return { ok: false, error_code: 'ENGINE_FAILED', message: String(error?.message || error), jobDir }
   }
+  input.onSession?.(session)
 
   try {
     // 6. skills/list 预检
@@ -123,6 +128,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
     const prompt = renderKernelTemplate(contract.invoke.prompt, vars)
     const text = contract.invoke.mention ? `${contract.invoke.mention}\n${prompt}` : prompt
     let turn
+    input.onPhase?.('running')
     try {
       turn = await session.runTurn({
         text,
@@ -136,6 +142,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
     writeKernelLastMessage(jobDir, turn.lastAgentMessage)
 
     // 8. 收回 + last_message 兜底
+    input.onPhase?.('harvesting')
     const harvest = harvestKernelArtifacts({ projectDir, artifactsDir, manifest, contract, vars })
     const artifacts = [...harvest.artifacts]
     let missingRequired = [...harvest.missingRequired]

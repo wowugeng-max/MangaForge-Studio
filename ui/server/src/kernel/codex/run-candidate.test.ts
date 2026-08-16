@@ -107,4 +107,24 @@ describe('runKernelCandidate', () => {
     })
     expect(noKey).toMatchObject({ ok: false, error_code: 'PROVIDER_TRANSLATE_FAILED' })
   })
+
+  test('onPhase and onSession hooks fire in order', async () => {
+    const { ws, project, ch2 } = await seedWorkspace()
+    const phases: string[] = []
+    let sessionSeen = false
+    const result = await runKernelCandidate({
+      workspace: ws, projectId: project.id, chapterId: ch2.id, contract: reviewContract, modelId: 9,
+      sessionArgv: [process.execPath, FIXTURE],
+      sessionExtraEnv: {
+        FAKE_SKILLS: JSON.stringify([{ name: 'story-review', path: '.agents/skills/story-review' }]),
+        FAKE_WRITE_FILE: '审稿/第002章.md',
+        FAKE_WRITE_CONTENT: 'Fallback: none\n报告',
+      },
+      onPhase: (phase) => phases.push(phase),
+      onSession: () => { sessionSeen = true },
+    })
+    expect(result.ok).toBe(true)
+    expect(phases).toEqual(['projecting', 'starting', 'running', 'harvesting'])
+    expect(sessionSeen).toBe(true)
+  })
 })
