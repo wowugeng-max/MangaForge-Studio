@@ -25,6 +25,9 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
   if (detail.job.status === 'committed' || detail.commits.length > 0) {
     return { ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED', message: 'job already committed' }
   }
+  if (detail.job.status === 'cancelled' || detail.job.status === 'failed') {
+    return { ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED', message: 'job is ' + detail.job.status }
+  }
   if (candidate.status !== 'succeeded') {
     return { ok: false, status: 409, code: 'CANDIDATE_NOT_SUCCEEDED', message: `candidate status is ${candidate.status}` }
   }

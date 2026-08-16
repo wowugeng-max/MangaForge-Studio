@@ -123,4 +123,34 @@ describe('kernel job orchestration', () => {
     expect(detail.job.status).toBe('cancelled')
     expect(cancelKernelJob(ws, 'nope')).toMatchObject({ ok: false, status: 404 })
   })
+
+  test('cancel before onSession still closes the session and leaves job cancelled', async () => {
+    const { ws, project, chapter } = await seed()
+    let allowSession!: () => void
+    const beforeSession = new Promise<void>(resolve => { allowSession = resolve })
+    let allowFinish!: () => void
+    const afterSession = new Promise<void>(resolve => { allowFinish = resolve })
+    let closed = 0
+    const close = () => { closed += 1 }
+    const created = await createAndRunKernelJob(ws, body(project, chapter), {
+      candidateRunner: (async (input: any) => {
+        input.onPhase?.('running')
+        await beforeSession
+        input.onSession?.({ close })
+        await afterSession
+        return { ok: false, error_code: 'CANCELLED', message: 'cancelled' }
+      }) as any,
+      skipRuntimeCheck: true,
+    })
+    if (!created.ok) throw new Error('create failed')
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(cancelKernelJob(ws, created.jobId)).toEqual({ ok: true })
+    allowSession()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(closed).toBeGreaterThanOrEqual(1)
+    allowFinish()
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('cancelled')
+  })
 })

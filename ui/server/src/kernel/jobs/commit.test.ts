@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { createNovelChapter, createNovelProject, createNovelReview, getNovelChapter, listNovelReviewsByType } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
 import { commitKernelCandidate } from './commit'
-import { getKernelJobDetail, insertKernelArtifact, insertKernelCandidate, insertKernelJob, updateKernelCandidate } from './repo'
+import { getKernelJobDetail, insertKernelArtifact, insertKernelCandidate, insertKernelJob, updateKernelCandidate, updateKernelJob } from './repo'
 
 const EIGHT = Array.from({ length: 8 }, (_, i) => `原文段${i}。`).join('\n\n')
 
@@ -81,5 +81,17 @@ describe('commitKernelCandidate', () => {
     expect(result.ok).toBe(true)
     const updated = await getNovelChapter(ws, chapter.id, project.id)
     expect(updated?.chapter_text).toBe(nextText)
+  })
+
+  test('cancelled job with succeeded candidate refuses commit', async () => {
+    const { ws, project } = await seedReviewJob()
+    updateKernelJob(ws, 'job-1', { status: 'cancelled' })
+    expect(await commitKernelCandidate(ws, 'job-1', 'cand-1')).toMatchObject({
+      ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED', message: 'job is cancelled',
+    })
+    expect(await listNovelReviewsByType(ws, project.id, 'oh_story_review')).toEqual([])
+    const detail = getKernelJobDetail(ws, 'job-1')!
+    expect(detail.job.status).toBe('cancelled')
+    expect(detail.commits.length).toBe(0)
   })
 })

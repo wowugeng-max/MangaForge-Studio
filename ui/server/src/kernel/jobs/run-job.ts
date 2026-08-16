@@ -98,72 +98,95 @@ export async function createAndRunKernelJob(
 
   const runner = opts.candidateRunner || runKernelCandidate
   const done = (async () => {
-    updateKernelJob(ws, jobId, { status: 'running' })
-    for (let index = 0; index < validated.contracts.length; index++) {
-      if (live.cancelled) break
-      const contract = validated.contracts[index]
-      const candidateId = candidateIds[index]
-      live.candidateId = candidateId
-      const candidateJobId = `${jobId}/candidates/${candidateId}`
-      live.candidateDirs.set(candidateId, kernelJobDir(ws, candidateJobId))
-      updateKernelCandidate(ws, candidateId, { status: 'running', started_at: new Date().toISOString() })
-      let result
-      try {
-        result = await runner({
-          workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
-          contract, modelId: body.model_id, jobId: candidateJobId,
-          sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
-          onPhase: (phase) => { live.phase = phase },
-          onSession: (session) => { live.closeSession = () => session.close() },
-        } as any)
-      } catch (error: any) {
-        result = { ok: false as const, error_code: 'ENGINE_FAILED', message: String(error?.message || error) }
+    try {
+      updateKernelJob(ws, jobId, { status: 'running' })
+      for (let index = 0; index < validated.contracts.length; index++) {
+        if (live.cancelled) break
+        const contract = validated.contracts[index]
+        const candidateId = candidateIds[index]
+        live.candidateId = candidateId
+        const candidateJobId = `${jobId}/candidates/${candidateId}`
+        live.candidateDirs.set(candidateId, kernelJobDir(ws, candidateJobId))
+        updateKernelCandidate(ws, candidateId, { status: 'running', started_at: new Date().toISOString() })
+        let result
+        try {
+          result = await runner({
+            workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
+            contract, modelId: body.model_id, jobId: candidateJobId,
+            sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
+            onPhase: (phase) => { live.phase = phase },
+            onSession: (session) => {
+              live.closeSession = () => session.close()
+              if (live.cancelled) {
+                try { session.close() } catch { /* already closed */ }
+              }
+            },
+          } as any)
+        } catch (error: any) {
+          result = { ok: false as const, error_code: 'ENGINE_FAILED', message: String(error?.message || error) }
+        }
+        const now = new Date().toISOString()
+        if (live.cancelled) {
+          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
+          continue
+        }
+        if (!result.ok) {
+          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
+          continue
+        }
+        const registered = persistCandidateArtifacts(ws, candidateId, result.artifacts)
+        live.phase = 'gating'
+        const gate = await runPostHarvestGates({
+          workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
+          artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
+          warnings: result.warnings,
+          readArtifactText: (artifact) => {
+            try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
+          },
+        })
+        if (live.cancelled) {
+          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
+          continue
+        }
+        updateKernelCandidate(ws, candidateId, {
+          status: gate.failedCode ? 'gated' : 'succeeded',
+          error_code: gate.failedCode || '',
+          thread_id: result.threadId, turn_id: result.turnId,
+          last_message_excerpt: result.lastMessage.slice(0, 500),
+          gate_results: JSON.stringify(gate.results),
+          metadata: JSON.stringify({ spawn_evidence: result.spawnEvidence }),
+          finished_at: new Date().toISOString(),
+        })
       }
+      // 收敛 job
+      if (live.cancelled) return
+      const detail = getKernelJobDetail(ws, jobId)!
+      const succeeded = detail.candidates.filter(c => c.status === 'succeeded')
       const now = new Date().toISOString()
-      if (live.cancelled) {
-        updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
-        continue
+      if (succeeded.length === 0) {
+        const first = detail.candidates.find(c => c.error_code)
+        updateKernelJob(ws, jobId, { status: 'failed', finished_at: now, error_code: first?.error_code || 'OUTPUT_MISSING' })
+      } else if (succeeded.length === 1 && validated.contracts[0].commit.mode === 'auto_if_single') {
+        live.phase = 'committing'
+        if (live.cancelled) return
+        const committed = await commitKernelCandidate(ws, jobId, succeeded[0].id)
+        if (live.cancelled) return
+        if (!committed.ok) updateKernelJob(ws, jobId, { status: 'awaiting_selection', error_code: committed.code })
+      } else {
+        updateKernelJob(ws, jobId, { status: 'awaiting_selection' })
       }
-      if (!result.ok) {
-        updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
-        continue
+    } catch (error: any) {
+      if (!live.cancelled) {
+        updateKernelJob(ws, jobId, {
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          error_code: 'ENGINE_FAILED',
+          error_message: String(error?.message || error),
+        })
       }
-      const registered = persistCandidateArtifacts(ws, candidateId, result.artifacts)
-      live.phase = 'gating'
-      const gate = await runPostHarvestGates({
-        workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
-        artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
-        warnings: result.warnings,
-        readArtifactText: (artifact) => {
-          try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
-        },
-      })
-      updateKernelCandidate(ws, candidateId, {
-        status: gate.failedCode ? 'gated' : 'succeeded',
-        error_code: gate.failedCode || '',
-        thread_id: result.threadId, turn_id: result.turnId,
-        last_message_excerpt: result.lastMessage.slice(0, 500),
-        gate_results: JSON.stringify(gate.results),
-        metadata: JSON.stringify({ spawn_evidence: result.spawnEvidence }),
-        finished_at: new Date().toISOString(),
-      })
+    } finally {
+      liveJobs.delete(jobId)
     }
-    // 收敛 job
-    if (live.cancelled) { liveJobs.delete(jobId); return }
-    const detail = getKernelJobDetail(ws, jobId)!
-    const succeeded = detail.candidates.filter(c => c.status === 'succeeded')
-    const now = new Date().toISOString()
-    if (succeeded.length === 0) {
-      const first = detail.candidates.find(c => c.error_code)
-      updateKernelJob(ws, jobId, { status: 'failed', finished_at: now, error_code: first?.error_code || 'OUTPUT_MISSING' })
-    } else if (succeeded.length === 1 && validated.contracts[0].commit.mode === 'auto_if_single') {
-      live.phase = 'committing'
-      const committed = await commitKernelCandidate(ws, jobId, succeeded[0].id)
-      if (!committed.ok) updateKernelJob(ws, jobId, { status: 'awaiting_selection', error_code: committed.code })
-    } else {
-      updateKernelJob(ws, jobId, { status: 'awaiting_selection' })
-    }
-    liveJobs.delete(jobId)
   })()
   return { ok: true, jobId, done }
 }
@@ -185,7 +208,9 @@ export function getKernelJobProgress(ws: string, jobId: string) {
   const detail = getKernelJobDetail(ws, jobId)
   if (!detail) return null
   const live = liveJobs.get(jobId)
-  const phase = live ? live.phase : detail.job.status
+  const terminal = detail.job.status === 'cancelled' || detail.job.status === 'failed'
+    || detail.job.status === 'committed' || detail.job.status === 'awaiting_selection'
+  const phase = terminal ? detail.job.status : (live ? live.phase : detail.job.status)
   let hint = ''
   if (live) {
     const dir = live.candidateDirs.get(live.candidateId)
