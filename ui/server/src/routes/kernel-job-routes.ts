@@ -15,6 +15,7 @@ export function registerKernelJobRoutes(app: Express, deps: KernelJobRoutesDeps)
     try {
       const result = await createJob(deps.getWorkspace(), req.body || {})
       if (!result.ok) return res.status(result.status).json({ error: result.message, code: result.code })
+      void result.done.catch(() => {})
       res.status(202).json({ ok: true, job: { id: result.jobId, status: 'queued' } })
     } catch (error: any) {
       res.status(500).json({ error: String(error?.message || error) })
@@ -48,8 +49,12 @@ export function registerKernelJobRoutes(app: Express, deps: KernelJobRoutesDeps)
   })
 
   app.post('/api/kernel/jobs/:id/commit', async (req, res) => {
-    const result = await commitKernelCandidate(deps.getWorkspace(), String(req.params?.id || ''), String(req.body?.candidate_id || ''))
-    if (!result.ok) return res.status(result.status).json({ error: result.message, code: result.code })
-    res.json({ ok: true, commits: result.commits })
+    try {
+      const result = await commitKernelCandidate(deps.getWorkspace(), String(req.params?.id || ''), String(req.body?.candidate_id || ''))
+      if (!result.ok) return res.status(result.status).json({ error: result.message, code: result.code })
+      res.json({ ok: true, commits: result.commits })
+    } catch (error: any) {
+      res.status(500).json({ error: String(error?.message || error) })
+    }
   })
 }
