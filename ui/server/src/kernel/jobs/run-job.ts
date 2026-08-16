@@ -194,13 +194,21 @@ export async function createAndRunKernelJob(
 export function cancelKernelJob(ws: string, jobId: string): { ok: true } | { ok: false; status: 404 | 409; code: string } {
   const detail = getKernelJobDetail(ws, jobId)
   if (!detail) return { ok: false, status: 404, code: 'JOB_NOT_FOUND' }
-  if (detail.job.status === 'committed') return { ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED' }
+  if (detail.job.status === 'committed' || detail.commits.length > 0) {
+    return { ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED' }
+  }
   const live = liveJobs.get(jobId)
   if (live) {
     live.cancelled = true
     try { live.closeSession?.() } catch { /* 会话可能已结束 */ }
   }
-  updateKernelJob(ws, jobId, { status: 'cancelled', finished_at: new Date().toISOString() })
+  const now = new Date().toISOString()
+  for (const candidate of detail.candidates) {
+    if (candidate.status === 'queued' || candidate.status === 'running') {
+      updateKernelCandidate(ws, candidate.id, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
+    }
+  }
+  updateKernelJob(ws, jobId, { status: 'cancelled', finished_at: now })
   return { ok: true }
 }
 

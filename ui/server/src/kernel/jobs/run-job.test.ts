@@ -117,6 +117,10 @@ describe('kernel job orchestration', () => {
     expect(progress.elapsed_ms).toBeGreaterThanOrEqual(0)
     const cancelled = cancelKernelJob(ws, created.jobId)
     expect(cancelled).toEqual({ ok: true })
+    const mid = getKernelJobDetail(ws, created.jobId)!
+    expect(mid.job.status).toBe('cancelled')
+    expect(mid.candidates[0].status).toBe('failed')
+    expect(mid.candidates[0].error_code).toBe('CANCELLED')
     release()
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
