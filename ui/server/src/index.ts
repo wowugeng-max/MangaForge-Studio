@@ -150,7 +150,6 @@ registerMcpRoutes(app, getWorkspace, mcpRuntime)
 const novelLifecycle = registerNovelRoutes(app, getWorkspace, { mcpRuntime })
 registerKernelRoutes(app, { getWorkspace })
 registerKernelJobRoutes(app, { getWorkspace })
-try { recoverOrphanKernelJobs(getWorkspace()) } catch (error) { console.warn('kernel orphan recovery failed:', error) }
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 
@@ -289,6 +288,7 @@ void startServerLifecycle({
   startNovelLifecycle: async workspace => {
     await novelLifecycle.start(workspace)
     workspaceState.bindRevisionWorkspace(workspace)
+    try { recoverOrphanKernelJobs(workspace) } catch (error) { console.warn('kernel orphan recovery failed:', error) }
   },
   shouldListen: () => !shutdownRequested,
   listen,

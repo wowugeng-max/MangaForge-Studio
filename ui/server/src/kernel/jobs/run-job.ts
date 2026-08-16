@@ -254,13 +254,15 @@ export function recoverOrphanKernelJobs(ws: string): number {
 }
 
 export function cleanupKernelJobDirs(ws: string, jobId: string): void {
-  const detail = getKernelJobDetail(ws, jobId)
-  for (const candidate of detail?.candidates || []) {
-    const dir = kernelJobDir(ws, `${jobId}/candidates/${candidate.id}`)
-    for (const sub of ['project', 'codex-home']) {
-      rmSync(joinPath(dir, sub), { recursive: true, force: true })
+  try {
+    const detail = getKernelJobDetail(ws, jobId)
+    for (const candidate of detail?.candidates || []) {
+      const dir = kernelJobDir(ws, `${jobId}/candidates/${candidate.id}`)
+      for (const sub of ['project', 'codex-home']) {
+        try { rmSync(joinPath(dir, sub), { recursive: true, force: true }) } catch { /* 清理失败不得改账本状态 */ }
+      }
     }
-  }
+  } catch { /* 清理失败不得改账本状态 */ }
 }
 
 export function getKernelJobProgress(ws: string, jobId: string) {
