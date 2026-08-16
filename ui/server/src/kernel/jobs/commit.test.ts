@@ -49,6 +49,20 @@ describe('commitKernelCandidate', () => {
     // 已 committed 的 job 依旧优先 409 JOB_ALREADY_COMMITTED，无需另测 gated 分支的 job 状态组合
   })
 
+  test('review commit with missing vault file -> 500 OUTPUT_MISSING and does not commit', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'commit-missing-'))
+    const project = await createNovelProject(ws, { title: '书' })
+    const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: EIGHT })
+    insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '' })
+    insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'succeeded' })
+    insertKernelArtifact(ws, { id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'review_report', rel_path: '审稿/第002章.md', sha256: 'h', byte_size: 10, vault_path: join(ws, 'missing-review.md') })
+    expect(await commitKernelCandidate(ws, 'job-1', 'cand-1')).toMatchObject({ ok: false, status: 500, code: 'OUTPUT_MISSING' })
+    const detail = getKernelJobDetail(ws, 'job-1')!
+    expect(detail.job.status).toBe('awaiting_selection')
+    expect(detail.commits.length).toBe(0)
+    expect(await listNovelReviewsByType(ws, project.id, 'oh_story_review')).toEqual([])
+  })
+
   test('rewrite commit updates chapter text with version source and re-runs stale gate', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'commit-rw-'))
     const project = await createNovelProject(ws, { title: '书' })

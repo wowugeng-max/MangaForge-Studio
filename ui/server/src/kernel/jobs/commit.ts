@@ -46,6 +46,10 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
     const artifact = artifacts.find((a: any) => a.artifact_kind === output.artifact_kind)
     if (!artifact) continue
     if (output.binding.startsWith('reviews.')) {
+      const reportText = readVaultText(artifact)
+      if (!reportText.trim()) {
+        return { ok: false, status: 500, code: 'OUTPUT_MISSING', message: 'review report vault is empty or unreadable' }
+      }
       const saved = await createNovelReview(ws, {
         project_id: detail.job.project_id,
         review_type: output.binding.slice('reviews.'.length),
@@ -56,7 +60,7 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
           chapter_id: chapterId,
           chapter_no: Number(chapter?.chapter_no || 0),
           chapter_text_hash: ohStoryChapterTextHash(String(chapter?.chapter_text || '')),
-          report_text: readVaultText(artifact),
+          report_text: reportText,
         }),
       })
       commits.push({ domain_table: 'reviews', domain_row_id: Number(saved.id) })
