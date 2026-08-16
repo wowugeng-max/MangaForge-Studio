@@ -3,7 +3,13 @@ import { dirname, join } from 'node:path'
 import JSZip from 'jszip'
 import { SkillPathError, validateSkillPackArchiveEntry } from '../../skills/path-safety'
 import { parseWritingSkillGitHubUrl, resolveWritingSkillHeadRevision } from '../writing-skills/install-github'
-import { hasStoryDeslopScripts, loadOhStoryCoreSuite, ohStoryCoreRoot } from './store'
+import {
+  hasOhStoryReviewerAgents,
+  hasStoryDeslopScripts,
+  loadOhStoryCoreSuite,
+  OH_STORY_REVIEWER_AGENTS,
+  ohStoryCoreRoot,
+} from './store'
 import { OH_STORY_CORE_SKILL_IDS, OH_STORY_CORE_SOURCE_URL } from './types'
 
 export const MAX_OH_STORY_CORE_ARCHIVE_BYTES = 64 * 1024 * 1024
@@ -11,6 +17,9 @@ export const MAX_OH_STORY_CORE_EXTRACTED_BYTES = 16 * 1024 * 1024
 
 const SKIPPED_SKILL_FOLDERS = new Set(['tests', 'demo'])
 const LOCKED_SKILL_IDS = new Set<string>(OH_STORY_CORE_SKILL_IDS)
+const SETUP_CODEX_AGENTS_PREFIX = 'skills/story-setup/references/codex/agents/'
+const SETUP_AGENT_REFERENCES_PREFIX = 'skills/story-setup/references/agent-references/'
+const SETUP_SKILL_MD = 'skills/story-setup/SKILL.md'
 
 export type InstallOhStoryCoreSuiteOptions = {
   fetchImpl?: typeof fetch
@@ -30,6 +39,15 @@ function archiveEntryType(entry: JSZip.JSZipObject): 'file' | 'directory' | 'sym
 }
 
 function isAllowedExtractPath(relativePath: string): boolean {
+  if (relativePath === SETUP_SKILL_MD) return true
+  if (relativePath.startsWith(SETUP_CODEX_AGENTS_PREFIX) && relativePath.endsWith('.toml')) {
+    const agentName = relativePath.slice(SETUP_CODEX_AGENTS_PREFIX.length).replace(/\.toml$/, '')
+    return (OH_STORY_REVIEWER_AGENTS as readonly string[]).includes(agentName)
+  }
+  if (relativePath.startsWith(SETUP_AGENT_REFERENCES_PREFIX) && !relativePath.endsWith('/')) {
+    const rest = relativePath.slice(SETUP_AGENT_REFERENCES_PREFIX.length)
+    return Boolean(rest) && !rest.split('/').includes('..') && !rest.includes('\\')
+  }
   const parts = relativePath.split('/').filter(Boolean)
   if (parts[0] !== 'skills' || !LOCKED_SKILL_IDS.has(parts[1] || '')) return false
   if (parts.some((part) => SKIPPED_SKILL_FOLDERS.has(part))) return false
@@ -45,6 +63,42 @@ function isAllowedExtractPath(relativePath: string): boolean {
     && parts[2] === 'scripts'
     && /\.js$/i.test(parts[3])
     && !parts[3].includes('\\')
+}
+
+function remapOhStoryCoreExtractedFiles(files: ExtractedFile[]): {
+  files: ExtractedFile[]
+  installedAgents: string[]
+  agentsVersion: number | undefined
+} {
+  const installedAgents: string[] = []
+  let agentsVersion: number | undefined
+  const remapped: ExtractedFile[] = []
+  for (const file of files) {
+    const name = file.relativePath
+    if (name === SETUP_SKILL_MD) {
+      const match = new TextDecoder().decode(file.content).match(/agents_version:\s*(\d+)/)
+      if (match) agentsVersion = Number(match[1])
+      continue
+    }
+    if (name.startsWith(SETUP_CODEX_AGENTS_PREFIX) && name.endsWith('.toml')) {
+      const agentFile = name.slice(SETUP_CODEX_AGENTS_PREFIX.length)
+      const agentName = agentFile.replace(/\.toml$/, '')
+      if ((OH_STORY_REVIEWER_AGENTS as readonly string[]).includes(agentName)) {
+        remapped.push({ relativePath: `agents/codex/${agentFile}`, content: file.content })
+        installedAgents.push(agentName)
+      }
+      continue
+    }
+    if (name.startsWith(SETUP_AGENT_REFERENCES_PREFIX) && !name.endsWith('/')) {
+      remapped.push({
+        relativePath: `agent-references/${name.slice(SETUP_AGENT_REFERENCES_PREFIX.length)}`,
+        content: file.content,
+      })
+      continue
+    }
+    remapped.push(file)
+  }
+  return { files: remapped, installedAgents, agentsVersion }
 }
 
 async function readResponseBytes(response: Response, limit: number): Promise<Uint8Array> {
@@ -168,6 +222,8 @@ async function writeSuiteAtomically(
     revision: string
     installed_at: string
     skills: readonly string[]
+    agents: readonly string[]
+    agents_version: number
   },
 ): Promise<void> {
   const dest = ohStoryCoreRoot(workspace)
@@ -209,7 +265,7 @@ export async function installOhStoryCoreSuite(
   const source = parseWritingSkillGitHubUrl(OH_STORY_CORE_SOURCE_URL)
   const revision = await resolveWritingSkillHeadRevision(source, fetchImpl)
   const existing = loadOhStoryCoreSuite(workspace)
-  if (existing?.revision === revision && hasStoryDeslopScripts(workspace)) return
+  if (existing?.revision === revision && hasStoryDeslopScripts(workspace) && hasOhStoryReviewerAgents(workspace)) return
 
   const archiveUrl = `https://codeload.github.com/${source.owner}/${source.repo}/zip/${revision}`
   let archiveResponse: Response
@@ -226,11 +282,14 @@ export async function installOhStoryCoreSuite(
     throw new Error('oh-story archive exceeds size limit')
   }
   const bytes = await readResponseBytes(archiveResponse, MAX_OH_STORY_CORE_ARCHIVE_BYTES)
-  const files = await extractOhStoryCoreArchive(bytes)
+  const extracted = await extractOhStoryCoreArchive(bytes)
+  const { files, installedAgents, agentsVersion } = remapOhStoryCoreExtractedFiles(extracted)
   await writeSuiteAtomically(workspace, files, {
     source_url: OH_STORY_CORE_SOURCE_URL,
     revision,
     installed_at: options?.now || new Date().toISOString(),
     skills: [...OH_STORY_CORE_SKILL_IDS],
+    agents: [...OH_STORY_REVIEWER_AGENTS].filter((name) => installedAgents.includes(name)),
+    agents_version: agentsVersion ?? 0,
   })
 }

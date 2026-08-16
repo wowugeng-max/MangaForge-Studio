@@ -51,6 +51,11 @@ function coreArchive(prefix: string, reviewBody = '# story-review') {
     { name: `${prefix}/skills/story-deslop/scripts/check-ai-patterns.js`, content: 'module.exports = 1' },
     { name: `${prefix}/skills/story-deslop/scripts/check-degeneration.js`, content: 'module.exports = 2' },
     { name: `${prefix}/skills/story-deslop/scripts/normalize-punctuation.js`, content: 'module.exports = 3' },
+    { name: `${prefix}/skills/story-setup/SKILL.md`, content: '# setup\n\nagents_version: 25\n' },
+    { name: `${prefix}/skills/story-setup/references/codex/agents/story-architect.toml`, content: 'name = "story-architect"\n' },
+    { name: `${prefix}/skills/story-setup/references/codex/agents/character-designer.toml`, content: 'name = "character-designer"\n' },
+    { name: `${prefix}/skills/story-setup/references/codex/agents/narrative-writer.toml`, content: 'name = "narrative-writer"\n' },
+    { name: `${prefix}/skills/story-setup/references/codex/agents/consistency-checker.toml`, content: 'name = "consistency-checker"\n' },
     { name: `${prefix}/.agents/skills`, content: '', unixPermissions: 0xa000 },
   ])
 }

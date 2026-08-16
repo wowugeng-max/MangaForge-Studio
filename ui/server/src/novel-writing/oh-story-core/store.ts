@@ -16,6 +16,16 @@ export function ohStoryCoreRoot(workspace: string) {
   return join(resolve(String(workspace || '')), '.mangaforge', 'oh-story-core')
 }
 
+export const OH_STORY_REVIEWER_AGENTS = ['story-architect', 'character-designer', 'narrative-writer', 'consistency-checker'] as const
+
+export function ohStoryCoreAgentsDir(workspace: string) {
+  return join(ohStoryCoreRoot(workspace), 'agents', 'codex')
+}
+
+export function ohStoryCoreAgentReferencesDir(workspace: string) {
+  return join(ohStoryCoreRoot(workspace), 'agent-references')
+}
+
 function regularFileSize(path: string): number | null {
   try {
     const info = lstatSync(path)
@@ -95,6 +105,11 @@ export function hasStoryDeslopScripts(workspace: string): boolean {
   return OH_STORY_DESLOP_REQUIRED_SCRIPTS.every((file) => regularFileSize(join(dir, file)) !== null)
 }
 
+export function hasOhStoryReviewerAgents(workspace: string): boolean {
+  const dir = ohStoryCoreAgentsDir(workspace)
+  return OH_STORY_REVIEWER_AGENTS.every((agent) => regularFileSize(join(dir, `${agent}.toml`)) !== null)
+}
+
 export function loadOhStoryCoreSuite(workspace: string): OhStoryCoreSuite | null {
   const root = ohStoryCoreRoot(workspace)
   if (!isRegularDirectory(root)) return null
@@ -134,5 +149,6 @@ export function loadOhStoryCoreSuite(workspace: string): OhStoryCoreSuite | null
     revision: record.revision,
     installed_at: record.installed_at,
     skills,
+    agents_version: typeof record.agents_version === 'number' ? record.agents_version : undefined,
   }
 }

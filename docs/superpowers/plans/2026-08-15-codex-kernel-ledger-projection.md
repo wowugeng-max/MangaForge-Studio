@@ -458,7 +458,7 @@ export const KERNEL_PROMPT_VARIABLES = [
   'previous_chapter_file', 'report_path', 'review_path', 'skill_name',
 ] as const
 
-const VAR_PATTERN = /\{\{\s*([a-z_]+)\s*\}\}/g
+const VAR_PATTERN = /\{\{\s*([^{}]*?)\s*\}\}/g
 
 export function findUnknownVariables(template: string): string[] {
   const unknown: string[] = []
