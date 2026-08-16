@@ -22,4 +22,41 @@ describe('extractSpawnEvidence', () => {
   test('empty events -> empty evidence', () => {
     expect(extractSpawnEvidence([])).toEqual({ subagent_threads: [], agent_hints: [] })
   })
+
+  test('collects Codex 0.147 collabAgentToolCall spawnAgent receiver threads', () => {
+    const evidence = extractSpawnEvidence([
+      {
+        direction: 'recv',
+        message: {
+          method: 'item/started',
+          params: {
+            item: {
+              type: 'collabAgentToolCall',
+              tool: 'spawnAgent',
+              senderThreadId: 'main',
+              receiverThreadIds: ['sub-3'],
+              prompt: 'OK',
+            },
+          },
+        },
+      },
+      {
+        direction: 'recv',
+        message: {
+          method: 'item/completed',
+          params: {
+            item: {
+              type: 'collabAgentToolCall',
+              tool: 'wait',
+              senderThreadId: 'main',
+              receiverThreadIds: ['sub-3'],
+            },
+          },
+        },
+      },
+    ] as any)
+    expect(evidence.subagent_threads).toEqual([
+      { thread_id: 'sub-3', parent_thread_id: 'main', agent: '' },
+    ])
+  })
 })

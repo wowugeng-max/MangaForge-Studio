@@ -11,7 +11,7 @@ function tomlString(value: string): string {
 
 export function buildCodexConfigToml(input: {
   provider: { id: string; api_format: string; default_base_url: string; custom_headers?: Record<string, string> }
-  model: { model_name: string }
+  model: { model_name: string; reasoning_effort?: string }
   agents: Array<{ name: string; configFile: string }>
   supportsChatWireApi: boolean
 }): { ok: true; toml: string } | { ok: false; error_code: 'PROVIDER_TRANSLATE_FAILED'; message: string } {
@@ -30,13 +30,16 @@ export function buildCodexConfigToml(input: {
   const lines: string[] = [
     `model = ${tomlString(model.model_name)}`,
     `model_provider = ${tomlString(provider.id)}`,
+  ]
+  if (model.reasoning_effort) lines.push(`model_reasoning_effort = ${tomlString(model.reasoning_effort)}`)
+  lines.push(
     '',
     `[model_providers.${provider.id}]`,
     `name = ${tomlString(provider.id)}`,
     `base_url = ${tomlString(provider.default_base_url)}`,
     `env_key = ${tomlString(ENV_KEY_NAME)}`,
     `wire_api = ${tomlString(wireApi)}`,
-  ]
+  )
   const headers = Object.entries(provider.custom_headers || {})
   if (headers.length) {
     lines.push('', `[model_providers.${provider.id}.http_headers]`)
@@ -67,7 +70,10 @@ export async function writeCodexHome(input: {
   if (!provider) return { ok: false, error_code: 'PROVIDER_TRANSLATE_FAILED', message: `provider ${(model as any).provider} not found` }
   const built = buildCodexConfigToml({
     provider: provider as any,
-    model: { model_name: String((model as any).model_name || '') },
+    model: {
+      model_name: String((model as any).model_name || ''),
+      reasoning_effort: String((model as any).context_ui_params?.reasoning_effort || (model as any).context_ui_params?.model_reasoning_effort || '').trim() || undefined,
+    },
     agents: input.agents,
     supportsChatWireApi: input.supportsChatWireApi,
   })

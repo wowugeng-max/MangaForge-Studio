@@ -30,6 +30,18 @@ describe('buildCodexConfigToml', () => {
     expect(result.toml).toContain('use_memories = false')
   })
 
+  test('optional reasoning_effort is a root-level model_reasoning_effort', () => {
+    const result = buildCodexConfigToml({
+      provider: { id: 'any', api_format: 'codex_responses', default_base_url: 'https://a/v1' },
+      model: { model_name: 'gpt-5.6-luna', reasoning_effort: 'xhigh' },
+      agents, supportsChatWireApi: false,
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.toml).toMatch(/model = "gpt-5.6-luna"\nmodel_provider = "any"\nmodel_reasoning_effort = "xhigh"/)
+    expect(result.toml).not.toContain('[features]')
+  })
+
   test('openai_compatible without chat support -> PROVIDER_TRANSLATE_FAILED', () => {
     const result = buildCodexConfigToml({
       provider: { id: 'gemini', api_format: 'openai_compatible', default_base_url: 'https://goai.example/v1' },

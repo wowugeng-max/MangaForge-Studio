@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { readKeys } from '../key-store'
@@ -39,7 +39,15 @@ export async function defaultRunHandshake(
   binary: string,
   { timeoutMs = 8000, argv }: { timeoutMs?: number; argv?: string[] } = {},
 ): Promise<void> {
-  const proc = Bun.spawn(argv ?? [binary, 'app-server'], { stdin: 'pipe', stdout: 'pipe', stderr: 'pipe' })
+  // Isolated CODEX_HOME: Codex 0.147 app-server can hang on initialize when it
+  // inherits the user's interactive ~/.codex (ChatGPT login / desktop lock).
+  const home = mkdtempSync(join(tmpdir(), 'kernel-probe-hs-'))
+  const proc = Bun.spawn(argv ?? [binary, 'app-server'], {
+    stdin: 'pipe',
+    stdout: 'pipe',
+    stderr: 'pipe',
+    env: { ...process.env, CODEX_HOME: home },
+  })
   const request = JSON.stringify({
     id: 0,
     method: 'initialize',
@@ -62,6 +70,7 @@ export async function defaultRunHandshake(
     throw new Error('no initialize response before timeout')
   } finally {
     proc.kill()
+    rmSync(home, { recursive: true, force: true })
   }
 }
 
@@ -167,16 +176,28 @@ async function defaultRunAgentsSpawnProbe(ws: string, runtime: KernelRuntimeInfo
     supportsChatWireApi: runtime.supports_chat_wire_api,
   })
   if (!home.ok) return { ok: false, message: home.message }
+  const effort = String((model as any).context_ui_params?.reasoning_effort || (model as any).context_ui_params?.model_reasoning_effort || '').trim()
+  appendFileSync(join(jobDir, 'codex-home', 'config.toml'), '\n[features]\nmulti_agent = true\n')
   const recorder = createKernelEventsRecorder(jobDir)
   const session = await startCodexSession({
     binary: runtime.binary, projectDir, codexHome: join(jobDir, 'codex-home'), envKey: key.key, sink: recorder.sink,
   })
   try {
-    await session.runTurn({ text: '请让 consistency-checker 子代理只回复 OK，然后立即结束本回合。', idleTimeoutMs: 60_000, hardTimeoutMs: 120_000 })
+    const xhigh = effort === 'xhigh'
+    const turn = await session.runTurn({
+      text: 'You MUST call spawn_agent with agent_type="consistency-checker". Child message: reply with only OK then stop. Do not answer yourself. If spawn_agent is unavailable, reply exactly NO_SPAWN_TOOL.',
+      effort: effort || undefined,
+      idleTimeoutMs: xhigh ? 300_000 : 60_000,
+      hardTimeoutMs: xhigh ? 720_000 : 120_000,
+    })
     const evidence = extractSpawnEvidence(readKernelEvents(jobDir))
-    return evidence.subagent_threads.length > 0
-      ? { ok: true }
-      : { ok: false, message: '未观察到 subagent thread' }
+    if (evidence.subagent_threads.length > 0) return { ok: true }
+    const last = String(turn.lastAgentMessage || '').trim().slice(0, 200)
+    const status = String(turn.completedParams?.turn?.status || '')
+    const bits = ['未观察到 subagent thread']
+    if (status && status !== 'completed') bits.push(`turn=${status}`)
+    if (last) bits.push(`模型回复：${last}`)
+    return { ok: false, message: bits.join('；') }
   } finally {
     session.close()
   }

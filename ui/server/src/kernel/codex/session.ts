@@ -15,7 +15,7 @@ export function mapContractSandbox(sandbox: string): string {
 export type CodexSession = {
   threadId: string
   listSkills(): Promise<Array<{ name: string; path: string }>>
-  runTurn(input: { text: string; skill?: { name: string; path: string }; idleTimeoutMs?: number; hardTimeoutMs?: number }): Promise<{ turnId: string; lastAgentMessage: string; completedParams: any }>
+  runTurn(input: { text: string; skill?: { name: string; path: string }; idleTimeoutMs?: number; hardTimeoutMs?: number; effort?: string }): Promise<{ turnId: string; lastAgentMessage: string; completedParams: any }>
   interrupt(turnId: string): Promise<void>
   close(): void
 }
@@ -78,7 +78,7 @@ export async function startCodexSession(input: {
         .map((row: any) => ({ name: String(row?.name || ''), path: String(row?.path || '') }))
         .filter((row: any) => row.name)
     },
-    async runTurn({ text, skill, idleTimeoutMs = 120_000, hardTimeoutMs = 1_800_000 }) {
+    async runTurn({ text, skill, idleTimeoutMs = 120_000, hardTimeoutMs = 1_800_000, effort }) {
       const inputItems: any[] = [{ type: 'text', text }]
       if (skill) inputItems.push({ type: 'skill', name: skill.name, path: skill.path })
       // 状态与 collector 必须在发 turn/start 之前就位：
@@ -98,7 +98,9 @@ export async function startCodexSession(input: {
         }
       }
       rpc.onNotification(collector)
-      const turnResult = await rpc.request('turn/start', { threadId, input: inputItems })
+      const turnParams: Record<string, unknown> = { threadId, input: inputItems }
+      if (effort) turnParams.effort = effort
+      const turnResult = await rpc.request('turn/start', turnParams)
       const turnId = String(turnResult?.turnId ?? turnResult?.turn?.id ?? '')
       const hardDeadline = Date.now() + hardTimeoutMs
       let exited = false
