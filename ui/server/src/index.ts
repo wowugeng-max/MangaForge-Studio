@@ -33,6 +33,7 @@ import { registerVideoLoopRoutes } from './routes/video-loop'
 import { registerDirectTaskRoutes } from './routes/direct-task'
 import { registerMangaCompatRoutes } from './routes/manga-compat'
 import { registerNovelRoutes } from './routes/novel'
+import { recoverOrphanKernelJobs } from './kernel/jobs/run-job'
 import { registerKernelRoutes } from './routes/kernel-routes'
 import { registerKernelJobRoutes } from './routes/kernel-job-routes'
 import { registerKnowledgeRoutes } from './routes/knowledge'
@@ -149,6 +150,7 @@ registerMcpRoutes(app, getWorkspace, mcpRuntime)
 const novelLifecycle = registerNovelRoutes(app, getWorkspace, { mcpRuntime })
 registerKernelRoutes(app, { getWorkspace })
 registerKernelJobRoutes(app, { getWorkspace })
+try { recoverOrphanKernelJobs(getWorkspace()) } catch (error) { console.warn('kernel orphan recovery failed:', error) }
 registerKnowledgeRoutes(app)
 registerFingerprintContractRoutes(app, getWorkspace)
 

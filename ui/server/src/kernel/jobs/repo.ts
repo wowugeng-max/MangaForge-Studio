@@ -101,3 +101,11 @@ export function listKernelJobs(ws: string, filter: { projectId?: number; subject
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
   return withDb(ws, db => db.query(`SELECT * FROM kernel_jobs ${clause} ORDER BY created_at DESC, id DESC LIMIT 50`).all(...values) as KernelJobRow[])
 }
+
+export function listKernelJobsByStatuses(ws: string, statuses: string[]): KernelJobRow[] {
+  if (!statuses.length) return []
+  const placeholders = statuses.map(() => '?').join(',')
+  return withDb(ws, db => db.query(
+    `SELECT * FROM kernel_jobs WHERE status IN (${placeholders}) ORDER BY created_at DESC, id DESC`,
+  ).all(...statuses) as KernelJobRow[])
+}

@@ -13,10 +13,11 @@ import { commitKernelCandidate } from './commit'
 import { runPostHarvestGates } from './gates'
 import {
   getKernelJobDetail, insertKernelCandidate, insertKernelJob, listKernelJobs,
-  updateKernelCandidate, updateKernelJob,
+  listKernelJobsByStatuses, updateKernelCandidate, updateKernelJob,
 } from './repo'
 import { persistCandidateArtifacts } from './vault'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
+import { join as joinPath } from 'node:path'
 
 export type CreateKernelJobBody = {
   project_id: number; subject_type: string; subject_id: number
@@ -194,6 +195,7 @@ export async function createAndRunKernelJob(
       } else {
         updateKernelJob(ws, jobId, { status: 'awaiting_selection' })
       }
+      cleanupKernelJobDirs(ws, jobId)
     } catch (error: any) {
       if (!live.cancelled) {
         updateKernelJob(ws, jobId, {
@@ -202,6 +204,7 @@ export async function createAndRunKernelJob(
           error_code: 'ENGINE_FAILED',
           error_message: String(error?.message || error),
         })
+        cleanupKernelJobDirs(ws, jobId)
       }
     } finally {
       liveJobs.delete(jobId)
@@ -230,7 +233,34 @@ export function cancelKernelJob(ws: string, jobId: string): { ok: true } | { ok:
     }
   }
   updateKernelJob(ws, jobId, { status: 'cancelled', finished_at: now })
+  cleanupKernelJobDirs(ws, jobId)
   return { ok: true }
+}
+
+export function recoverOrphanKernelJobs(ws: string): number {
+  const orphans = listKernelJobsByStatuses(ws, ['queued', 'running']).filter(job => !liveJobs.has(job.id))
+  const now = new Date().toISOString()
+  for (const job of orphans) {
+    updateKernelJob(ws, job.id, { status: 'failed', finished_at: now, error_code: 'ENGINE_FAILED', error_message: '进程重启导致任务中断' })
+    const detail = getKernelJobDetail(ws, job.id)
+    for (const candidate of detail?.candidates || []) {
+      if (['queued', 'running'].includes(candidate.status)) {
+        updateKernelCandidate(ws, candidate.id, { status: 'failed', error_code: 'ENGINE_FAILED', finished_at: now })
+      }
+    }
+    cleanupKernelJobDirs(ws, job.id)
+  }
+  return orphans.length
+}
+
+export function cleanupKernelJobDirs(ws: string, jobId: string): void {
+  const detail = getKernelJobDetail(ws, jobId)
+  for (const candidate of detail?.candidates || []) {
+    const dir = kernelJobDir(ws, `${jobId}/candidates/${candidate.id}`)
+    for (const sub of ['project', 'codex-home']) {
+      rmSync(joinPath(dir, sub), { recursive: true, force: true })
+    }
+  }
 }
 
 export function getKernelJobProgress(ws: string, jobId: string) {

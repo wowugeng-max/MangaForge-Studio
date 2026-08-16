@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createNovelProject } from '../../novel'
 import {
   getKernelJobDetail, insertKernelArtifact, insertKernelCandidate, insertKernelCommit,
-  insertKernelJob, listKernelJobs, updateKernelCandidate, updateKernelJob,
+  insertKernelJob, listKernelJobs, listKernelJobsByStatuses, updateKernelCandidate, updateKernelJob,
 } from './repo'
 
 async function seed() {
@@ -57,5 +57,19 @@ describe('kernel jobs repo', () => {
     expect(listKernelJobs(ws, { projectId: project.id }).length).toBe(2)
     expect(listKernelJobs(ws, { projectId: project.id, subjectId: 62 }).map(j => j.id)).toEqual(['job-1'])
     expect(listKernelJobs(ws, { projectId: 999 })).toEqual([])
+  })
+
+  test('listKernelJobsByStatuses returns all matching jobs without LIMIT 50', async () => {
+    const { ws, project } = await seed()
+    for (let i = 0; i < 51; i++) {
+      insertKernelJob(ws, {
+        id: `job-extra-${i}`, project_id: project.id, workspace_scope: 'novel', title: '',
+        status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1,
+        model_provider_id: 'any', model_id: 9, error_code: '', error_message: '',
+      })
+    }
+    expect(listKernelJobs(ws, { projectId: project.id }).length).toBe(50)
+    expect(listKernelJobsByStatuses(ws, ['running']).length).toBe(51)
+    expect(listKernelJobsByStatuses(ws, ['queued']).map(j => j.id)).toEqual(['job-1'])
   })
 })
