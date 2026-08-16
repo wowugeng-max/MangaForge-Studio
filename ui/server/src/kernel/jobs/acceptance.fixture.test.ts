@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createNovelChapter, createNovelOutline, createNovelProject, listNovelReviewsByType } from '../../novel'
+import { createNovelChapter, createNovelOutline, createNovelProject, getNovelChapter, listNovelReviewsByType } from '../../novel'
 import { OH_STORY_REVIEWER_AGENTS, ohStoryCoreAgentsDir, ohStoryCoreRoot } from '../../novel-writing/oh-story-core/store'
 import { getKernelJobDetail } from './repo'
 import { createAndRunKernelJob } from './run-job'
@@ -51,15 +51,24 @@ describe('phase-4 acceptance over fixture engine', () => {
       },
     })
     expect(created.ok).toBe(true)
-    if (!created.ok) return
+    if (!created.ok) throw new Error('create failed')
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('committed')
+    expect(detail.candidates[0].status).toBe('committed')
     expect(detail.candidates[0].pack_revision).toBe('rev-1')
+    expect(detail.commits.length).toBe(1)
     const reviews = await listNovelReviewsByType(ws, project.id, 'oh_story_review')
     const payload = JSON.parse(reviews[0].payload)
     expect(payload.kernel_job_id).toBe(created.jobId)
+    expect(payload.kernel_candidate_id).toBe(detail.candidates[0].id)
+    expect(payload.kernel_artifact_id).toBeTruthy()
+    expect(detail.artifacts.some((a: any) => a.id === payload.kernel_artifact_id)).toBe(true)
+    expect(payload.chapter_id).toBe(ch2.id)
     expect(payload.report_text).toContain('继承到下一批')
+    const spawn = JSON.parse(detail.candidates[0].metadata).spawn_evidence
+    expect(spawn.subagent_threads.length).toBe(1)
+    expect(spawn.subagent_threads[0].agent).toBe('story-architect')
     const gateResults = JSON.parse(detail.candidates[0].gate_results)
     expect(gateResults.find((g: any) => g.gate === 'reject_solo_fallback').ok).toBe(true)
   })
@@ -82,7 +91,13 @@ describe('phase-4 acceptance over fixture engine', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('SOLO_FALLBACK')
     expect(detail.candidates[0].status).toBe('gated')
+    expect(detail.candidates[0].error_code).toBe('SOLO_FALLBACK')
+    const gateResults = JSON.parse(detail.candidates[0].gate_results)
+    expect(gateResults.find((g: any) => g.gate === 'reject_solo_fallback').ok).toBe(false)
     expect((await listNovelReviewsByType(ws, project.id, 'oh_story_review')).length).toBe(0)
+    const chapter = await getNovelChapter(ws, ch2.id, project.id)
+    expect(chapter?.chapter_text).toBe('第二章。')
   })
 })
