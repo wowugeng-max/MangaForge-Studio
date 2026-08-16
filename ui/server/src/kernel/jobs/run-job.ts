@@ -106,60 +106,74 @@ export async function createAndRunKernelJob(
         const candidateJobId = `${jobId}/candidates/${candidateId}`
         live.candidateDirs.set(candidateId, kernelJobDir(ws, candidateJobId))
         updateKernelCandidate(ws, candidateId, { status: 'running', started_at: new Date().toISOString() })
-        let result
         try {
-          result = await runner({
-            workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
-            contract, modelId: body.model_id, jobId: candidateJobId,
-            sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
-            onPhase: (phase: string) => { live.phases.set(candidateId, phase) },
-            onSession: (session: { close: () => void }) => {
-              live.closeSessions.set(candidateId, () => session.close())
-              if (live.cancelled) {
-                try { session.close() } catch { /* already closed */ }
-              }
+          let result
+          try {
+            result = await runner({
+              workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
+              contract, modelId: body.model_id, jobId: candidateJobId,
+              sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
+              onPhase: (phase: string) => { live.phases.set(candidateId, phase) },
+              onSession: (session: { close: () => void }) => {
+                live.closeSessions.set(candidateId, () => session.close())
+                if (live.cancelled) {
+                  try { session.close() } catch { /* already closed */ }
+                }
+              },
+            } as any)
+          } catch (error: any) {
+            result = { ok: false as const, error_code: 'ENGINE_FAILED', message: String(error?.message || error) }
+          }
+          live.closeSessions.delete(candidateId)
+          const now = new Date().toISOString()
+          if (live.cancelled) {
+            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
+            return
+          }
+          if (!result.ok) {
+            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
+            return
+          }
+          const registered = persistCandidateArtifacts(ws, candidateId, result.artifacts)
+          live.phases.set(candidateId, 'gating')
+          if (live.cancelled) {
+            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
+            return
+          }
+          const gate = await runPostHarvestGates({
+            workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
+            artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
+            warnings: result.warnings,
+            readArtifactText: (artifact) => {
+              try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
             },
-          } as any)
+          })
+          if (live.cancelled) {
+            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
+            return
+          }
+          updateKernelCandidate(ws, candidateId, {
+            status: gate.failedCode ? 'gated' : 'succeeded',
+            error_code: gate.failedCode || '',
+            thread_id: result.threadId, turn_id: result.turnId,
+            last_message_excerpt: String(result.lastMessage || '').slice(0, 500),
+            gate_results: JSON.stringify(gate.results),
+            metadata: JSON.stringify({ spawn_evidence: result.spawnEvidence }),
+            finished_at: new Date().toISOString(),
+          })
         } catch (error: any) {
-          result = { ok: false as const, error_code: 'ENGINE_FAILED', message: String(error?.message || error) }
+          live.closeSessions.delete(candidateId)
+          const now = new Date().toISOString()
+          if (live.cancelled) {
+            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
+            return
+          }
+          updateKernelCandidate(ws, candidateId, {
+            status: 'failed',
+            error_code: 'ENGINE_FAILED',
+            finished_at: now,
+          })
         }
-        live.closeSessions.delete(candidateId)
-        const now = new Date().toISOString()
-        if (live.cancelled) {
-          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: now })
-          return
-        }
-        if (!result.ok) {
-          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
-          return
-        }
-        const registered = persistCandidateArtifacts(ws, candidateId, result.artifacts)
-        live.phases.set(candidateId, 'gating')
-        if (live.cancelled) {
-          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
-          return
-        }
-        const gate = await runPostHarvestGates({
-          workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
-          artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
-          warnings: result.warnings,
-          readArtifactText: (artifact) => {
-            try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
-          },
-        })
-        if (live.cancelled) {
-          updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
-          return
-        }
-        updateKernelCandidate(ws, candidateId, {
-          status: gate.failedCode ? 'gated' : 'succeeded',
-          error_code: gate.failedCode || '',
-          thread_id: result.threadId, turn_id: result.turnId,
-          last_message_excerpt: String(result.lastMessage || '').slice(0, 500),
-          gate_results: JSON.stringify(gate.results),
-          metadata: JSON.stringify({ spawn_evidence: result.spawnEvidence }),
-          finished_at: new Date().toISOString(),
-        })
       }
       await Promise.allSettled(validated.contracts.map((_, index) => runOne(index)))
       // 收敛 job

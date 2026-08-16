@@ -105,4 +105,26 @@ describe('compete execution', () => {
     expect(detail.job.status).toBe('cancelled')
     expect(detail.candidates.every(c => c.status === 'failed' && c.error_code === 'CANCELLED')).toBe(true)
   })
+
+  test('persist throw marks that candidate failed ENGINE_FAILED and does not leave it running', async () => {
+    const { ws, project, chapter } = await seed()
+    const runner = async (input: any) => {
+      const dir = mkdtempSync(join(tmpdir(), 'compete-art-'))
+      return {
+        ok: true, jobDir: dir, projectDir: dir, threadId: 't', turnId: 'u',
+        artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report', sha256: 'h', byte_size: 8, copied_path: join(dir, 'missing.md') }],
+        warnings: [], lastMessage: '', spawnEvidence: { subagent_threads: [], agent_hints: [] }, eventsPath: join(dir, 'e.jsonl'),
+      }
+    }
+    const created = await createAndRunKernelJob(ws, {
+      project_id: project.id, subject_type: 'chapter', subject_id: chapter.id,
+      contract_ids: ['oh-story-core.story-review.full', 'oh-story-core.story-review.fast'], model_id: 9,
+    }, { candidateRunner: runner as any, skipRuntimeCheck: true })
+    if (!created.ok) throw new Error('create failed')
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.candidates.every(c => c.status === 'failed' && c.error_code === 'ENGINE_FAILED')).toBe(true)
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ENGINE_FAILED')
+  })
 })
