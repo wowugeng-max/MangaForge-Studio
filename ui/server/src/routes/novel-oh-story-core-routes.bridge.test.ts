@@ -39,7 +39,7 @@ describe('oh-story bridge to kernel jobs', () => {
     writeFileSync(vaultFile, 'Fallback: none\n报告正文')
     const createKernelJob = async (workspace: string, body: any) => {
       expect(body.contract_ids).toEqual(['oh-story-core.story-review.full'])
-      insertKernelJob(workspace, { id: 'job-1', project_id: body.project_id, workspace_scope: 'novel', title: '', status: 'committed', capability: 'review', subject_type: 'chapter', subject_id: body.subject_id, model_provider_id: '', model_id: body.model_id, error_code: '', error_message: '' })
+      insertKernelJob(workspace, { id: 'job-1', project_id: body.project_id, workspace_scope: 'novel', title: '', status: 'committed', capability: 'review', subject_type: 'chapter', subject_id: body.subject_id, model_provider_id: '', model_id: body.model_id, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
       insertKernelCandidate(workspace, { id: 'cand-1', job_id: 'job-1', contract_id: body.contract_ids[0], pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'committed' })
       insertKernelArtifact(workspace, { id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'review_report', rel_path: '审稿/第002章.md', sha256: 'h', byte_size: 8, vault_path: vaultFile })
       insertKernelCommit(workspace, { id: 'commit-1', job_id: 'job-1', candidate_id: 'cand-1', domain_table: 'reviews', domain_row_id: 42 })
@@ -59,7 +59,7 @@ describe('oh-story bridge to kernel jobs', () => {
     const project = await createNovelProject(ws, { title: '书' })
     const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: '正文。' })
     const createKernelJob = async (workspace: string, body: any) => {
-      insertKernelJob(workspace, { id: 'job-2', project_id: body.project_id, workspace_scope: 'novel', title: '', status: 'failed', capability: 'rewrite', subject_type: 'chapter', subject_id: body.subject_id, model_provider_id: '', model_id: body.model_id, error_code: 'OH_STORY_APPLY_STALE_REVIEW', error_message: '' })
+      insertKernelJob(workspace, { id: 'job-2', project_id: body.project_id, workspace_scope: 'novel', title: '', status: 'failed', capability: 'rewrite', subject_type: 'chapter', subject_id: body.subject_id, model_provider_id: '', model_id: body.model_id, error_code: 'OH_STORY_APPLY_STALE_REVIEW', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
       return { ok: true, jobId: 'job-2', done: Promise.resolve() }
     }
     const handlers = harness(ws, createKernelJob)

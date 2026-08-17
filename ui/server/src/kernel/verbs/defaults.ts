@@ -13,6 +13,19 @@ function defaultsPath(ws: string): string {
   return join(kernelRoot(ws), 'verb-defaults.json')
 }
 
+function isNonEmptyStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string' && item.length > 0)
+}
+
+function sanitizeVerbDefaults(parsed: unknown): Record<string, string[]> | null {
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const out: Record<string, string[]> = {}
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (isNonEmptyStringArray(value)) out[key] = [...value]
+  }
+  return out
+}
+
 export function loadVerbDefaults(ws: string): Record<string, string[]> {
   const path = defaultsPath(ws)
   if (!existsSync(path)) {
@@ -21,8 +34,7 @@ export function loadVerbDefaults(ws: string): Record<string, string[]> {
     return { ...BUILTIN_DEFAULTS }
   }
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8'))
-    return typeof parsed === 'object' && parsed ? parsed : { ...BUILTIN_DEFAULTS }
+    return sanitizeVerbDefaults(JSON.parse(readFileSync(path, 'utf8'))) ?? { ...BUILTIN_DEFAULTS }
   } catch {
     return { ...BUILTIN_DEFAULTS }
   }
