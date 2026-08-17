@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelChapter, createNovelProject, listNovelReviewsByType } from '../../novel'
-import { getKernelJobDetail } from './repo'
+import { getKernelJobDetail, insertKernelJob } from './repo'
 import { cancelKernelJob, candidateStatusAfterGate, createAndRunKernelJob, getKernelJobProgress, validateCreateKernelJob } from './run-job'
 
 function seedStores(ws: string) {
@@ -47,7 +47,7 @@ describe('kernel job orchestration', () => {
     const unknown = await validateCreateKernelJob(ws, { ...body(project, chapter), contract_ids: ['a.b.c'] }, { skipRuntimeCheck: true })
     expect(unknown).toMatchObject({ ok: false, status: 400, code: 'CONTRACT_INVALID' })
     const mixed = await validateCreateKernelJob(ws, { ...body(project, chapter), contract_ids: ['oh-story-core.story-review.full', 'oh-story-core.story-deslop.file'] }, { skipRuntimeCheck: true })
-    expect(mixed).toMatchObject({ ok: false, code: 'CAPABILITY_MIXED' })
+    expect(mixed).toMatchObject({ ok: false, code: 'VERB_MIXED' })
     const notImplemented = await validateCreateKernelJob(ws, { ...body(project, chapter), contract_ids: ['oh-story-core.story-long-write.outline'] }, { skipRuntimeCheck: true })
     expect(notImplemented).toMatchObject({ ok: false, code: 'CONTRACT_NOT_IMPLEMENTED' })
     writeFileSync(join(ws, 'models.json'), JSON.stringify([{ id: 9, api_key_id: 5, provider: 'gemini', model_name: 'g' }]))
@@ -156,6 +156,50 @@ describe('kernel job orchestration', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('cancelled')
+  })
+})
+
+describe('verb-based job creation', () => {
+  test('verb only resolves default instances', async () => {
+    const { ws, project, chapter } = await seed()
+    const result = await validateCreateKernelJob(ws, {
+      project_id: project.id, subject_type: 'chapter', subject_id: chapter.id, verb: 'review_chapter', model_id: 9,
+    }, { skipRuntimeCheck: true })
+    expect(result.ok).toBe(true)
+    if (result.ok) expect(result.contracts.map(c => c.id)).toEqual(['oh-story-core.story-review.full'])
+  })
+  test('unknown verb / missing default / mixed verbs / subject mismatch', async () => {
+    const { ws, project, chapter } = await seed()
+    const base = { project_id: project.id, subject_type: 'chapter', subject_id: chapter.id, model_id: 9 }
+    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'nope' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_UNKNOWN')
+    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'rewrite_chapter' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_DEFAULT_MISSING')
+    expect(((await validateCreateKernelJob(ws, {
+      ...base, verb: 'review_chapter',
+      contract_ids: ['oh-story-core.story-review.full', 'oh-story-core.story-deslop.file'],
+    }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_MIXED')
+    expect(((await validateCreateKernelJob(ws, {
+      ...base, subject_type: 'project', subject_id: project.id, verb: 'review_chapter',
+    }, { skipRuntimeCheck: true })) as any).code).toBe('SUBJECT_TYPE_MISMATCH')
+  })
+  test.todo('open_book requires brief and project_id==subject_id; dedupes per verb', async () => {
+    const { ws, project } = await seed()
+    const body: any = { project_id: project.id, subject_type: 'project', subject_id: project.id, verb: 'open_book', model_id: 9 }
+    expect(((await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })) as any).code).toBe('BRIEF_REQUIRED')
+    body.user_brief = { idea: '一句话创意' }
+    const ok = await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })
+    expect(ok.ok).toBe(true)
+    insertKernelJob(ws, { id: 'job-run', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running',
+      capability: 'outline', subject_type: 'project', subject_id: project.id, model_provider_id: '', model_id: null,
+      error_code: '', error_message: '', verb: 'open_book', verb_params: '{}', subject_key: '', brief_json: '' })
+    expect(((await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })) as any).code).toBe('PROJECT_JOB_RUNNING')
+  })
+  test('legacy body without verb still works via inference', async () => {
+    const { ws, project, chapter } = await seed()
+    const result = await validateCreateKernelJob(ws, {
+      project_id: project.id, subject_type: 'chapter', subject_id: chapter.id, model_id: 9,
+      contract_ids: ['oh-story-core.story-review.full'],
+    }, { skipRuntimeCheck: true })
+    expect(result.ok).toBe(true)
   })
 })
 

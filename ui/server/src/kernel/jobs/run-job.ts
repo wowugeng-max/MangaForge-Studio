@@ -9,10 +9,13 @@ import { loadKernelContracts, type KernelContractView } from '../contracts/store
 import { kernelJobDir } from '../paths'
 import { buildCodexConfigToml } from '../providers/translate'
 import { checkKernelBinary, loadKernelRuntime } from '../runtime'
+import { loadVerbDefaults } from '../verbs/defaults'
+import { resolveContractVerb } from '../verbs/infer'
+import { getVerbTemplate } from '../verbs/registry'
 import { commitKernelCandidate } from './commit'
 import { runPostHarvestGates } from './gates'
 import {
-  getKernelJobDetail, insertKernelCandidate, insertKernelJob, listKernelJobs,
+  getKernelJobDetail, hasActiveKernelJob, insertKernelCandidate, insertKernelJob, listKernelJobs,
   listKernelJobsByStatuses, updateKernelCandidate, updateKernelJob,
 } from './repo'
 import { persistCandidateArtifacts } from './vault'
@@ -21,9 +24,12 @@ import { join as joinPath } from 'node:path'
 
 export type CreateKernelJobBody = {
   project_id: number; subject_type: string; subject_id: number
-  contract_ids: string[]; model_id: number; title?: string
+  contract_ids?: string[]; model_id: number; title?: string
+  verb?: string
+  verb_params?: Record<string, unknown>
+  user_brief?: { title?: string; genre?: string; idea?: string; length_target?: string; constraints?: string }
 }
-export type CreateKernelJobError = { ok: false; status: 400 | 503; code: string; message: string }
+export type CreateKernelJobError = { ok: false; status: 400 | 409 | 503; code: string; message: string }
 
 export function candidateStatusAfterGate(failedCode: string, failedStatus?: 'gated' | 'failed' | null): 'succeeded' | 'gated' | 'failed' {
   if (!failedCode) return 'succeeded'
@@ -40,24 +46,58 @@ const liveJobs = new Map<string, LiveJobState>()
 
 export async function validateCreateKernelJob(
   ws: string, body: CreateKernelJobBody, opts: { skipRuntimeCheck?: boolean } = {},
-): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string } | CreateKernelJobError> {
+): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project' } | CreateKernelJobError> {
   if (!opts.skipRuntimeCheck) {
     const binary = await checkKernelBinary(loadKernelRuntime(ws))
     if (!binary.ok) return { ok: false, status: 503, code: 'KERNEL_RUNTIME_UNAVAILABLE', message: binary.message }
   }
-  if (body.subject_type !== 'chapter') return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: '第一期只支持 subject_type=chapter' }
-  const ids = Array.isArray(body.contract_ids) ? body.contract_ids : []
-  if (ids.length < 1 || ids.length > 8) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: 'contract_ids 需要 1..8 个' }
   const { contracts } = loadKernelContracts(ws)
+  const ids = Array.isArray(body.contract_ids) && body.contract_ids.length
+    ? body.contract_ids
+    : null
+  let verb = String(body.verb || '')
+  if (!ids && !verb) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: '需要 verb 或 contract_ids' }
+  if (verb && !getVerbTemplate(verb)) return { ok: false, status: 400, code: 'VERB_UNKNOWN', message: `未知动词 ${verb}` }
+  const resolvedIds = ids || (loadVerbDefaults(ws)[verb] || [])
+  if (!resolvedIds.length) return { ok: false, status: 400, code: 'VERB_DEFAULT_MISSING', message: `动词 ${verb} 无默认实例` }
+  if (resolvedIds.length > 8) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: 'contract_ids 需要 1..8 个' }
   const selected: KernelContractView[] = []
-  for (const id of ids) {
+  for (const id of resolvedIds) {
     const contract = contracts.find(c => c.id === id)
     if (!contract) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: `contract not found: ${id}` }
     if (!contract.implemented) return { ok: false, status: 400, code: 'CONTRACT_NOT_IMPLEMENTED', message: id }
     selected.push(contract)
   }
-  if (new Set(selected.map(c => c.capability)).size > 1) {
-    return { ok: false, status: 400, code: 'CAPABILITY_MIXED', message: '并跑的合同必须同 capability' }
+  const verbs = new Set(selected.map(c => resolveContractVerb(c) || ''))
+  if (verbs.has('')) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: '合同缺 verb 且无法推断' }
+  if (verbs.size > 1) return { ok: false, status: 400, code: 'VERB_MIXED', message: '并跑的合同必须同动词' }
+  verb = [...verbs][0]
+  const template = getVerbTemplate(verb)!
+  if (body.subject_type !== template.subject_type) {
+    return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: `动词 ${verb} 主体是 ${template.subject_type}` }
+  }
+  if (template.subject_type === 'pack') {
+    return { ok: false, status: 400, code: 'CONTRACT_NOT_IMPLEMENTED', message: 'adapt_pack 第一期不执行' }
+  }
+  if (template.subject_type === 'project' && Number(body.subject_id) !== Number(body.project_id)) {
+    return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: 'project 主体要求 subject_id == project_id' }
+  }
+  let briefJson = ''
+  if (verb === 'open_book') {
+    const brief = body.user_brief
+    if (!brief || !String(brief.idea || '').trim()) {
+      return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '深度孵化需要创作创意' }
+    }
+    briefJson = JSON.stringify(brief)
+    if (Buffer.byteLength(briefJson, 'utf8') > 32 * 1024) {
+      return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '创意超过 32KiB 上限' }
+    }
+  }
+  const dedupe = template.subject_type === 'project'
+    ? { projectId: body.project_id, verb }
+    : { projectId: body.project_id, verb, subjectId: body.subject_id }
+  if (hasActiveKernelJob(ws, dedupe)) {
+    return { ok: false, status: 409, code: 'PROJECT_JOB_RUNNING', message: '同项目同动词任务未结束' }
   }
   const model = (await readModels(ws)).find(m => Number(m.id) === Number(body.model_id))
   if (!model) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: `model ${body.model_id} not found` }
@@ -68,7 +108,7 @@ export async function validateCreateKernelJob(
     supportsChatWireApi: loadKernelRuntime(ws).supports_chat_wire_api,
   })
   if (!translated.ok) return { ok: false, status: 400, code: 'PROVIDER_TRANSLATE_FAILED', message: translated.message }
-  return { ok: true, contracts: selected, providerId: String(provider.id) }
+  return { ok: true, contracts: selected, providerId: String(provider.id), verb, briefJson, subjectType: template.subject_type }
 }
 
 export async function createAndRunKernelJob(
@@ -85,10 +125,10 @@ export async function createAndRunKernelJob(
   const packRevision = loadOhStoryCoreSuite(ws)?.revision || ''
   insertKernelJob(ws, {
     id: jobId, project_id: body.project_id, workspace_scope: 'novel', title: body.title || '',
-    status: 'queued', capability: validated.contracts[0].capability, subject_type: 'chapter',
+    status: 'queued', capability: validated.contracts[0].capability, subject_type: validated.subjectType,
     subject_id: body.subject_id, model_provider_id: validated.providerId, model_id: body.model_id,
     error_code: '', error_message: '',
-    verb: '', verb_params: '{}', subject_key: '', brief_json: '',
+    verb: validated.verb, verb_params: JSON.stringify(body.verb_params || {}), subject_key: '', brief_json: validated.briefJson,
   })
   const candidateIds: string[] = []
   for (const contract of validated.contracts) {
@@ -119,6 +159,7 @@ export async function createAndRunKernelJob(
             result = await runner({
               workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
               contract, modelId: body.model_id, jobId: candidateJobId,
+              subjectType: validated.subjectType, briefJson: validated.briefJson,
               sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
               onPhase: (phase: string) => { live.phases.set(candidateId, phase) },
               onSession: (session: { close: () => void }) => {
