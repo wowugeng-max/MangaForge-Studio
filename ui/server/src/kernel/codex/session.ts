@@ -1,5 +1,6 @@
 // ui/server/src/kernel/codex/session.ts
 import { spawnCodexRpc, type CodexRpcClient, type RpcEventSink } from './rpc'
+import { DEFAULT_HARD_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from './turn-timeouts'
 
 const SANDBOX_MAP: Record<string, string> = {
   workspaceWrite: 'workspace-write',
@@ -78,7 +79,7 @@ export async function startCodexSession(input: {
         .map((row: any) => ({ name: String(row?.name || ''), path: String(row?.path || '') }))
         .filter((row: any) => row.name)
     },
-    async runTurn({ text, skill, idleTimeoutMs = 120_000, hardTimeoutMs = 1_800_000, effort }) {
+    async runTurn({ text, skill, idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS, hardTimeoutMs = DEFAULT_HARD_TIMEOUT_MS, effort }) {
       const inputItems: any[] = [{ type: 'text', text }]
       if (skill) inputItems.push({ type: 'skill', name: skill.name, path: skill.path })
       // 状态与 collector 必须在发 turn/start 之前就位：

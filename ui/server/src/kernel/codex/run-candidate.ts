@@ -14,6 +14,7 @@ import { loadKernelRuntime } from '../runtime'
 import { renderKernelTemplate } from '../template'
 import { createKernelEventsRecorder, readKernelEvents, writeKernelLastMessage } from './events'
 import { startCodexSession, type CodexSession } from './session'
+import { turnTimeoutsForContract } from './turn-timeouts'
 import { extractSpawnEvidence, type SpawnEvidence } from './spawn-evidence'
 
 export type RunKernelCandidateInput = {
@@ -135,11 +136,12 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
     let turn
     input.onPhase?.('running')
     try {
+      const timeouts = turnTimeoutsForContract(contract)
       turn = await session.runTurn({
         text,
         skill: skillItem,
-        idleTimeoutMs: input.idleTimeoutMs,
-        hardTimeoutMs: input.hardTimeoutMs,
+        idleTimeoutMs: input.idleTimeoutMs ?? timeouts.idleTimeoutMs,
+        hardTimeoutMs: input.hardTimeoutMs ?? timeouts.hardTimeoutMs,
       })
     } catch (error: any) {
       return { ok: false, error_code: String(error?.code || 'ENGINE_FAILED'), message: String(error?.message || error), jobDir }
