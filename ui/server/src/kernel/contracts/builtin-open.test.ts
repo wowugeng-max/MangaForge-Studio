@@ -16,6 +16,7 @@ describe('builtin open_book instance', () => {
     expect(open.invoke.prompt).toContain('帮我开书')
     expect(open.invoke.prompt).toContain('不要写正文')
     expect(open.invoke.prompt).toContain('{{user_brief_file}}')
+    expect(open.invoke.prompt).toContain('不要再建书名')
   })
   test('outputs order puts narrow character glob before wide world glob', () => {
     const kinds = open.outputs.map(o => o.artifact_kind)

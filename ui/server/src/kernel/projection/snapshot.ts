@@ -39,6 +39,20 @@ function globToRegExp(glob: string): RegExp {
   return new RegExp(`^${escaped}$`)
 }
 
+function detectNestedWriteRoot(relPaths: string[], writeScope: string[]): string | null {
+  if (relPaths.some(rel => writeScope.some(scope => rel.startsWith(scope)))) return null
+  const roots = new Set<string>()
+  for (const rel of relPaths) {
+    const slash = rel.indexOf('/')
+    if (slash <= 0) continue
+    const rest = rel.slice(slash + 1)
+    if (writeScope.some(scope => rest.startsWith(scope))) roots.add(rel.slice(0, slash))
+  }
+  if (roots.size !== 1) return null
+  const root = [...roots][0]
+  return root.startsWith('.') ? null : root
+}
+
 export type HarvestedArtifact = {
   rel_path: string
   artifact_kind: string
@@ -70,26 +84,30 @@ export function harvestKernelArtifacts(input: {
 
   const relPaths: string[] = []
   walkFiles(projectDir, projectDir, relPaths)
+  const bookRoot = detectNestedWriteRoot(relPaths, writeScope)
 
   const artifacts: HarvestedArtifact[] = []
   const warnings: Array<{ warning: 'write_outside_scope'; rel_path: string }> = []
 
   for (const relPath of relPaths.sort()) {
+    const logicalPath = bookRoot && relPath.startsWith(`${bookRoot}/`)
+      ? relPath.slice(bookRoot.length + 1)
+      : relPath
     const bytes = readFileSync(join(projectDir, relPath))
     const digest = sha256(bytes)
     if (manifest[relPath] === digest) continue
-    if (ignore.some(prefix => relPath.startsWith(prefix))) continue
-    if (!writeScope.some(prefix => relPath.startsWith(prefix))) {
+    if (ignore.some(prefix => logicalPath.startsWith(prefix) || relPath.startsWith(prefix))) continue
+    if (!writeScope.some(prefix => logicalPath.startsWith(prefix))) {
       warnings.push({ warning: 'write_outside_scope', rel_path: relPath })
       continue
     }
-    const output = outputs.find(candidate => candidate.pattern.test(relPath))
+    const output = outputs.find(candidate => candidate.pattern.test(logicalPath))
     if (output) output.hits += 1
-    const copied = join(artifactsDir, relPath)
+    const copied = join(artifactsDir, logicalPath)
     mkdirSync(dirname(copied), { recursive: true })
     copyFileSync(join(projectDir, relPath), copied)
     artifacts.push({
-      rel_path: relPath,
+      rel_path: logicalPath,
       artifact_kind: output ? output.artifact_kind : 'attachment',
       sha256: digest,
       byte_size: bytes.byteLength,

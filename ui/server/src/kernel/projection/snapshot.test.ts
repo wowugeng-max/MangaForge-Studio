@@ -82,4 +82,32 @@ describe('snapshot & harvest', () => {
     expect(byPath['设定/角色/楚弦.md']).toBe('character_sheet')
     expect(byPath['设定/世界观.md']).toBe('world_doc')
   })
+
+  test('harvest strips a single book-title prefix so 设定/ and 大纲/ globs still hit', () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'harvest-proj-'))
+    mkdirSync(join(projectDir, '借命城账/设定/角色'), { recursive: true })
+    mkdirSync(join(projectDir, '借命城账/大纲'), { recursive: true })
+    writeFileSync(join(projectDir, '借命城账/设定/角色/楚弦.md'), '# 楚弦')
+    writeFileSync(join(projectDir, '借命城账/设定/世界观.md'), '# 世界观')
+    writeFileSync(join(projectDir, '借命城账/大纲/大纲.md'), '# 总纲')
+    writeFileSync(join(projectDir, '借命城账/大纲/细纲_第001章.md'), '# 第001章')
+    const artifactsDir = mkdtempSync(join(tmpdir(), 'harvest-art-'))
+    const contract: any = {
+      ...reviewContract,
+      write_scope: ['设定/', '大纲/'],
+      outputs: [
+        { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: true },
+        { artifact_kind: 'outline_doc', glob: '大纲/**/*.md', binding: 'outlines.upsert', required: true },
+        { artifact_kind: 'world_doc', glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: true },
+      ],
+    }
+    const result = harvestKernelArtifacts({ projectDir, artifactsDir, manifest: {}, contract, vars })
+    const byPath = Object.fromEntries(result.artifacts.map(a => [a.rel_path, a.artifact_kind]))
+    expect(byPath['设定/角色/楚弦.md']).toBe('character_sheet')
+    expect(byPath['设定/世界观.md']).toBe('world_doc')
+    expect(byPath['大纲/大纲.md']).toBe('outline_doc')
+    expect(byPath['大纲/细纲_第001章.md']).toBe('outline_doc')
+    expect(result.missingRequired).toEqual([])
+    expect(result.warnings).toEqual([])
+  })
 })
