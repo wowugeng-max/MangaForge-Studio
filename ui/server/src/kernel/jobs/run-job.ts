@@ -155,7 +155,7 @@ export async function createAndRunKernelJob(
             return
           }
           updateKernelCandidate(ws, candidateId, {
-            status: gate.failedCode ? 'gated' : 'succeeded',
+            status: gate.failedCode ? (gate.failedStatus === 'failed' ? 'failed' : 'gated') : 'succeeded',
             error_code: gate.failedCode || '',
             thread_id: result.threadId, turn_id: result.turnId,
             last_message_excerpt: String(result.lastMessage || '').slice(0, 500),

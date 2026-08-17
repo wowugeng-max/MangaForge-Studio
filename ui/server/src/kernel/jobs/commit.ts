@@ -2,6 +2,9 @@ import { readFileSync } from 'node:fs'
 import { createNovelReview, getNovelChapter, updateNovelChapter } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
 import { loadKernelContracts } from '../contracts/store'
+import {
+  ensureEmptyChapterRow, firstHeadingOf, upsertCharacterSheet, upsertOutlineDoc, upsertWorldDoc,
+} from './domain-upsert'
 import { runPostHarvestGates } from './gates'
 import { getKernelJobDetail, insertKernelCommit, updateKernelCandidate, updateKernelJob } from './repo'
 
@@ -43,37 +46,53 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
   })
   if (gate.failedCode) return { ok: false, status: 409, code: gate.failedCode, message: 'commit-time gate failed' }
 
-  const chapter = await getNovelChapter(ws, chapterId, detail.job.project_id)
+  const isProjectSubject = detail.job.subject_type === 'project'
+  const chapter = isProjectSubject ? null : await getNovelChapter(ws, chapterId, detail.job.project_id)
   const commits: Array<{ domain_table: string; domain_row_id: number }> = []
+  const outlineRows: Array<{ outlineId: number; chapterNo: number | null; title: string }> = []
   for (const output of contract.outputs) {
-    const artifact = artifacts.find((a: any) => a.artifact_kind === output.artifact_kind)
-    if (!artifact) continue
-    if (output.binding.startsWith('reviews.')) {
-      const reportText = readVaultText(artifact)
-      if (!reportText.trim()) {
-        return { ok: false, status: 500, code: 'OUTPUT_MISSING', message: 'review report vault is empty or unreadable' }
+    const matched = artifacts.filter((a: any) => a.artifact_kind === output.artifact_kind)
+    for (const artifact of matched) {
+      const text = readVaultText(artifact)
+      if (output.binding.startsWith('reviews.')) {
+        if (!text.trim()) return { ok: false, status: 500, code: 'OUTPUT_MISSING', message: 'review report vault is empty or unreadable' }
+        const saved = await createNovelReview(ws, {
+          project_id: detail.job.project_id,
+          review_type: output.binding.slice('reviews.'.length),
+          payload: JSON.stringify({
+            kernel_job_id: jobId,
+            kernel_candidate_id: candidateId,
+            kernel_artifact_id: artifact.id,
+            chapter_id: chapterId,
+            chapter_no: Number(chapter?.chapter_no || 0),
+            chapter_text_hash: ohStoryChapterTextHash(String(chapter?.chapter_text || '')),
+            report_text: text,
+          }),
+        })
+        commits.push({ domain_table: 'reviews', domain_row_id: Number(saved.id) })
+      } else if (output.binding === 'chapters.rewrite') {
+        await updateNovelChapter(ws, chapterId, { chapter_text: text }, {
+          versionSource: String(contract.commit.source || 'kernel_rewrite') as any,
+        })
+        commits.push({ domain_table: 'chapters', domain_row_id: chapterId })
+      } else if (output.binding === 'worldbuilding.upsert') {
+        const id = upsertWorldDoc(ws, detail.job.project_id, String(artifact.rel_path), text)
+        commits.push({ domain_table: 'worldbuilding', domain_row_id: id })
+      } else if (output.binding === 'characters.upsert') {
+        const id = upsertCharacterSheet(ws, detail.job.project_id, String(artifact.rel_path), text)
+        commits.push({ domain_table: 'characters', domain_row_id: id })
+      } else if (output.binding === 'outlines.upsert') {
+        const row = upsertOutlineDoc(ws, detail.job.project_id, String(artifact.rel_path), text)
+        outlineRows.push({ ...row, title: firstHeadingOf(text) })
+        commits.push({ domain_table: 'outlines', domain_row_id: row.outlineId })
       }
-      const saved = await createNovelReview(ws, {
-        project_id: detail.job.project_id,
-        review_type: output.binding.slice('reviews.'.length),
-        payload: JSON.stringify({
-          kernel_job_id: jobId,
-          kernel_candidate_id: candidateId,
-          kernel_artifact_id: artifact.id,
-          chapter_id: chapterId,
-          chapter_no: Number(chapter?.chapter_no || 0),
-          chapter_text_hash: ohStoryChapterTextHash(String(chapter?.chapter_text || '')),
-          report_text: reportText,
-        }),
-      })
-      commits.push({ domain_table: 'reviews', domain_row_id: Number(saved.id) })
-    } else if (output.binding === 'chapters.rewrite') {
-      await updateNovelChapter(ws, chapterId, { chapter_text: readVaultText(artifact) }, {
-        versionSource: String(contract.commit.source || 'kernel_rewrite') as any,
-      })
-      commits.push({ domain_table: 'chapters', domain_row_id: chapterId })
+      // kernel_only：产物已在账本与 vault，跳过
     }
-    // kernel_only：产物已在账本与 vault，跳过
+  }
+  for (const row of outlineRows) {
+    if (row.chapterNo === null) continue
+    const chapterId2 = ensureEmptyChapterRow(ws, detail.job.project_id, row.chapterNo, row.title, row.outlineId)
+    if (chapterId2) commits.push({ domain_table: 'chapters', domain_row_id: chapterId2 })
   }
   const now = new Date().toISOString()
   for (const commit of commits) {
