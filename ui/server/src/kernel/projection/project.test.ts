@@ -125,6 +125,23 @@ describe('projectKernelSubject', () => {
     expect(readFileSync(join(dir, '设定/世界观.md'), 'utf8')).toContain('旧行摘要')
   })
 
+  test('world mount does not write empty 世界观.md when other 设定 files were replayed', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    await createNovelWorldbuilding(ws, {
+      project_id: project.id,
+      world_summary: '摘要',
+      raw_payload: { kernel_rel_path: '设定/世界观/力量体系.md', kernel_full_text: '# 力量体系\n内核全文' },
+    })
+    const contract: any = { ...reviewContract, projection: { mounts: ['world', 'skill_tree'] } }
+    const dir = mkdtempSync(join(tmpdir(), 'proj-world-no-placeholder-'))
+    await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir, subjectType: 'project',
+    })
+    expect(readFileSync(join(dir, '设定/世界观/力量体系.md'), 'utf8')).toContain('内核全文')
+    expect(existsSync(join(dir, '设定/世界观.md'))).toBe(false)
+  })
+
   test('world fallback does not overwrite a replayed 设定/世界观.md', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
     const project = await createNovelProject(ws, { title: '试作' })

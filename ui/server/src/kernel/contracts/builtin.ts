@@ -6,6 +6,7 @@ const reviewFull: KernelContract = {
   pack_id: 'oh-story-core',
   skill_name: 'story-review',
   variant: 'full',
+  verb: 'review_chapter',
   capability: 'review',
   label: 'oh-story 完整审稿',
   invoke: {
@@ -39,6 +40,7 @@ const deslopFile: KernelContract = {
   pack_id: 'oh-story-core',
   skill_name: 'story-deslop',
   variant: 'file',
+  verb: 'deslop_chapter',
   capability: 'rewrite',
   label: 'oh-story 去AI（文件模式）',
   invoke: {
@@ -68,6 +70,7 @@ const applySurgical: KernelContract = {
   pack_id: 'oh-story-core',
   skill_name: 'story-apply',
   variant: 'surgical',
+  verb: 'apply_review',
   capability: 'rewrite',
   label: '按建议改稿（外科手术式）',
   invoke: {

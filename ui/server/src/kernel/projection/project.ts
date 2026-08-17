@@ -135,17 +135,21 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
   if (mounts.includes('world')) {
     const worlds = await listNovelWorldbuilding(workspace, projectId)
     const legacy: string[] = []
+    let replayedWorldFile = false
     for (const w of worlds) {
       const payload = parseWorldPayload((w as any).raw_payload)
       const relPath = String(payload.kernel_rel_path || '')
       if (relPath && !relPath.includes('..')) {
         writeProjected(projectDir, relPath, String(payload.kernel_full_text || w.world_summary || ''), files)
+        replayedWorldFile = true
       } else if (String(w.world_summary || '').trim()) {
         legacy.push(String(w.world_summary))
       }
     }
     if (!files.some(f => f === '设定/世界观.md')) {
-      writeProjected(projectDir, '设定/世界观.md', legacy.join('\n\n') || '（空）', files)
+      const legacyBody = legacy.join('\n\n').trim()
+      if (legacyBody) writeProjected(projectDir, '设定/世界观.md', legacyBody, files)
+      else if (!replayedWorldFile) writeProjected(projectDir, '设定/世界观.md', '（空）', files)
     }
   }
   let userBriefFile = ''

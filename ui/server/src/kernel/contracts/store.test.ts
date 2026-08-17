@@ -14,6 +14,10 @@ describe('builtin contracts', () => {
       const result = validateKernelContract(contract)
       expect(result.ok).toBe(true)
     }
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')?.verb).toBe('review_chapter')
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-deslop.file')?.verb).toBe('deslop_chapter')
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')?.verb).toBe('apply_review')
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')?.verb).toBeUndefined()
     expect(BUILTIN_KERNEL_CONTRACTS.map(c => c.id)).toEqual([
       'oh-story-core.story-review.full',
       'oh-story-core.story-deslop.file',

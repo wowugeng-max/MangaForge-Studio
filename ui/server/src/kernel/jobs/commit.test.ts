@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, spyOn, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,6 +9,7 @@ import { saveUserKernelContract } from '../contracts/store'
 import { openKernelDb } from '../db'
 import { validateInstanceAgainstTemplate } from '../verbs/validate-instance'
 import { commitKernelCandidate } from './commit'
+import * as domainUpsert from './domain-upsert'
 import { getKernelJobDetail, insertKernelArtifact, insertKernelCandidate, insertKernelJob, updateKernelCandidate, updateKernelJob } from './repo'
 
 const EIGHT = Array.from({ length: 8 }, (_, i) => `原文段${i}。`).join('\n\n')
@@ -171,5 +172,76 @@ describe('commitKernelCandidate', () => {
     expect(outlines.n).toBe(3)
     expect(chapters.map(c => c.chapter_no)).toEqual([1, 2])
     expect(chapters.every(c => c.chapter_text === '')).toBe(true)
+  })
+
+  test('open_book commit rolls back domain rows if a later upsert throws', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'commit-open-tx-'))
+    const project = await createNovelProject(ws, { title: '开书回滚' })
+    const openContract = {
+      schema_version: 1 as const,
+      id: 'user-pack.story-open.tx',
+      pack_id: 'user-pack',
+      skill_name: 'story-open',
+      variant: 'tx',
+      verb: 'open_book',
+      capability: 'outline' as const,
+      label: '用户开书合同',
+      invoke: { mention: '$story-open', prompt: '帮我开书。创意见 {{user_brief_file}}。不要写正文。' },
+      projection: { mounts: ['user_brief', 'skill_tree'] as const },
+      outputs: [
+        { artifact_kind: 'character_sheet' as const, glob: '设定/角色/*.md', binding: 'characters.upsert', required: true },
+        { artifact_kind: 'outline_doc' as const, glob: '大纲/**/*.md', binding: 'outlines.upsert', required: true },
+        { artifact_kind: 'world_doc' as const, glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: true },
+      ],
+      write_scope: ['设定/', '大纲/'],
+      gates: ['reject_chapter_text_artifact', 'require_outline_mix'] as const,
+      commit: { mode: 'manual' as const, domain_writes: ['worldbuilding', 'characters', 'outlines'] },
+      sandbox: 'workspace-write' as const,
+      approval: 'never' as const,
+    }
+    expect(validateKernelContract(openContract).ok).toBe(true)
+    expect(validateInstanceAgainstTemplate(openContract as any)).toEqual({ ok: true })
+    expect(saveUserKernelContract(ws, openContract).ok).toBe(true)
+    insertKernelJob(ws, {
+      id: 'job-tx', project_id: project.id, workspace_scope: 'novel', title: '',
+      status: 'awaiting_selection', capability: 'outline', subject_type: 'project',
+      subject_id: project.id, model_provider_id: 'any', model_id: 9,
+      error_code: '', error_message: '', verb: 'open_book', verb_params: '{}', subject_key: '', brief_json: '',
+    })
+    insertKernelCandidate(ws, {
+      id: 'cand-tx', job_id: 'job-tx', contract_id: openContract.id,
+      pack_id: openContract.pack_id, pack_revision: 'r', skill_name: openContract.skill_name, status: 'succeeded',
+    })
+    const vaultDir = mkdtempSync(join(tmpdir(), 'commit-open-tx-vault-'))
+    const artifacts = [
+      { id: 'art-w', kind: 'world_doc', rel: '设定/世界观.md', text: '# 世界观\n铁律' },
+      { id: 'art-c', kind: 'character_sheet', rel: '设定/角色/楚弦.md', text: '# 楚弦\n档案' },
+      { id: 'art-o0', kind: 'outline_doc', rel: '大纲/大纲.md', text: '# 总纲\n全书骨架' },
+      { id: 'art-o1', kind: 'outline_doc', rel: '大纲/细纲_第001章.md', text: '# 第001章 初入怪谈\n细纲一' },
+    ]
+    for (const artifact of artifacts) {
+      const vaultFile = join(vaultDir, artifact.rel.replaceAll('/', '__'))
+      writeFileSync(vaultFile, artifact.text)
+      insertKernelArtifact(ws, {
+        id: artifact.id, candidate_id: 'cand-tx', artifact_kind: artifact.kind,
+        rel_path: artifact.rel, sha256: 'h', byte_size: artifact.text.length, vault_path: vaultFile,
+      })
+    }
+    const spy = spyOn(domainUpsert, 'upsertOutlineDoc').mockImplementationOnce(() => {
+      throw new Error('boom')
+    })
+    await expect(commitKernelCandidate(ws, 'job-tx', 'cand-tx')).rejects.toThrow('boom')
+    spy.mockRestore()
+    const db = openKernelDb(ws)
+    const worlds = db.query(`SELECT COUNT(*) AS n FROM worldbuilding WHERE project_id = ?`).get(project.id) as any
+    const chars = db.query(`SELECT COUNT(*) AS n FROM characters WHERE project_id = ?`).get(project.id) as any
+    const outlines = db.query(`SELECT COUNT(*) AS n FROM outlines WHERE project_id = ?`).get(project.id) as any
+    db.close()
+    expect(worlds.n).toBe(0)
+    expect(chars.n).toBe(0)
+    expect(outlines.n).toBe(0)
+    const detail = getKernelJobDetail(ws, 'job-tx')!
+    expect(detail.job.status).toBe('awaiting_selection')
+    expect(detail.commits.length).toBe(0)
   })
 })

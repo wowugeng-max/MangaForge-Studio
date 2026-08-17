@@ -64,6 +64,21 @@ describe('domain upserts', () => {
     expect(rows[0].name).toBe('楚弦')
     expect(rows[0].backstory).toContain('档案2')
   })
+  test('character upsert matches kernel_rel_path first and does not merge different files by name', () => {
+    const ws = makeWs()
+    const id1 = upsertCharacterSheet(ws, 1, '设定/角色/楚弦.md', '# 楚弦\n档案1')
+    const id2 = upsertCharacterSheet(ws, 1, '设定/配角/楚弦.md', '# 楚弦\n配角档')
+    const id1b = upsertCharacterSheet(ws, 1, '设定/角色/楚弦.md', '# 楚弦\n档案2')
+    expect(id1b).toBe(id1)
+    expect(id2).not.toBe(id1)
+    const db = openKernelDb(ws)
+    const rows = db.query(`SELECT name, backstory, raw_payload FROM characters WHERE project_id = 1 ORDER BY id`).all() as any[]
+    db.close()
+    expect(rows.length).toBe(2)
+    expect(JSON.parse(rows[0].raw_payload).kernel_rel_path).toBe('设定/角色/楚弦.md')
+    expect(rows[0].backstory).toContain('档案2')
+    expect(JSON.parse(rows[1].raw_payload).kernel_rel_path).toBe('设定/配角/楚弦.md')
+  })
   test('outline upsert: chapter-parsable becomes outline_type=chapter; empty chapter row created once', () => {
     const ws = makeWs()
     const { outlineId, chapterNo } = upsertOutlineDoc(ws, 1, '大纲/细纲_第001章.md', '# 第001章 初入怪谈\n细纲内容')

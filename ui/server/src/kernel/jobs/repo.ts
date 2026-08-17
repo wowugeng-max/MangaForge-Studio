@@ -16,12 +16,13 @@ export type KernelCandidateRow = {
   last_message_excerpt: string; gate_results: string; metadata: string
 }
 
-function withDb<T>(ws: string, fn: (db: ReturnType<typeof openKernelDb>) => T): T {
-  const db = openKernelDb(ws)
+function withDb<T>(ws: string, fn: (db: ReturnType<typeof openKernelDb>) => T, db?: ReturnType<typeof openKernelDb>): T {
+  if (db) return fn(db)
+  const opened = openKernelDb(ws)
   try {
-    return fn(db)
+    return fn(opened)
   } finally {
-    db.close()
+    opened.close()
   }
 }
 
@@ -49,7 +50,7 @@ export function insertKernelCandidate(ws: string, row: Pick<KernelCandidateRow, 
 const JOB_PATCH_COLUMNS = ['status', 'finished_at', 'error_code', 'error_message'] as const
 const CANDIDATE_PATCH_COLUMNS = ['status', 'thread_id', 'turn_id', 'started_at', 'finished_at', 'error_code', 'last_message_excerpt', 'gate_results', 'metadata'] as const
 
-export function updateKernelJob(ws: string, id: string, patch: Partial<Pick<KernelJobRow, typeof JOB_PATCH_COLUMNS[number]>>): void {
+export function updateKernelJob(ws: string, id: string, patch: Partial<Pick<KernelJobRow, typeof JOB_PATCH_COLUMNS[number]>>, db?: ReturnType<typeof openKernelDb>): void {
   const sets: string[] = ["updated_at = datetime('now')"]
   const values: any[] = []
   for (const column of JOB_PATCH_COLUMNS) {
@@ -57,10 +58,10 @@ export function updateKernelJob(ws: string, id: string, patch: Partial<Pick<Kern
     sets.push(`${column} = ?`)
     values.push(patch[column])
   }
-  withDb(ws, db => db.query(`UPDATE kernel_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id))
+  withDb(ws, conn => conn.query(`UPDATE kernel_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id), db)
 }
 
-export function updateKernelCandidate(ws: string, id: string, patch: Partial<Pick<KernelCandidateRow, typeof CANDIDATE_PATCH_COLUMNS[number]>>): void {
+export function updateKernelCandidate(ws: string, id: string, patch: Partial<Pick<KernelCandidateRow, typeof CANDIDATE_PATCH_COLUMNS[number]>>, db?: ReturnType<typeof openKernelDb>): void {
   const sets: string[] = []
   const values: any[] = []
   for (const column of CANDIDATE_PATCH_COLUMNS) {
@@ -69,7 +70,7 @@ export function updateKernelCandidate(ws: string, id: string, patch: Partial<Pic
     values.push(patch[column])
   }
   if (!sets.length) return
-  withDb(ws, db => db.query(`UPDATE kernel_candidates SET ${sets.join(', ')} WHERE id = ?`).run(...values, id))
+  withDb(ws, conn => conn.query(`UPDATE kernel_candidates SET ${sets.join(', ')} WHERE id = ?`).run(...values, id), db)
 }
 
 export function insertKernelArtifact(ws: string, row: { id: string; candidate_id: string; artifact_kind: string; rel_path: string; sha256: string; byte_size: number; vault_path: string; metadata?: string }): void {
@@ -83,10 +84,10 @@ export function getKernelArtifact(ws: string, id: string) {
   return withDb(ws, db => db.query('SELECT * FROM kernel_artifacts WHERE id = ?').get(id) as any | null)
 }
 
-export function insertKernelCommit(ws: string, row: { id: string; job_id: string; candidate_id: string; domain_table: string; domain_row_id: number }): void {
-  withDb(ws, db => db.query(`
+export function insertKernelCommit(ws: string, row: { id: string; job_id: string; candidate_id: string; domain_table: string; domain_row_id: number }, db?: ReturnType<typeof openKernelDb>): void {
+  withDb(ws, conn => conn.query(`
     INSERT INTO kernel_commits (id, job_id, candidate_id, domain_table, domain_row_id) VALUES (?,?,?,?,?)
-  `).run(row.id, row.job_id, row.candidate_id, row.domain_table, row.domain_row_id))
+  `).run(row.id, row.job_id, row.candidate_id, row.domain_table, row.domain_row_id), db)
 }
 
 export function getKernelJobDetail(ws: string, jobId: string) {
