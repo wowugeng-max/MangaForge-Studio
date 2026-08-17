@@ -52,15 +52,24 @@ async function fetchJson(path: string, init?: RequestInit) {
   // 202 Accepted is success (response.ok is true for 2xx, including 202)
   if (response.status === 202) return body?.ok === false ? body : { ok: true, ...body }
   if (!response.ok) {
-    return { ok: false, code: body?.code || 'UNKNOWN', error: body?.error, ...body }
+    return { ok: false, code: body?.code || 'UNKNOWN', error: body?.error, ...body, status: response.status }
   }
   return body
 }
 
 function isClearly302(model: any) {
-  if (Number(model?.id) === 302) return true
-  const blob = `${model?.provider || ''} ${model?.display_name || ''} ${model?.model_name || ''} ${model?.name || ''}`.toLowerCase()
-  return /\b302\b/.test(blob) || blob.includes('302.ai')
+  const provider = String(model?.provider || '').toLowerCase()
+  const display = String(model?.display_name || '').toLowerCase()
+  const modelName = String(model?.model_name || '').toLowerCase()
+  const name = String(model?.name || '').toLowerCase()
+  const blob = `${provider} ${display} ${modelName} ${name}`
+  return blob.includes('302.ai') || provider === '302' || /\b302\b/.test(blob)
+}
+
+function cancelAlreadySettled(result: any) {
+  const status = Number(result?.status || 0)
+  const code = String(result?.code || '')
+  return status === 409 && /CANCELLED/.test(code) && !/COMMITTED/.test(code)
 }
 
 function isTextCapableModel(model: any) {
@@ -163,6 +172,8 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
   const pollGenerationRef = useRef(0)
   const incubationRef = useRef(incubation)
   incubationRef.current = incubation
+  const openRef = useRef(open)
+  openRef.current = open
 
   useEffect(() => {
     if (!open) return
@@ -251,6 +262,10 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
 
   useEffect(() => () => clearPoll(), [clearPoll])
 
+  useEffect(() => {
+    if (!open) clearPoll()
+  }, [open, clearPoll])
+
   const selectedKernelModel = models.find(model => Number(model.id) === Number(seedModelId))
   const selectedKernelModelId = selectedKernelModel && !isClearly302(selectedKernelModel)
     ? Number(selectedKernelModel.id)
@@ -271,7 +286,15 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
       try {
         const detail = await fetchJson(`${KERNEL_JOBS_PATH}/${jobId}`)
         if (generation !== pollGenerationRef.current) return
-        const status = String(detail?.job?.status || '')
+        if (detail?.ok === false || !detail?.job) {
+          setIncubation({
+            phase: 'failed',
+            jobId,
+            errorCode: String(detail?.code || detail?.error || 'JOB_FETCH_FAILED'),
+          })
+          return
+        }
+        const status = String(detail.job.status || '')
         const hint = String(detail?.progress?.hint || detail?.progress?.phase || status || '')
         const elapsedMs = Number(detail?.progress?.elapsed_ms || 0)
         if (status === 'awaiting_selection') {
@@ -293,6 +316,9 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
             jobId,
             errorCode: String(detail?.job?.error_code || detail?.progress?.error_code || status.toUpperCase()),
           })
+          return
+        }
+        if (status === 'committed') {
           return
         }
         setIncubation({ phase: 'running', jobId, hint, elapsedMs })
@@ -324,11 +350,18 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
       message.warning('请先选择 Codex 内核文本模型')
       return
     }
-    const currentPhase = incubationRef.current.phase
-    if (currentPhase === 'creating' || currentPhase === 'running') return
+    if (
+      incubationRef.current.phase === 'creating'
+      || incubationRef.current.phase === 'running'
+      || incubationRef.current.phase === 'awaiting_selection'
+      || adopting
+      || discarding
+    ) return
 
     clearPoll()
+    const generation = pollGenerationRef.current
     setArtifactPreview(null)
+    incubationRef.current = { phase: 'creating' }
     setIncubation({ phase: 'creating' })
     incubationProjectIdRef.current = null
     try {
@@ -336,6 +369,7 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
         method: 'POST',
         body: JSON.stringify(projectFormPayload()),
       })
+      if (generation !== pollGenerationRef.current || !openRef.current) return
       if (created?.ok === false) {
         setIncubation({ phase: 'failed', jobId: null, errorCode: created.code || 'UNKNOWN' })
         return
@@ -365,15 +399,17 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
           },
         }),
       })
+      if (generation !== pollGenerationRef.current || !openRef.current) return
       if (!job.ok) {
         setIncubation({ phase: 'failed', jobId: null, errorCode: job.code || 'UNKNOWN' })
         return
       }
       pollIncubation(job.job.id)
     } catch {
+      if (generation !== pollGenerationRef.current || !openRef.current) return
       setIncubation({ phase: 'failed', jobId: null, errorCode: 'UNKNOWN' })
     }
-  }, [clearPoll, data.genre, data.length_target, data.synopsis, data.title, pollIncubation, seedIdea, selectedKernelModelId])
+  }, [adopting, clearPoll, data.genre, data.length_target, data.synopsis, data.title, discarding, pollIncubation, seedIdea, selectedKernelModelId])
 
   const loadArtifactPreview = useCallback(async (artifact: IncubationArtifact) => {
     if (artifactPreview?.id === artifact.id) {
@@ -440,7 +476,11 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     clearPoll()
     try {
       if (jobId) {
-        await fetchJson(`${KERNEL_JOBS_PATH}/${jobId}/cancel`, { method: 'POST' })
+        const cancelled = await fetchJson(`${KERNEL_JOBS_PATH}/${jobId}/cancel`, { method: 'POST' })
+        if (cancelled?.ok === false && !cancelAlreadySettled(cancelled)) {
+          message.error(cancelled.error || cancelled.code || '取消失败')
+          return
+        }
       }
       setIncubation({ phase: 'idle' })
       setArtifactPreview(null)
@@ -520,6 +560,7 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     setSelectedGenreFramework('')
     setDeepDraftReview(buildDeepDraftReviewForUi({}))
     setLaunchpad(createEmptyLaunchpadFields())
+    incubationRef.current = { phase: 'idle' }
     setIncubation({ phase: 'idle' })
     setArtifactPreview(null)
     setPreviewLoadingId(null)
@@ -594,7 +635,11 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     }
   }
 
-  const incubationBusy = incubation.phase === 'creating' || incubation.phase === 'running'
+  const incubationBusy =
+    incubation.phase === 'creating'
+    || incubation.phase === 'running'
+    || incubation.phase === 'awaiting_selection'
+    || adopting
 
   return {
     form,

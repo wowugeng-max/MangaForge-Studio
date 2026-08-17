@@ -623,7 +623,7 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 icon={current === 4 || isDeepDraft ? <RocketOutlined /> : <ArrowRightOutlined />}
                 onClick={handleNext}
                 loading={creating || incubationBusy}
-                disabled={primaryDisabled}
+                disabled={primaryDisabled || incubationBusy}
               >
                 {isDeepDraft ? '开始深度孵化' : current === 4 ? '创建项目' : '下一步'}
               </Button>
