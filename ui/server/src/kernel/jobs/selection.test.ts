@@ -19,7 +19,7 @@ function seedStores(ws: string) {
 
 function fakeReviewContract() {
   const base = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
-  return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', label: '假审稿' }
+  return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', verb: 'review_chapter', label: '假审稿' }
 }
 
 function stubRunner() {

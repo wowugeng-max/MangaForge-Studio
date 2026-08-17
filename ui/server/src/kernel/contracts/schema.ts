@@ -10,6 +10,7 @@ export const KERNEL_MOUNTS = [
 export const KERNEL_GATES = [
   'reject_solo_fallback', 'require_reviewer_agents', 'require_chapter_file',
   'require_matching_review', 'paragraph_retention_70', 'write_outside_scope',
+  'reject_chapter_text_artifact', 'reject_outline_artifact', 'require_outline_mix',
 ] as const
 
 export const CONTRACT_ID_PATTERN = /^[a-z0-9][a-z0-9.-]{2,127}$/
@@ -30,6 +31,7 @@ const contractSchema = z.object({
   variant: z.string().min(1),
   capability: z.enum(ALL_CAPABILITIES as unknown as [string, ...string[]]),
   label: z.string().min(1),
+  verb: z.string().min(1).optional(),
   invoke: z.object({ mention: z.string(), prompt: z.string().min(1) }),
   projection: z.object({ mounts: z.array(z.enum(KERNEL_MOUNTS)).min(1) }),
   outputs: z.array(outputSchema).min(1),

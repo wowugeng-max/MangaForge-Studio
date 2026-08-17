@@ -1,17 +1,21 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { IMPLEMENTED_CAPABILITIES } from '../artifact-kinds'
 import { kernelContractsDir } from '../paths'
+import { IMPLEMENTED_VERBS } from '../verbs/registry'
+import { resolveContractVerb } from '../verbs/infer'
+import { validateInstanceAgainstTemplate } from '../verbs/validate-instance'
 import { BUILTIN_KERNEL_CONTRACTS, isBuiltinKernelContractId } from './builtin'
 import { CONTRACT_ID_PATTERN, validateKernelContract, type KernelContract } from './schema'
 
 export type KernelContractView = KernelContract & { builtin: boolean; implemented: boolean }
 
 function toView(contract: KernelContract): KernelContractView {
+  const verb = resolveContractVerb(contract)
   return {
     ...contract,
+    verb: verb || undefined,
     builtin: isBuiltinKernelContractId(contract.id),
-    implemented: (IMPLEMENTED_CAPABILITIES as readonly string[]).includes(contract.capability),
+    implemented: !!verb && (IMPLEMENTED_VERBS as readonly string[]).includes(verb),
   }
 }
 
@@ -35,8 +39,11 @@ export function loadKernelContracts(activeWorkspace: string): {
     try {
       const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8'))
       const result = validateKernelContract(parsed)
-      if (result.ok) contracts.push(toView(result.contract))
-      else errors.push({ file, errors: result.errors })
+      if (result.ok) {
+        const templateCheck = validateInstanceAgainstTemplate(result.contract)
+        if (templateCheck.ok) contracts.push(toView(result.contract))
+        else errors.push({ file, errors: templateCheck.errors.map(e => `TEMPLATE_UNSATISFIED: ${e}`) })
+      } else errors.push({ file, errors: result.errors })
     } catch (error: any) {
       errors.push({ file, errors: [String(error?.message || error)] })
     }
@@ -46,10 +53,12 @@ export function loadKernelContracts(activeWorkspace: string): {
 
 export function saveUserKernelContract(activeWorkspace: string, input: unknown):
   | { ok: true; contract: KernelContractView }
-  | { ok: false; status: 400; code: 'CONTRACT_INVALID' | 'CONTRACT_BUILTIN'; errors?: string[] } {
+  | { ok: false; status: 400; code: 'CONTRACT_INVALID' | 'CONTRACT_BUILTIN' | 'TEMPLATE_UNSATISFIED'; errors?: string[] } {
   const result = validateKernelContract(input)
   if (!result.ok) return { ok: false, status: 400, code: 'CONTRACT_INVALID', errors: result.errors }
   if (isBuiltinKernelContractId(result.contract.id)) return { ok: false, status: 400, code: 'CONTRACT_BUILTIN' }
+  const templateCheck = validateInstanceAgainstTemplate(result.contract)
+  if (!templateCheck.ok) return { ok: false, status: 400, code: 'TEMPLATE_UNSATISFIED', errors: templateCheck.errors }
   const dir = kernelContractsDir(activeWorkspace)
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, `${result.contract.id}.json`), JSON.stringify(result.contract, null, 2))

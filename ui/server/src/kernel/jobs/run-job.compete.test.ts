@@ -18,7 +18,7 @@ function seedStores(ws: string) {
 // 与内置 review.full 同 capability 的用户合同（“假审稿”，spec 验收 6 的载体）
 function fakeReviewContract() {
   const base = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
-  return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', label: '假审稿（并跑对照）' }
+  return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', verb: 'review_chapter', label: '假审稿（并跑对照）' }
 }
 
 function stubRunner(reportByContract: Record<string, string>) {

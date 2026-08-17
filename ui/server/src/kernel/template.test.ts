@@ -31,7 +31,7 @@ describe('kernel template', () => {
   })
 
   test('artifact kind registry is locked', () => {
-    expect([...REGISTERED_ARTIFACT_KINDS]).toEqual(['review_report', 'tracking_doc', 'chapter_text', 'outline_doc', 'attachment'])
+    expect([...REGISTERED_ARTIFACT_KINDS]).toEqual(['review_report', 'tracking_doc', 'chapter_text', 'outline_doc', 'attachment', 'world_doc', 'character_sheet', 'contract_json'])
     expect([...IMPLEMENTED_CAPABILITIES]).toEqual(['review', 'rewrite', 'tracking', 'attachment'])
   })
 })

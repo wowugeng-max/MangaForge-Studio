@@ -63,4 +63,12 @@ describe('kernel contract schema', () => {
     expect(validateKernelContract({ ...baseContract(), gates: ['not_a_gate'] }).ok).toBe(false)
     expect(validateKernelContract({ ...baseContract(), projection: { mounts: ['not_a_mount'] } }).ok).toBe(false)
   })
+
+  test('optional verb and new artifact kinds / gates are accepted', () => {
+    const withVerb = { ...baseContract(), verb: 'review_chapter', gates: ['reject_chapter_text_artifact', 'require_outline_mix'] }
+    expect(validateKernelContract(withVerb).ok).toBe(true)
+    const withKind = baseContract()
+    withKind.outputs[0].artifact_kind = 'world_doc'
+    expect(validateKernelContract(withKind).ok).toBe(true)
+  })
 })

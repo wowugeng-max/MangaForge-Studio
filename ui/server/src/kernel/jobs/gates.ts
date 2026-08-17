@@ -48,6 +48,12 @@ export async function runPostHarvestGates(input: {
       continue
     }
     if (gate === 'require_chapter_file') {
+      if (!chapterArtifact && input.contract.capability === 'review') {
+        const chapter = await getNovelChapter(input.workspace, input.chapterId, input.projectId)
+        if (String(chapter?.chapter_text || '').replace(/\s/g, '')) results.push({ gate, ok: true })
+        else results.push({ gate, ok: false, code: 'CHAPTER_FILE_MISSING' })
+        continue
+      }
       const text = chapterArtifact ? input.readArtifactText(chapterArtifact) : ''
       if (!text.replace(/\s/g, '')) results.push({ gate, ok: false, code: 'CHAPTER_FILE_MISSING' })
       else results.push({ gate, ok: true })

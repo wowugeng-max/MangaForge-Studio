@@ -37,8 +37,10 @@ describe('contract store', () => {
     expect(errors).toEqual([])
     const review = contracts.find(c => c.id === 'oh-story-core.story-review.full')!
     expect(review.builtin).toBe(true)
+    expect(review.verb).toBe('review_chapter')
     expect(review.implemented).toBe(true)
     const outline = contracts.find(c => c.id === 'oh-story-core.story-long-write.outline')!
+    expect(outline.verb).toBeUndefined()
     expect(outline.implemented).toBe(false)
   })
 
@@ -50,6 +52,7 @@ describe('contract store', () => {
       pack_id: 'fake-pack',
       skill_name: 'fake-review',
       variant: 'full',
+      verb: 'review_chapter',
       invoke: { mention: '$fake-review', prompt: '报告写到 {{report_path}}' },
       outputs: [{ artifact_kind: 'review_report', glob: '审稿/第{{chapter_pad}}章.md', binding: 'reviews.kernel_review', required: true }],
     }
@@ -57,6 +60,42 @@ describe('contract store', () => {
     expect(saved.ok).toBe(true)
     const { contracts } = loadKernelContracts(ws)
     expect(contracts.some(c => c.id === 'fake-pack.fake-review.full' && !c.builtin && c.implemented)).toBe(true)
+  })
+
+  test('save rejects instances that fail template validation', () => {
+    const ws = tempWs()
+    const bad = {
+      ...BUILTIN_KERNEL_CONTRACTS[0],
+      id: 'fake-pack.fake-review.full',
+      pack_id: 'fake-pack',
+      skill_name: 'fake-review',
+      variant: 'full',
+      verb: 'review_chapter',
+      invoke: { mention: '$fake-review', prompt: '报告写到 {{report_path}}' },
+      gates: ['reject_solo_fallback'],
+    }
+    const saved = saveUserKernelContract(ws, bad)
+    expect(saved.ok).toBe(false)
+    if (!saved.ok) expect(saved.code).toBe('TEMPLATE_UNSATISFIED')
+  })
+
+  test('load reports TEMPLATE_UNSATISFIED for on-disk instances that miss template gates', () => {
+    const ws = tempWs()
+    seedBuiltinKernelContracts(ws)
+    const dir = join(ws, '.mangaforge', 'kernel', 'contracts')
+    writeFileSync(join(dir, 'fake-pack.fake-review.full.json'), JSON.stringify({
+      ...BUILTIN_KERNEL_CONTRACTS[0],
+      id: 'fake-pack.fake-review.full',
+      pack_id: 'fake-pack',
+      skill_name: 'fake-review',
+      variant: 'full',
+      verb: 'review_chapter',
+      invoke: { mention: '$fake-review', prompt: '报告写到 {{report_path}}' },
+      gates: ['reject_solo_fallback'],
+    }, null, 2))
+    const { contracts, errors } = loadKernelContracts(ws)
+    expect(contracts.some(c => c.id === 'fake-pack.fake-review.full')).toBe(false)
+    expect(errors.some(e => e.file === 'fake-pack.fake-review.full.json' && e.errors.some(msg => msg.startsWith('TEMPLATE_UNSATISFIED:')))).toBe(true)
   })
 
   test('overwriting builtin id -> CONTRACT_BUILTIN; invalid json -> CONTRACT_INVALID', () => {
