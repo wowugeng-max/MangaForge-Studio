@@ -3,6 +3,8 @@ import { getNovelChapter, listNovelReviewsByType } from '../../novel'
 import { ohStoryApplyRewroteTooMuch } from '../../novel-writing/oh-story-core/paragraph-retention'
 import { latestOhStoryReviewForChapter, ohStoryReviewMatchesChapterText } from '../../novel-writing/oh-story-core/review-match'
 import type { KernelContract } from '../contracts/schema'
+import { resolveContractVerb } from '../verbs/infer'
+import { getVerbTemplate } from '../verbs/registry'
 
 export type GateResult = { gate: string; ok: boolean; code?: string; message?: string }
 
@@ -22,7 +24,7 @@ export async function runPostHarvestGates(input: {
   artifacts: GateArtifact[]
   warnings: Array<{ warning: string; rel_path: string }>
   readArtifactText: (artifact: GateArtifact) => string
-}): Promise<{ results: GateResult[]; failedCode: string | null }> {
+}): Promise<{ results: GateResult[]; failedCode: string | null; failedStatus: 'gated' | 'failed' | null }> {
   const results: GateResult[] = []
   for (const warning of input.warnings || []) {
     results.push({ gate: 'write_outside_scope', ok: true, code: 'write_outside_scope', message: warning.rel_path })
@@ -30,6 +32,11 @@ export async function runPostHarvestGates(input: {
 
   const chapterArtifact = input.artifacts.find(a => a.artifact_kind === 'chapter_text')
   const reportArtifact = input.artifacts.find(a => a.artifact_kind === 'review_report')
+  const changedPaths = [
+    ...input.artifacts.map(a => a.rel_path),
+    ...(input.warnings || []).map(w => w.rel_path),
+  ]
+  const hasChapterParse = (rel: string) => /第\s*\d+\s*章/.test(rel.split('/').pop() || rel)
 
   for (const gate of input.contract.gates) {
     if (gate === 'require_reviewer_agents') {
@@ -37,6 +44,26 @@ export async function runPostHarvestGates(input: {
       continue
     }
     if (gate === 'write_outside_scope') continue
+    if (gate === 'reject_chapter_text_artifact') {
+      const hit = input.artifacts.some(a => a.artifact_kind === 'chapter_text')
+        || changedPaths.some(p => p.startsWith('正文/'))
+      results.push(hit ? { gate, ok: false, code: 'REJECT_CHAPTER_TEXT' } : { gate, ok: true })
+      continue
+    }
+    if (gate === 'reject_outline_artifact') {
+      const hit = input.artifacts.some(a => a.artifact_kind === 'outline_doc')
+        || changedPaths.some(p => p.startsWith('大纲/'))
+      results.push(hit ? { gate, ok: false, code: 'REJECT_OUTLINE' } : { gate, ok: true })
+      continue
+    }
+    if (gate === 'require_outline_mix') {
+      const outlineDocs = input.artifacts.filter(a => a.artifact_kind === 'outline_doc')
+      const withNo = outlineDocs.filter(a => hasChapterParse(a.rel_path)).length
+      const withoutNo = outlineDocs.length - withNo
+      if (withNo >= 1 && withoutNo >= 1) results.push({ gate, ok: true })
+      else results.push({ gate, ok: false, code: 'KIND_COUNT_BELOW_MIN', message: `细纲 ${withNo} / 总纲 ${withoutNo}` })
+      continue
+    }
     if (gate === 'reject_solo_fallback') {
       if (!reportArtifact) {
         results.push({ gate, ok: false, code: 'SOLO_FALLBACK', message: 'no review_report artifact to verify' })
@@ -82,6 +109,20 @@ export async function runPostHarvestGates(input: {
       continue
     }
   }
+  const verb = resolveContractVerb(input.contract as any)
+  const template = verb ? getVerbTemplate(verb) : null
+  if (template) {
+    for (const need of template.required_kinds) {
+      const count = input.artifacts.filter(a => a.artifact_kind === need.kind).length
+      if (count < need.min) {
+        results.push({ gate: 'kind_count', ok: false, code: 'KIND_COUNT_BELOW_MIN', message: `${need.kind} ${count}/${need.min}` })
+      }
+    }
+  }
   const failed = results.find(r => !r.ok)
-  return { results, failedCode: failed?.code || null }
+  const failedCode = failed?.code || null
+  const failedStatus: 'gated' | 'failed' | null = failedCode
+    ? (failedCode === 'KIND_COUNT_BELOW_MIN' ? 'failed' : 'gated')
+    : null
+  return { results, failedCode, failedStatus }
 }

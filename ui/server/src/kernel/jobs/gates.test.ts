@@ -82,3 +82,65 @@ describe('runPostHarvestGates', () => {
     expect(ok.results.some(r => r.gate === 'write_outside_scope' && r.message === '越界.md')).toBe(true)
   })
 })
+
+const baseOpenContract: any = {
+  id: 'oh-story-core.story-long-write.open', verb: 'open_book', capability: 'outline',
+  skill_name: 'story-long-write',
+  gates: ['reject_chapter_text_artifact', 'require_outline_mix'],
+  outputs: [], write_scope: ['设定/', '大纲/'], commit: { mode: 'manual', domain_writes: [] },
+  invoke: { mention: '$story-long-write', prompt: 'x' }, projection: { mounts: ['skill_tree'] },
+}
+const art = (kind: string, rel: string) => ({ rel_path: rel, artifact_kind: kind, vault_path: '' })
+const okOpenArtifacts = [
+  art('world_doc', '设定/世界观.md'),
+  art('character_sheet', '设定/角色/楚弦.md'),
+  art('outline_doc', '大纲/大纲.md'),
+  art('outline_doc', '大纲/细纲_第001章.md'),
+]
+
+describe('verb gates', () => {
+  const run = (artifacts: any[], warnings: any[] = [], contract = baseOpenContract) =>
+    runPostHarvestGates({
+      workspace: '/tmp/nowhere', projectId: 1, chapterId: 0, contract,
+      artifacts, warnings, readArtifactText: () => '',
+    })
+
+  test('clean open_book harvest passes', async () => {
+    const gate = await run(okOpenArtifacts)
+    expect(gate.failedCode).toBeNull()
+  })
+  test('正文/ prefix diff outside write_scope gates the candidate', async () => {
+    const gate = await run(okOpenArtifacts, [{ warning: 'write_outside_scope', rel_path: '正文/第001章_偷跑.md' }])
+    expect(gate.failedCode).toBe('REJECT_CHAPTER_TEXT')
+    expect(gate.failedStatus).toBe('gated')
+  })
+  test('chapter_text artifact gates the candidate', async () => {
+    const gate = await run([...okOpenArtifacts, art('chapter_text', '设定/伪装.md')])
+    expect(gate.failedCode).toBe('REJECT_CHAPTER_TEXT')
+  })
+  test('two 细纲 without any 总纲 fail outline mix as failed', async () => {
+    const gate = await run([
+      art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),
+      art('outline_doc', '大纲/细纲_第001章.md'), art('outline_doc', '大纲/细纲_第002章.md'),
+    ])
+    expect(gate.failedCode).toBe('KIND_COUNT_BELOW_MIN')
+    expect(gate.failedStatus).toBe('failed')
+  })
+  test('required kind count below template min fails', async () => {
+    const gate = await run([
+      art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),
+      art('outline_doc', '大纲/大纲.md'),
+    ])
+    expect(gate.failedCode).toBe('KIND_COUNT_BELOW_MIN')
+    expect(gate.failedStatus).toBe('failed')
+  })
+  test('reject_outline_artifact fires on 大纲/ prefix', async () => {
+    const deslop: any = {
+      ...baseOpenContract, id: 'oh-story-core.story-deslop.file', verb: 'deslop_chapter',
+      capability: 'rewrite', gates: ['reject_outline_artifact'], write_scope: ['正文/'],
+    }
+    const gate = await run([art('chapter_text', '正文/第002章_x.md')], [{ warning: 'write_outside_scope', rel_path: '大纲/细纲_第002章.md' }], deslop)
+    expect(gate.failedCode).toBe('REJECT_OUTLINE')
+    expect(gate.failedStatus).toBe('gated')
+  })
+})
