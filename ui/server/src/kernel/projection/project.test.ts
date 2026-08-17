@@ -8,7 +8,7 @@ import {
 } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
 import { BUILTIN_KERNEL_CONTRACTS } from '../contracts/builtin'
-import { projectKernelSubject } from './project'
+import { projectKernelSubject, renderUserBriefMarkdown } from './project'
 
 const reviewContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
 const applyContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')!
@@ -81,5 +81,52 @@ describe('projectKernelSubject', () => {
     const instruction = readFileSync(join(projectDir, '改稿/指令.md'), 'utf8')
     expect(instruction).toContain('禁止整章重写')
     expect(instruction).toContain('段二补动机')
+  })
+
+  test('project subject: no chapter required, brief.md written, chapter vars empty', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    const contract: any = {
+      ...reviewContract,
+      verb: 'open_book',
+      capability: 'outline',
+      projection: { mounts: ['user_brief', 'skill_tree'] },
+      invoke: { mention: '$story-long-write', prompt: '开书：{{user_brief_file}}' },
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'proj-open-'))
+    const { vars, files } = await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir,
+      subjectType: 'project',
+      briefJson: JSON.stringify({ title: '试作', genre: '玄幻', idea: '一句话创意', length_target: 'long', constraints: '无' }),
+    })
+    expect(files).toContain('brief.md')
+    expect(readFileSync(join(dir, 'brief.md'), 'utf8')).toContain('一句话创意')
+    expect(vars.user_brief_file).toBe('brief.md')
+    expect(vars.chapter_no).toBe('')
+    expect(vars.chapter_pad).toBe('')
+    expect(vars.report_path).toBe('')
+  })
+
+  test('world mount replays committed world_doc by kernel_rel_path', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    await createNovelWorldbuilding(ws, {
+      project_id: project.id,
+      world_summary: '摘要A',
+      raw_payload: { kernel_rel_path: '设定/势力/铁誓盟.md', kernel_full_text: '# 铁誓盟\n全文A' },
+    })
+    await createNovelWorldbuilding(ws, { project_id: project.id, world_summary: '旧行摘要' })
+    const contract: any = { ...reviewContract, projection: { mounts: ['world', 'skill_tree'] } }
+    const dir = mkdtempSync(join(tmpdir(), 'proj-world-'))
+    await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir, subjectType: 'project',
+    })
+    expect(readFileSync(join(dir, '设定/势力/铁誓盟.md'), 'utf8')).toContain('全文A')
+    expect(readFileSync(join(dir, '设定/世界观.md'), 'utf8')).toContain('旧行摘要')
+  })
+
+  test('renderUserBriefMarkdown renders all five fields', () => {
+    const md = renderUserBriefMarkdown(JSON.stringify({ title: 'T', genre: 'G', idea: 'I', length_target: 'long', constraints: 'C' }))
+    for (const s of ['T', 'G', 'I', 'long', 'C']) expect(md).toContain(s)
   })
 })

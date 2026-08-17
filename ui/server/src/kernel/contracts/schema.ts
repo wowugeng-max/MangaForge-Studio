@@ -5,6 +5,7 @@ import { findUnknownVariables } from '../template'
 export const KERNEL_MOUNTS = [
   'current_chapter', 'previous_chapter', 'outline', 'characters', 'world',
   'tracking', 'skill_tree', 'agents', 'review_report', 'canvas_node',
+  'user_brief',
 ] as const
 
 export const KERNEL_GATES = [

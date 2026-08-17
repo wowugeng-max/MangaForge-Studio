@@ -11,6 +11,7 @@ const vars: KernelPromptVars = {
   report_path: '审稿/第062章.md',
   review_path: '审稿/第062章.md',
   skill_name: 'story-review',
+  user_brief_file: '',
 }
 
 describe('kernel template', () => {

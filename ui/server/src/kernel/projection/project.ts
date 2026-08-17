@@ -12,12 +12,16 @@ import { listCommittedTrackingDocPaths } from '../db'
 import type { KernelPromptVars } from '../template'
 import { chapterRelPath, padChapterNo, safeChapterTitle } from './naming'
 
+const CHAPTER_LEVEL_MOUNTS = ['current_chapter', 'previous_chapter', 'review_report']
+
 export type ProjectKernelSubjectInput = {
   workspace: string
   projectId: number
   chapterId: number
   contract: KernelContract
   projectDir: string
+  subjectType?: 'chapter' | 'project'
+  briefJson?: string
 }
 
 function writeProjected(projectDir: string, relPath: string, content: string, files: string[]) {
@@ -37,28 +41,61 @@ const SURGICAL_HEADER = [
   '',
 ].join('\n')
 
+export function renderUserBriefMarkdown(briefJson: string): string {
+  let brief: any = {}
+  try { brief = JSON.parse(briefJson || '{}') } catch { brief = {} }
+  return [
+    `# 创作创意`,
+    ``,
+    `书名方向：${String(brief.title || '（未定）')}`,
+    `题材：${String(brief.genre || '（未定）')}`,
+    `体量：${String(brief.length_target || '（未定）')}`,
+    ``,
+    `## 创意`,
+    ``,
+    String(brief.idea || '（空）'),
+    ``,
+    `## 约束`,
+    ``,
+    String(brief.constraints || '无'),
+    ``,
+  ].join('\n')
+}
+
+function parseWorldPayload(raw: unknown): any {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw
+  try { return JSON.parse(String(raw || '{}')) } catch { return {} }
+}
+
 export async function projectKernelSubject(input: ProjectKernelSubjectInput): Promise<{ vars: KernelPromptVars; files: string[] }> {
   const { workspace, projectId, chapterId, contract, projectDir } = input
   const mounts = contract.projection.mounts
   if (mounts.includes('canvas_node')) {
     throw Object.assign(new Error('canvas_node projection is not implemented'), { code: 'CONTRACT_NOT_IMPLEMENTED' })
   }
-  const chapter = await getNovelChapter(workspace, chapterId, projectId)
-  if (!chapter) throw Object.assign(new Error('chapter not found'), { code: 'CHAPTER_NOT_FOUND' })
+  const subjectType = input.subjectType || 'chapter'
+  if (subjectType === 'project' && mounts.some(m => CHAPTER_LEVEL_MOUNTS.includes(m))) {
+    throw Object.assign(new Error('project subject cannot mount chapter-level projections'), { code: 'CONTRACT_INVALID' })
+  }
+  const chapter = subjectType === 'chapter' ? await getNovelChapter(workspace, chapterId, projectId) : null
+  if (subjectType === 'chapter' && !chapter) throw Object.assign(new Error('chapter not found'), { code: 'CHAPTER_NOT_FOUND' })
 
   const files: string[] = []
-  const pad = padChapterNo(Number(chapter.chapter_no))
-  const currentRel = chapterRelPath(Number(chapter.chapter_no), String(chapter.title || ''))
+  const pad = chapter ? padChapterNo(Number(chapter.chapter_no)) : ''
+  const currentRel = chapter ? chapterRelPath(Number(chapter.chapter_no), String(chapter.title || '')) : ''
   let previousRel = ''
-  const chapters = await listNovelChapters(workspace, projectId)
-  const previous = chapters
-    .filter((item: any) => Number(item.chapter_no) < Number(chapter.chapter_no))
-    .sort((a: any, b: any) => Number(b.chapter_no) - Number(a.chapter_no))[0]
+  let previous: any
+  if (chapter) {
+    const chapters = await listNovelChapters(workspace, projectId)
+    previous = chapters
+      .filter((item: any) => Number(item.chapter_no) < Number(chapter.chapter_no))
+      .sort((a: any, b: any) => Number(b.chapter_no) - Number(a.chapter_no))[0]
+  }
 
-  if (mounts.includes('current_chapter')) {
+  if (chapter && mounts.includes('current_chapter')) {
     writeProjected(projectDir, currentRel, String(chapter.chapter_text || ''), files)
   }
-  if (mounts.includes('previous_chapter') && previous) {
+  if (chapter && mounts.includes('previous_chapter') && previous) {
     previousRel = chapterRelPath(Number(previous.chapter_no), String(previous.title || ''))
     writeProjected(projectDir, previousRel, String(previous.chapter_text || ''), files)
   }
@@ -67,17 +104,21 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
     const master = outlines.filter((o: any) => String(o.outline_type || 'master') === 'master')
     const detail = outlines.filter((o: any) => String(o.outline_type || 'master') !== 'master')
     const renderOutline = (rows: any[]) => rows.map(o => `# ${o.title}\n\n${String(o.summary || '')}`.trim()).join('\n\n---\n\n') || '（空）'
-    writeProjected(projectDir, '大纲/总纲.md', renderOutline(master), files)
-    writeProjected(projectDir, '大纲/细纲.md', renderOutline(detail), files)
-    const chapterCard = (row: any) => [
-      `# 第${padChapterNo(Number(row.chapter_no))}章 ${String(row.title || '')}`,
-      `目标：${String(row.chapter_goal || '')}`,
-      `概要：${String(row.chapter_summary || '')}`,
-      `冲突：${String(row.conflict || '')}`,
-      `章末钩子：${String(row.ending_hook || '')}`,
-    ].join('\n')
-    writeProjected(projectDir, `大纲/第${pad}章.md`, chapterCard(chapter), files)
-    if (previous) writeProjected(projectDir, `大纲/第${padChapterNo(Number(previous.chapter_no))}章.md`, chapterCard(previous), files)
+    if (chapter || outlines.length) {
+      writeProjected(projectDir, '大纲/总纲.md', renderOutline(master), files)
+      writeProjected(projectDir, '大纲/细纲.md', renderOutline(detail), files)
+    }
+    if (chapter) {
+      const chapterCard = (row: any) => [
+        `# 第${padChapterNo(Number(row.chapter_no))}章 ${String(row.title || '')}`,
+        `目标：${String(row.chapter_goal || '')}`,
+        `概要：${String(row.chapter_summary || '')}`,
+        `冲突：${String(row.conflict || '')}`,
+        `章末钩子：${String(row.ending_hook || '')}`,
+      ].join('\n')
+      writeProjected(projectDir, `大纲/第${pad}章.md`, chapterCard(chapter), files)
+      if (previous) writeProjected(projectDir, `大纲/第${padChapterNo(Number(previous.chapter_no))}章.md`, chapterCard(previous), files)
+    }
   }
   if (mounts.includes('characters')) {
     for (const character of await listNovelCharacters(workspace, projectId)) {
@@ -93,8 +134,24 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
   }
   if (mounts.includes('world')) {
     const worlds = await listNovelWorldbuilding(workspace, projectId)
-    const body = worlds.map((w: any) => String(w.world_summary || '')).filter(Boolean).join('\n\n') || '（空）'
-    writeProjected(projectDir, '设定/世界观.md', body, files)
+    const legacy: string[] = []
+    for (const w of worlds) {
+      const payload = parseWorldPayload((w as any).raw_payload)
+      const relPath = String(payload.kernel_rel_path || '')
+      if (relPath && !relPath.includes('..')) {
+        writeProjected(projectDir, relPath, String(payload.kernel_full_text || w.world_summary || ''), files)
+      } else if (String(w.world_summary || '').trim()) {
+        legacy.push(String(w.world_summary))
+      }
+    }
+    if (legacy.length || !files.some(f => f === '设定/世界观.md')) {
+      writeProjected(projectDir, '设定/世界观.md', legacy.join('\n\n') || '（空）', files)
+    }
+  }
+  let userBriefFile = ''
+  if (mounts.includes('user_brief')) {
+    userBriefFile = 'brief.md'
+    writeProjected(projectDir, userBriefFile, renderUserBriefMarkdown(String(input.briefJson || '')), files)
   }
   if (mounts.includes('tracking')) {
     const docs = listCommittedTrackingDocPaths(workspace, projectId)
@@ -111,13 +168,13 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
     if (!files.some(f => f === '追踪/伏笔.md')) {
       writeProjected(projectDir, '追踪/伏笔.md', '# 伏笔\n\n开放项：无\n', files)
     }
-    if (!files.some(f => f.startsWith('追踪/逐章记录/'))) {
+    if (chapter && !files.some(f => f.startsWith('追踪/逐章记录/'))) {
       writeProjected(projectDir, `追踪/逐章记录/第${pad}章.md`, `# 第${pad}章 逐章记录\n\n开放项：无\n`, files)
     }
   }
 
   let reviewPath = ''
-  if (mounts.includes('review_report')) {
+  if (chapter && mounts.includes('review_report')) {
     const reviews = await listNovelReviewsByType(workspace, projectId, 'oh_story_review')
     const review = latestOhStoryReviewForChapter(reviews, chapterId)
     if (!review) throw Object.assign(new Error('先对本稿重新审稿'), { code: 'OH_STORY_APPLY_NO_REVIEW' })
@@ -133,14 +190,15 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
   }
 
   const vars: KernelPromptVars = {
-    scope_files: currentRel,
-    chapter_no: String(chapter.chapter_no),
-    chapter_pad: pad,
-    chapter_title: String(chapter.title || ''),
+    scope_files: chapter ? currentRel : '',
+    chapter_no: chapter ? String(chapter.chapter_no) : '',
+    chapter_pad: chapter ? pad : '',
+    chapter_title: chapter ? String(chapter.title || '') : '',
     previous_chapter_file: previousRel,
-    report_path: `审稿/第${pad}章.md`,
+    report_path: chapter ? `审稿/第${pad}章.md` : '',
     review_path: reviewPath,
     skill_name: contract.skill_name,
+    user_brief_file: userBriefFile,
   }
   return { vars, files }
 }

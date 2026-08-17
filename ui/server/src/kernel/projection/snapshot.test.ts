@@ -13,6 +13,7 @@ const vars: KernelPromptVars = {
   scope_files: '正文/第002章_违背规则的绝对防御.md',
   chapter_no: '2', chapter_pad: '002', chapter_title: '违背规则的绝对防御',
   previous_chapter_file: '', report_path: '审稿/第002章.md', review_path: '', skill_name: 'story-review',
+  user_brief_file: '',
 }
 
 function seedProject() {

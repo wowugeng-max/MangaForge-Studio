@@ -7,11 +7,13 @@ export type KernelPromptVars = {
   report_path: string
   review_path: string
   skill_name: string
+  user_brief_file: string
 }
 
 export const KERNEL_PROMPT_VARIABLES = [
   'scope_files', 'chapter_no', 'chapter_pad', 'chapter_title',
   'previous_chapter_file', 'report_path', 'review_path', 'skill_name',
+  'user_brief_file',
 ] as const
 
 const VAR_PATTERN = /\{\{\s*([^{}]*?)\s*\}\}/g
