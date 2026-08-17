@@ -30,7 +30,13 @@ describe('kernel contract routes', () => {
     const res = await callRoute(handlers.get('GET /api/kernel/contracts'))
     expect(res.statusCode).toBe(200)
     expect(res.body.ok).toBe(true)
-    expect(res.body.contracts.length).toBe(4)
+    expect(res.body.contracts.map((c: { id: string }) => c.id).sort()).toEqual([
+      'oh-story-core.story-apply.surgical',
+      'oh-story-core.story-deslop.file',
+      'oh-story-core.story-long-write.open',
+      'oh-story-core.story-long-write.outline',
+      'oh-story-core.story-review.full',
+    ])
     expect(typeof res.body.runtime.available).toBe('boolean')
   })
 
