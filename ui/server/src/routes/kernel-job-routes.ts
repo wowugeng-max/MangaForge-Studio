@@ -1,6 +1,7 @@
 import type { Express } from 'express'
+import { readFileSync } from 'node:fs'
 import { commitKernelCandidate } from '../kernel/jobs/commit'
-import { getKernelJobDetail, listKernelJobs } from '../kernel/jobs/repo'
+import { getKernelArtifact, getKernelJobDetail, listKernelJobs } from '../kernel/jobs/repo'
 import { cancelKernelJob, createAndRunKernelJob, getKernelJobProgress } from '../kernel/jobs/run-job'
 
 export type KernelJobRoutesDeps = {
@@ -46,6 +47,21 @@ export function registerKernelJobRoutes(app: Express, deps: KernelJobRoutesDeps)
     const result = cancelKernelJob(deps.getWorkspace(), String(req.params?.id || ''))
     if (!result.ok) return res.status(result.status).json({ error: 'cannot cancel', code: result.code })
     res.json({ ok: true })
+  })
+
+  app.get('/api/kernel/artifacts/:id/content', (req, res) => {
+    const artifact = getKernelArtifact(deps.getWorkspace(), String(req.params?.id || ''))
+    if (!artifact) return res.status(404).json({ error: 'artifact not found', code: 'ARTIFACT_NOT_FOUND' })
+    let content = ''
+    try { content = readFileSync(String(artifact.vault_path), 'utf8') } catch { content = '' }
+    const LIMIT = 256 * 1024
+    const truncated = content.length > LIMIT
+    res.json({
+      ok: true,
+      artifact: { id: artifact.id, rel_path: artifact.rel_path, artifact_kind: artifact.artifact_kind, byte_size: artifact.byte_size },
+      content: truncated ? content.slice(0, LIMIT) : content,
+      truncated,
+    })
   })
 
   app.post('/api/kernel/jobs/:id/commit', async (req, res) => {

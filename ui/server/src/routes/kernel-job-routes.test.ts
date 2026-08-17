@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelProject } from '../novel'
@@ -72,5 +72,65 @@ describe('kernel job routes', () => {
     expect(cancelled.body.code).toBe('JOB_ALREADY_COMMITTED')
     const commit = await callRoute(handlers.get('POST /api/kernel/jobs/:id/commit'), { params: { id: 'job-1' }, body: { candidate_id: 'cand-x' } })
     expect([404, 409]).toContain(commit.statusCode)
+  })
+
+  test('artifact content endpoint reads vault file and 404s on unknown id', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'job-routes-'))
+    const project = await createNovelProject(ws, { title: '书' })
+    const { insertKernelArtifact, insertKernelCandidate, insertKernelJob } = await import('../kernel/jobs/repo')
+    insertKernelJob(ws, {
+      id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '',
+      status: 'awaiting_selection', capability: 'outline', subject_type: 'project', subject_id: project.id,
+      model_provider_id: '', model_id: null, error_code: '', error_message: '',
+      verb: '', verb_params: '{}', subject_key: '', brief_json: '',
+    })
+    insertKernelCandidate(ws, {
+      id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-long-write.open',
+      pack_id: 'oh-story-core', pack_revision: 'rev', skill_name: 'story-long-write', status: 'succeeded',
+    })
+    const vaultPath = join(ws, 'world.md')
+    writeFileSync(vaultPath, '# 世界观\n正文')
+    insertKernelArtifact(ws, {
+      id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'world_doc',
+      rel_path: '设定/世界观.md', sha256: 'h', byte_size: 20, vault_path: vaultPath,
+    })
+    const handlers = routeHarness(ws)
+    const ok = await callRoute(handlers.get('GET /api/kernel/artifacts/:id/content'), { params: { id: 'art-1' } })
+    expect(ok.statusCode).toBe(200)
+    expect(ok.body.content).toContain('世界观')
+    expect(ok.body.artifact).toEqual({
+      id: 'art-1', rel_path: '设定/世界观.md', artifact_kind: 'world_doc', byte_size: 20,
+    })
+    const missing = await callRoute(handlers.get('GET /api/kernel/artifacts/:id/content'), { params: { id: 'art-nope' } })
+    expect(missing.statusCode).toBe(404)
+    expect(missing.body.code).toBe('ARTIFACT_NOT_FOUND')
+  })
+
+  test('artifact content endpoint truncates files over 256KiB', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'job-routes-'))
+    const project = await createNovelProject(ws, { title: '书' })
+    const { insertKernelArtifact, insertKernelCandidate, insertKernelJob } = await import('../kernel/jobs/repo')
+    insertKernelJob(ws, {
+      id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '',
+      status: 'awaiting_selection', capability: 'outline', subject_type: 'project', subject_id: project.id,
+      model_provider_id: '', model_id: null, error_code: '', error_message: '',
+      verb: '', verb_params: '{}', subject_key: '', brief_json: '',
+    })
+    insertKernelCandidate(ws, {
+      id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-long-write.open',
+      pack_id: 'oh-story-core', pack_revision: 'rev', skill_name: 'story-long-write', status: 'succeeded',
+    })
+    const LIMIT = 256 * 1024
+    const vaultPath = join(ws, 'big.md')
+    writeFileSync(vaultPath, 'x'.repeat(LIMIT + 1))
+    insertKernelArtifact(ws, {
+      id: 'art-big', candidate_id: 'cand-1', artifact_kind: 'world_doc',
+      rel_path: '设定/大文件.md', sha256: 'h', byte_size: LIMIT + 1, vault_path: vaultPath,
+    })
+    const handlers = routeHarness(ws)
+    const res = await callRoute(handlers.get('GET /api/kernel/artifacts/:id/content'), { params: { id: 'art-big' } })
+    expect(res.statusCode).toBe(200)
+    expect(res.body.truncated).toBe(true)
+    expect(res.body.content.length).toBe(LIMIT)
   })
 })

@@ -79,6 +79,10 @@ export function insertKernelArtifact(ws: string, row: { id: string; candidate_id
   `).run(row.id, row.candidate_id, row.artifact_kind, row.rel_path, row.sha256, row.byte_size, row.vault_path, row.metadata ?? '{}'))
 }
 
+export function getKernelArtifact(ws: string, id: string) {
+  return withDb(ws, db => db.query('SELECT * FROM kernel_artifacts WHERE id = ?').get(id) as any | null)
+}
+
 export function insertKernelCommit(ws: string, row: { id: string; job_id: string; candidate_id: string; domain_table: string; domain_row_id: number }): void {
   withDb(ws, db => db.query(`
     INSERT INTO kernel_commits (id, job_id, candidate_id, domain_table, domain_row_id) VALUES (?,?,?,?,?)
