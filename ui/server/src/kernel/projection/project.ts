@@ -144,7 +144,7 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
         legacy.push(String(w.world_summary))
       }
     }
-    if (legacy.length || !files.some(f => f === '设定/世界观.md')) {
+    if (!files.some(f => f === '设定/世界观.md')) {
       writeProjected(projectDir, '设定/世界观.md', legacy.join('\n\n') || '（空）', files)
     }
   }

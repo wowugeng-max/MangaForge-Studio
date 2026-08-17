@@ -125,6 +125,25 @@ describe('projectKernelSubject', () => {
     expect(readFileSync(join(dir, '设定/世界观.md'), 'utf8')).toContain('旧行摘要')
   })
 
+  test('world fallback does not overwrite a replayed 设定/世界观.md', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    await createNovelWorldbuilding(ws, {
+      project_id: project.id,
+      world_summary: '摘要A',
+      raw_payload: { kernel_rel_path: '设定/世界观.md', kernel_full_text: '# 世界观\n内核全文' },
+    })
+    await createNovelWorldbuilding(ws, { project_id: project.id, world_summary: '旧行摘要' })
+    const contract: any = { ...reviewContract, projection: { mounts: ['world', 'skill_tree'] } }
+    const dir = mkdtempSync(join(tmpdir(), 'proj-world-keep-'))
+    await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir, subjectType: 'project',
+    })
+    const body = readFileSync(join(dir, '设定/世界观.md'), 'utf8')
+    expect(body).toContain('内核全文')
+    expect(body).not.toBe('旧行摘要')
+  })
+
   test('renderUserBriefMarkdown renders all five fields', () => {
     const md = renderUserBriefMarkdown(JSON.stringify({ title: 'T', genre: 'G', idea: 'I', length_target: 'long', constraints: 'C' }))
     for (const s of ['T', 'G', 'I', 'long', 'C']) expect(md).toContain(s)
