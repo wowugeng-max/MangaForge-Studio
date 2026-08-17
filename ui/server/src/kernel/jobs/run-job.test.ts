@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelChapter, createNovelProject, listNovelReviewsByType } from '../../novel'
 import { getKernelJobDetail } from './repo'
-import { cancelKernelJob, createAndRunKernelJob, getKernelJobProgress, validateCreateKernelJob } from './run-job'
+import { cancelKernelJob, candidateStatusAfterGate, createAndRunKernelJob, getKernelJobProgress, validateCreateKernelJob } from './run-job'
 
 function seedStores(ws: string) {
   writeFileSync(join(ws, 'providers.json'), JSON.stringify([{ id: 'any', api_format: 'codex_responses', default_base_url: 'https://a/v1', custom_headers: {} }]))
@@ -156,5 +156,18 @@ describe('kernel job orchestration', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('cancelled')
+  })
+})
+
+describe('candidateStatusAfterGate', () => {
+  test('KIND_COUNT_BELOW_MIN maps to failed, not gated', () => {
+    expect(candidateStatusAfterGate('KIND_COUNT_BELOW_MIN', 'failed')).toBe('failed')
+  })
+  test('SOLO_FALLBACK stays gated', () => {
+    expect(candidateStatusAfterGate('SOLO_FALLBACK', 'gated')).toBe('gated')
+  })
+  test('empty failedCode is succeeded', () => {
+    expect(candidateStatusAfterGate('', null)).toBe('succeeded')
+    expect(candidateStatusAfterGate('', undefined)).toBe('succeeded')
   })
 })

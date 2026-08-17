@@ -25,6 +25,11 @@ export type CreateKernelJobBody = {
 }
 export type CreateKernelJobError = { ok: false; status: 400 | 503; code: string; message: string }
 
+export function candidateStatusAfterGate(failedCode: string, failedStatus?: 'gated' | 'failed' | null): 'succeeded' | 'gated' | 'failed' {
+  if (!failedCode) return 'succeeded'
+  return failedStatus === 'failed' ? 'failed' : 'gated'
+}
+
 type LiveJobState = {
   phases: Map<string, string>
   candidateDirs: Map<string, string>
@@ -155,7 +160,7 @@ export async function createAndRunKernelJob(
             return
           }
           updateKernelCandidate(ws, candidateId, {
-            status: gate.failedCode ? (gate.failedStatus === 'failed' ? 'failed' : 'gated') : 'succeeded',
+            status: candidateStatusAfterGate(gate.failedCode || '', gate.failedStatus),
             error_code: gate.failedCode || '',
             thread_id: result.threadId, turn_id: result.turnId,
             last_message_excerpt: String(result.lastMessage || '').slice(0, 500),
