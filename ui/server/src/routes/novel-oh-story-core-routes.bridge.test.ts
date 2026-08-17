@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelChapter, createNovelProject } from '../novel'
+import { openKernelDb } from '../kernel/db'
 import { insertKernelCandidate, insertKernelCommit, insertKernelJob, insertKernelArtifact } from '../kernel/jobs/repo'
 import { registerOhStoryCoreRoutes } from './novel-oh-story-core-routes'
 
@@ -82,5 +83,35 @@ describe('oh-story bridge to kernel jobs', () => {
     })
     expect(res.statusCode).toBe(503)
     expect(res.body.code).toBe('KERNEL_RUNTIME_UNAVAILABLE')
+  })
+
+  test('bridge tags kernel jobs with the workbench verb', async () => {
+    const expected: Record<string, string> = {
+      review: 'review_chapter',
+      deslop: 'deslop_chapter',
+      apply: 'apply_review',
+    }
+    for (const action of Object.keys(expected)) {
+      const ws = mkdtempSync(join(tmpdir(), 'bridge-verb-'))
+      const project = await createNovelProject(ws, { title: '书' })
+      const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: '正文。' })
+      const createKernelJob = async (workspace: string, body: any) => {
+        insertKernelJob(workspace, {
+          id: 'job-verb', project_id: body.project_id, workspace_scope: 'novel', title: '',
+          status: 'failed', capability: 'review', subject_type: 'chapter', subject_id: body.subject_id,
+          model_provider_id: '', model_id: body.model_id, error_code: 'ENGINE_FAILED', error_message: '',
+          verb: String(body.verb || ''), verb_params: '{}', subject_key: '', brief_json: '',
+        })
+        return { ok: true, jobId: 'job-verb', done: Promise.resolve() }
+      }
+      const handlers = harness(ws, createKernelJob)
+      await callRoute(handlers.get(`POST /api/novel/oh-story/core/${action}`), {
+        body: { project_id: project.id, chapter_id: chapter.id, model_id: 9 },
+      })
+      const db = openKernelDb(ws)
+      const row = db.query(`SELECT verb FROM kernel_jobs ORDER BY created_at DESC LIMIT 1`).get() as any
+      db.close()
+      expect(row.verb).toBe(expected[action])
+    }
   })
 })

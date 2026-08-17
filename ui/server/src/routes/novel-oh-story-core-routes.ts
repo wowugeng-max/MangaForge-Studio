@@ -73,6 +73,10 @@ const CONTRACT_BY_ACTION: Record<OhStoryCoreAction, string> = {
   apply: 'oh-story-core.story-apply.surgical',
 }
 
+const ACTION_VERB: Record<OhStoryCoreAction, string> = {
+  review: 'review_chapter', deslop: 'deslop_chapter', apply: 'apply_review',
+}
+
 const TERMINAL_ERROR_HTTP: Record<string, { status: number; message?: string }> = {
   OH_STORY_APPLY_NO_REVIEW: { status: 409, message: '先对本稿重新审稿' },
   OH_STORY_APPLY_STALE_REVIEW: { status: 409, message: '先对本稿重新审稿' },
@@ -161,6 +165,7 @@ export function registerOhStoryCoreRoutes(app: Express, deps: OhStoryCoreRoutesD
       const created = await createJob(workspace, {
         project_id: projectId, subject_type: 'chapter', subject_id: chapterId,
         contract_ids: [CONTRACT_BY_ACTION[action]], model_id: Number(modelId || 0),
+        verb: ACTION_VERB[action],
       })
       if (!created.ok) return res.status(created.status).json({ error: created.message, code: created.code })
       await created.done
