@@ -62,4 +62,24 @@ describe('snapshot & harvest', () => {
     expect(changed.missingRequired).toEqual([])
     expect(changed.artifacts[0].artifact_kind).toBe('chapter_text')
   })
+
+  test('glob priority follows outputs order: 角色 file is character_sheet, not world_doc', () => {
+    const projectDir = mkdtempSync(join(tmpdir(), 'harvest-proj-'))
+    mkdirSync(join(projectDir, '设定/角色'), { recursive: true })
+    writeFileSync(join(projectDir, '设定/角色/楚弦.md'), '# 楚弦')
+    writeFileSync(join(projectDir, '设定/世界观.md'), '# 世界观')
+    const artifactsDir = mkdtempSync(join(tmpdir(), 'harvest-art-'))
+    const contract: any = {
+      ...reviewContract,
+      write_scope: ['设定/'],
+      outputs: [
+        { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: true },
+        { artifact_kind: 'world_doc', glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: true },
+      ],
+    }
+    const result = harvestKernelArtifacts({ projectDir, artifactsDir, manifest: {}, contract, vars })
+    const byPath = Object.fromEntries(result.artifacts.map(a => [a.rel_path, a.artifact_kind]))
+    expect(byPath['设定/角色/楚弦.md']).toBe('character_sheet')
+    expect(byPath['设定/世界观.md']).toBe('world_doc')
+  })
 })

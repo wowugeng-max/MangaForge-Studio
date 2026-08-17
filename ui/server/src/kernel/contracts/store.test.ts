@@ -9,7 +9,7 @@ import { deleteUserKernelContract, loadKernelContracts, saveUserKernelContract, 
 function tempWs() { return mkdtempSync(join(tmpdir(), 'kernel-contracts-')) }
 
 describe('builtin contracts', () => {
-  test('all four builtins pass validation', () => {
+  test('all five builtins pass validation', () => {
     for (const contract of BUILTIN_KERNEL_CONTRACTS) {
       const result = validateKernelContract(contract)
       expect(result.ok).toBe(true)
@@ -19,6 +19,7 @@ describe('builtin contracts', () => {
       'oh-story-core.story-deslop.file',
       'oh-story-core.story-apply.surgical',
       'oh-story-core.story-long-write.outline',
+      'oh-story-core.story-long-write.open',
     ])
   })
 })
@@ -30,6 +31,7 @@ describe('contract store', () => {
     expect(readdirSync(join(ws, '.mangaforge', 'kernel', 'contracts')).sort()).toEqual([
       'oh-story-core.story-apply.surgical.json',
       'oh-story-core.story-deslop.file.json',
+      'oh-story-core.story-long-write.open.json',
       'oh-story-core.story-long-write.outline.json',
       'oh-story-core.story-review.full.json',
     ])
@@ -42,6 +44,9 @@ describe('contract store', () => {
     const outline = contracts.find(c => c.id === 'oh-story-core.story-long-write.outline')!
     expect(outline.verb).toBeUndefined()
     expect(outline.implemented).toBe(false)
+    const open = contracts.find(c => c.id === 'oh-story-core.story-long-write.open')!
+    expect(open.verb).toBe('open_book')
+    expect(open.implemented).toBe(true)
   })
 
   test('user contract with same artifact kind installs without code change (扩展 8.1)', () => {

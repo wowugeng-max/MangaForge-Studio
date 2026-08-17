@@ -111,7 +111,41 @@ const longWriteOutline: KernelContract = {
   approval: 'never',
 }
 
-export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline]
+const longWriteOpen: KernelContract = {
+  schema_version: 1,
+  id: 'oh-story-core.story-long-write.open',
+  pack_id: 'oh-story-core',
+  skill_name: 'story-long-write',
+  variant: 'open',
+  verb: 'open_book',
+  capability: 'outline',
+  label: '深度孵化（oh-story 开书）',
+  invoke: {
+    mention: '$story-long-write',
+    prompt: [
+      '帮我开书。',
+      '创作创意见 {{user_brief_file}}，以它为唯一选题输入。',
+      '执行开书流程 Phase 1→2→3：题材定位与核心设定写入 设定/，卷纲与首批章节细纲写入 大纲/。',
+      '默认停在细纲交付：不要写正文，不要创建 正文/ 目录下的任何文件，不要进入单章写作。',
+      '至少交付：一份总纲或卷纲、一份章细纲、一份世界观文件、一份角色档案。',
+    ].join('\n'),
+  },
+  projection: { mounts: ['user_brief', 'skill_tree', 'agents'] },
+  outputs: [
+    { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: true },
+    { artifact_kind: 'outline_doc', glob: '大纲/**/*.md', binding: 'outlines.upsert', required: true },
+    { artifact_kind: 'world_doc', glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: true },
+    { artifact_kind: 'tracking_doc', glob: '追踪/**/*.md', binding: 'kernel_only', required: false },
+  ],
+  write_scope: ['设定/', '大纲/', '追踪/'],
+  ignore: ['.story-review/'],
+  gates: ['reject_chapter_text_artifact', 'require_outline_mix'],
+  commit: { mode: 'manual', domain_writes: ['worldbuilding', 'characters', 'outlines'] },
+  sandbox: 'workspace-write',
+  approval: 'never',
+}
+
+export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen]
 
 export function isBuiltinKernelContractId(id: string): boolean {
   return BUILTIN_KERNEL_CONTRACTS.some(contract => contract.id === id)

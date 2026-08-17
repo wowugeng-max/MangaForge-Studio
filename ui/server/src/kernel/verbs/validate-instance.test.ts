@@ -34,7 +34,7 @@ describe('instance vs template validation', () => {
     const openBook = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.open')
     const bad = { ...reviewFull, outputs: [{ ...reviewFull.outputs[0], binding: 'outlines.replace' }] }
     expect(validateInstanceAgainstTemplate(bad as any).ok).toBe(false)
-    expect(openBook).toBeUndefined()
+    expect(openBook).toBeTruthy()
   })
   test('template gates must all appear in instance gates', () => {
     const bad = { ...reviewFull, gates: ['reject_solo_fallback'] }

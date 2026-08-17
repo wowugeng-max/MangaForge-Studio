@@ -181,7 +181,7 @@ describe('verb-based job creation', () => {
       ...base, subject_type: 'project', subject_id: project.id, verb: 'review_chapter',
     }, { skipRuntimeCheck: true })) as any).code).toBe('SUBJECT_TYPE_MISMATCH')
   })
-  test.todo('open_book requires brief and project_id==subject_id; dedupes per verb', async () => {
+  test('open_book requires brief and project_id==subject_id; dedupes per verb', async () => {
     const { ws, project } = await seed()
     const body: any = { project_id: project.id, subject_type: 'project', subject_id: project.id, verb: 'open_book', model_id: 9 }
     expect(((await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })) as any).code).toBe('BRIEF_REQUIRED')
