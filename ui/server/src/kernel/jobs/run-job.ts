@@ -83,6 +83,7 @@ export async function createAndRunKernelJob(
     status: 'queued', capability: validated.contracts[0].capability, subject_type: 'chapter',
     subject_id: body.subject_id, model_provider_id: validated.providerId, model_id: body.model_id,
     error_code: '', error_message: '',
+    verb: '', verb_params: '{}', subject_key: '', brief_json: '',
   })
   const candidateIds: string[] = []
   for (const contract of validated.contracts) {

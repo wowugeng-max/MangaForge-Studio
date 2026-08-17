@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite'
-import { ensureSqliteSchema, openDb } from '../novel/db'
+import { addColumnIfMissing, ensureSqliteSchema, openDb } from '../novel/db'
+import { BUILTIN_VERB_BY_ID } from './verbs/infer'
 
 export function ensureKernelSchema(db: Database) {
   db.exec(`
@@ -62,6 +63,23 @@ CREATE TABLE IF NOT EXISTS kernel_commits (
   FOREIGN KEY (candidate_id) REFERENCES kernel_candidates(id) ON DELETE CASCADE
 );
 `)
+  addColumnIfMissing(db, 'kernel_jobs', 'verb', "TEXT NOT NULL DEFAULT ''")
+  addColumnIfMissing(db, 'kernel_jobs', 'verb_params', "TEXT NOT NULL DEFAULT '{}'")
+  addColumnIfMissing(db, 'kernel_jobs', 'subject_key', "TEXT NOT NULL DEFAULT ''")
+  addColumnIfMissing(db, 'kernel_jobs', 'brief_json', "TEXT NOT NULL DEFAULT ''")
+  backfillKernelJobVerbs(db)
+}
+
+function backfillKernelJobVerbs(db: Database) {
+  const rows = db.query(`
+    SELECT j.id AS id, MIN(c.contract_id) AS contract_id
+    FROM kernel_jobs j JOIN kernel_candidates c ON c.job_id = j.id
+    WHERE j.verb = '' GROUP BY j.id
+  `).all() as Array<{ id: string; contract_id: string }>
+  for (const row of rows) {
+    const verb = BUILTIN_VERB_BY_ID[row.contract_id]
+    if (verb) db.query('UPDATE kernel_jobs SET verb = ? WHERE id = ?').run(verb, row.id)
+  }
 }
 
 export function openKernelDb(activeWorkspace: string): Database {
@@ -71,7 +89,7 @@ export function openKernelDb(activeWorkspace: string): Database {
   return db
 }
 
-export function listCommittedTrackingDocPaths(activeWorkspace: string, projectId: number): Array<{ rel_path: string; vault_path: string }> {
+export function listCommittedDocPaths(activeWorkspace: string, projectId: number, kind: string): Array<{ rel_path: string; vault_path: string }> {
   const db = openKernelDb(activeWorkspace)
   try {
     return db.query(`
@@ -79,10 +97,14 @@ export function listCommittedTrackingDocPaths(activeWorkspace: string, projectId
       FROM kernel_artifacts a
       JOIN kernel_commits c ON c.candidate_id = a.candidate_id
       JOIN kernel_jobs j ON j.id = c.job_id
-      WHERE j.project_id = ? AND a.artifact_kind = 'tracking_doc'
+      WHERE j.project_id = ? AND a.artifact_kind = ?
       ORDER BY c.created_at DESC
-    `).all(projectId) as Array<{ rel_path: string; vault_path: string }>
+    `).all(projectId, kind) as Array<{ rel_path: string; vault_path: string }>
   } finally {
     db.close()
   }
+}
+
+export function listCommittedTrackingDocPaths(activeWorkspace: string, projectId: number) {
+  return listCommittedDocPaths(activeWorkspace, projectId, 'tracking_doc')
 }

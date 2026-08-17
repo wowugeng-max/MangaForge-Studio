@@ -11,7 +11,7 @@ import { cleanupKernelJobDirs, recoverOrphanKernelJobs } from './run-job'
 test('orphan running job is failed with ENGINE_FAILED on recovery', async () => {
   const ws = mkdtempSync(join(tmpdir(), 'recover-'))
   const project = await createNovelProject(ws, { title: '书' })
-  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '' })
+  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
   insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'a.b.c', pack_id: 'a', pack_revision: 'r', skill_name: 'b', status: 'running' })
   expect(recoverOrphanKernelJobs(ws)).toBe(1)
   const detail = getKernelJobDetail(ws, 'job-1')!
@@ -24,7 +24,7 @@ test('orphan running job is failed with ENGINE_FAILED on recovery', async () => 
 test('cleanup removes project and codex-home but keeps events and artifacts', async () => {
   const ws = mkdtempSync(join(tmpdir(), 'cleanup-'))
   const project = await createNovelProject(ws, { title: '书' })
-  insertKernelJob(ws, { id: 'job-2', project_id: project.id, workspace_scope: 'novel', title: '', status: 'committed', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '' })
+  insertKernelJob(ws, { id: 'job-2', project_id: project.id, workspace_scope: 'novel', title: '', status: 'committed', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
   insertKernelCandidate(ws, { id: 'cand-2', job_id: 'job-2', contract_id: 'a.b.c', pack_id: 'a', pack_revision: 'r', skill_name: 'b', status: 'committed' })
   const dir = kernelJobDir(ws, 'job-2/candidates/cand-2')
   for (const sub of ['project', 'codex-home', 'snapshot', 'artifacts']) mkdirSync(join(dir, sub), { recursive: true })

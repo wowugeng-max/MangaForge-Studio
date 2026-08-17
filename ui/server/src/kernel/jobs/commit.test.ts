@@ -13,7 +13,7 @@ async function seedReviewJob() {
   const ws = mkdtempSync(join(tmpdir(), 'commit-'))
   const project = await createNovelProject(ws, { title: '书' })
   const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: EIGHT })
-  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '' })
+  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
   insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'succeeded' })
   const vaultFile = join(mkdtempSync(join(tmpdir(), 'commit-vault-')), '第002章.md')
   writeFileSync(vaultFile, 'Fallback: none\n完整审稿报告')
@@ -53,7 +53,7 @@ describe('commitKernelCandidate', () => {
     const ws = mkdtempSync(join(tmpdir(), 'commit-missing-'))
     const project = await createNovelProject(ws, { title: '书' })
     const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: EIGHT })
-    insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '' })
+    insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
     insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'succeeded' })
     insertKernelArtifact(ws, { id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'review_report', rel_path: '审稿/第002章.md', sha256: 'h', byte_size: 10, vault_path: join(ws, 'missing-review.md') })
     expect(await commitKernelCandidate(ws, 'job-1', 'cand-1')).toMatchObject({ ok: false, status: 500, code: 'OUTPUT_MISSING' })
@@ -71,7 +71,7 @@ describe('commitKernelCandidate', () => {
       project_id: project.id, review_type: 'oh_story_review',
       payload: JSON.stringify({ chapter_id: chapter.id, chapter_text_hash: ohStoryChapterTextHash(EIGHT), report_text: 'r' }),
     })
-    insertKernelJob(ws, { id: 'job-2', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'rewrite', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '' })
+    insertKernelJob(ws, { id: 'job-2', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'rewrite', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
     insertKernelCandidate(ws, { id: 'cand-2', job_id: 'job-2', contract_id: 'oh-story-core.story-apply.surgical', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-apply', status: 'succeeded' })
     const nextText = EIGHT + '\n\n新增修订段。'
     const vaultFile = join(mkdtempSync(join(tmpdir(), 'commit-rw-vault-')), '第002章_二.md')

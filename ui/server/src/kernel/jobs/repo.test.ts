@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createNovelProject } from '../../novel'
 import {
-  getKernelJobDetail, insertKernelArtifact, insertKernelCandidate, insertKernelCommit,
+  getKernelJobDetail, hasActiveKernelJob, insertKernelArtifact, insertKernelCandidate, insertKernelCommit,
   insertKernelJob, listKernelJobs, listKernelJobsByStatuses, updateKernelCandidate, updateKernelJob,
 } from './repo'
 
@@ -16,6 +16,7 @@ async function seed() {
     id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '第2章审稿',
     status: 'queued', capability: 'review', subject_type: 'chapter', subject_id: 62,
     model_provider_id: 'any', model_id: 9, error_code: '', error_message: '',
+    verb: '', verb_params: '{}', subject_key: '', brief_json: '',
   })
   insertKernelCandidate(ws, {
     id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full',
@@ -53,6 +54,7 @@ describe('kernel jobs repo', () => {
       id: 'job-2', project_id: project.id, workspace_scope: 'novel', title: '',
       status: 'queued', capability: 'rewrite', subject_type: 'chapter', subject_id: 63,
       model_provider_id: 'any', model_id: 9, error_code: '', error_message: '',
+      verb: '', verb_params: '{}', subject_key: '', brief_json: '',
     })
     expect(listKernelJobs(ws, { projectId: project.id }).length).toBe(2)
     expect(listKernelJobs(ws, { projectId: project.id, subjectId: 62 }).map(j => j.id)).toEqual(['job-1'])
@@ -66,10 +68,24 @@ describe('kernel jobs repo', () => {
         id: `job-extra-${i}`, project_id: project.id, workspace_scope: 'novel', title: '',
         status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1,
         model_provider_id: 'any', model_id: 9, error_code: '', error_message: '',
+        verb: '', verb_params: '{}', subject_key: '', brief_json: '',
       })
     }
     expect(listKernelJobs(ws, { projectId: project.id }).length).toBe(50)
     expect(listKernelJobsByStatuses(ws, ['running']).length).toBe(51)
     expect(listKernelJobsByStatuses(ws, ['queued']).map(j => j.id)).toEqual(['job-1'])
+  })
+
+  test('hasActiveKernelJob dedupes per verb, chapter verbs per subject', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-verb-repo-'))
+    const project = await createNovelProject(ws, { title: '书' })
+    insertKernelJob(ws, {
+      id: 'job-a', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running',
+      capability: 'review', subject_type: 'chapter', subject_id: 62, model_provider_id: '', model_id: null,
+      error_code: '', error_message: '', verb: 'review_chapter', verb_params: '{}', subject_key: '', brief_json: '',
+    })
+    expect(hasActiveKernelJob(ws, { projectId: project.id, verb: 'review_chapter', subjectId: 62 })).toBe(true)
+    expect(hasActiveKernelJob(ws, { projectId: project.id, verb: 'review_chapter', subjectId: 63 })).toBe(false)
+    expect(hasActiveKernelJob(ws, { projectId: project.id, verb: 'open_book' })).toBe(false)
   })
 })

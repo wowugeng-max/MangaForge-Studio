@@ -7,6 +7,7 @@ export type KernelJobRow = {
   model_provider_id: string; model_id: number | null
   created_at: string; updated_at: string; finished_at: string | null
   error_code: string; error_message: string
+  verb: string; verb_params: string; subject_key: string; brief_json: string
 }
 export type KernelCandidateRow = {
   id: string; job_id: string; contract_id: string; pack_id: string; pack_revision: string
@@ -26,9 +27,16 @@ function withDb<T>(ws: string, fn: (db: ReturnType<typeof openKernelDb>) => T): 
 
 export function insertKernelJob(ws: string, row: Omit<KernelJobRow, 'created_at' | 'updated_at' | 'finished_at'>): void {
   withDb(ws, db => db.query(`
-    INSERT INTO kernel_jobs (id, project_id, workspace_scope, title, status, capability, subject_type, subject_id, model_provider_id, model_id, error_code, error_message)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-  `).run(row.id, row.project_id, row.workspace_scope, row.title, row.status, row.capability, row.subject_type, row.subject_id, row.model_provider_id, row.model_id, row.error_code, row.error_message))
+    INSERT INTO kernel_jobs (id, project_id, workspace_scope, title, status, capability, subject_type, subject_id, model_provider_id, model_id, error_code, error_message, verb, verb_params, subject_key, brief_json)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+  `).run(row.id, row.project_id, row.workspace_scope, row.title, row.status, row.capability, row.subject_type, row.subject_id, row.model_provider_id, row.model_id, row.error_code, row.error_message, row.verb, row.verb_params, row.subject_key, row.brief_json))
+}
+
+export function hasActiveKernelJob(ws: string, filter: { projectId: number; verb: string; subjectId?: number }): boolean {
+  const where = ['project_id = ?', 'verb = ?', "status IN ('queued','running','awaiting_selection')"]
+  const values: any[] = [filter.projectId, filter.verb]
+  if (filter.subjectId !== undefined) { where.push('subject_id = ?'); values.push(filter.subjectId) }
+  return withDb(ws, db => !!db.query(`SELECT id FROM kernel_jobs WHERE ${where.join(' AND ')} LIMIT 1`).get(...values))
 }
 
 export function insertKernelCandidate(ws: string, row: Pick<KernelCandidateRow, 'id' | 'job_id' | 'contract_id' | 'pack_id' | 'pack_revision' | 'skill_name' | 'status'>): void {

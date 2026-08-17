@@ -10,7 +10,7 @@ import { persistCandidateArtifacts } from './vault'
 test('persists artifact copies under vault and registers ledger rows', async () => {
   const ws = mkdtempSync(join(tmpdir(), 'vault-'))
   const project = await createNovelProject(ws, { title: '书' })
-  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '' })
+  insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running', capability: 'review', subject_type: 'chapter', subject_id: 1, model_provider_id: '', model_id: null, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
   insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'a.b.c', pack_id: 'a', pack_revision: 'r', skill_name: 'b', status: 'running' })
   const src = mkdtempSync(join(tmpdir(), 'vault-src-'))
   mkdirSync(join(src, '审稿'), { recursive: true })

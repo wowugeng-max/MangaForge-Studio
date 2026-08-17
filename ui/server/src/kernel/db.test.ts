@@ -3,6 +3,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { listCommittedTrackingDocPaths, openKernelDb } from './db'
+import { BUILTIN_VERB_BY_ID } from './verbs/infer'
 
 function tempWs() { return mkdtempSync(join(tmpdir(), 'kernel-db-')) }
 
@@ -33,5 +34,20 @@ describe('kernel db', () => {
     const ws = tempWs()
     openKernelDb(ws).close()
     expect(listCommittedTrackingDocPaths(ws, 3)).toEqual([])
+  })
+
+  test('kernel_jobs gains verb columns and backfills from candidate contract ids', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-verb-db-'))
+    const db = openKernelDb(ws)
+    db.exec("INSERT INTO projects (id, title) VALUES (1, 't')")
+    db.query(`INSERT INTO kernel_jobs (id, project_id, status, capability, subject_type, subject_id, verb)
+              VALUES ('job-old', 1, 'committed', 'review', 'chapter', 62, '')`).run()
+    db.query(`INSERT INTO kernel_candidates (id, job_id, contract_id, pack_id, pack_revision, skill_name, status)
+              VALUES ('cand-old', 'job-old', 'oh-story-core.story-review.full', 'oh-story-core', 'r', 'story-review', 'committed')`).run()
+    db.close()
+    const reopened = openKernelDb(ws)
+    const row = reopened.query(`SELECT verb FROM kernel_jobs WHERE id = 'job-old'`).get() as any
+    reopened.close()
+    expect(row.verb).toBe(BUILTIN_VERB_BY_ID['oh-story-core.story-review.full'])
   })
 })
