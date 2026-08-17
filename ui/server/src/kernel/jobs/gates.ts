@@ -36,7 +36,13 @@ export async function runPostHarvestGates(input: {
     ...input.artifacts.map(a => a.rel_path),
     ...(input.warnings || []).map(w => w.rel_path),
   ]
-  const hasChapterParse = (rel: string) => /第\s*\d+\s*章/.test(rel.split('/').pop() || rel)
+  const hasChapterParse = (artifact: GateArtifact) => {
+    const name = artifact.rel_path.split('/').pop() || artifact.rel_path
+    if (/第\s*\d+\s*章/.test(name)) return true
+    const text = input.readArtifactText(artifact)
+    const heading = String(text || '').match(/^#+\s*(.+)$/m)?.[1] || ''
+    return /第\s*\d+\s*章/.test(heading) || /第\s*\d+\s*章/.test(text)
+  }
 
   for (const gate of input.contract.gates) {
     if (gate === 'require_reviewer_agents') {
@@ -58,7 +64,7 @@ export async function runPostHarvestGates(input: {
     }
     if (gate === 'require_outline_mix') {
       const outlineDocs = input.artifacts.filter(a => a.artifact_kind === 'outline_doc')
-      const withNo = outlineDocs.filter(a => hasChapterParse(a.rel_path)).length
+      const withNo = outlineDocs.filter(a => hasChapterParse(a)).length
       const withoutNo = outlineDocs.length - withNo
       if (withNo >= 1 && withoutNo >= 1) results.push({ gate, ok: true })
       else results.push({ gate, ok: false, code: 'KIND_COUNT_BELOW_MIN', message: `细纲 ${withNo} / 总纲 ${withoutNo}` })

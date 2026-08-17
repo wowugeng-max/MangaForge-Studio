@@ -84,4 +84,59 @@ describe('deep-draft wizard source contract', () => {
     expect(controller).toContain('302.ai')
     expect(controller).toContain('kernel-codex-gpt-5.6-luna')
   })
+
+  test('footer cancel and modal close cancel a running job then reset', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    const wizard = read('NovelCreateWizard.tsx')
+    const discard = controller.slice(
+      controller.indexOf('const discardIncubation'),
+      controller.indexOf('const handleNext'),
+    )
+    const modalCancel = controller.slice(
+      controller.indexOf('const handleModalCancel'),
+      controller.indexOf('const steps'),
+    )
+    expect(discard).toContain('/cancel')
+    expect(modalCancel).toContain('discardIncubation')
+    expect(modalCancel).toContain('handleReset')
+    expect(modalCancel).toContain('onCancel')
+    expect(wizard).toContain('onCancel={handleModalCancel}')
+    expect(wizard).toContain('onClick={handleModalCancel}')
+  })
+
+  test('discard is visible while incubation is creating or running', () => {
+    const wizard = read('NovelCreateWizard.tsx')
+    const creatingBlock = wizard.slice(
+      wizard.indexOf("incubation.phase === 'creating'"),
+      wizard.indexOf("incubation.phase === 'running'"),
+    )
+    const runningBlock = wizard.slice(
+      wizard.indexOf("incubation.phase === 'running'"),
+      wizard.indexOf("incubation.phase === 'failed'"),
+    )
+    expect(creatingBlock).toContain('丢弃')
+    expect(runningBlock).toContain('丢弃')
+  })
+
+  test('retries a failed incubation on the same empty project', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    const start = controller.slice(
+      controller.indexOf('const startDeepDraftIncubation'),
+      controller.indexOf('const loadArtifactPreview'),
+    )
+    const discard = controller.slice(
+      controller.indexOf('const discardIncubation'),
+      controller.indexOf('const handleNext'),
+    )
+    const reset = controller.slice(
+      controller.indexOf('const handleReset'),
+      controller.indexOf('const handleModalCancel'),
+    )
+    expect(start).not.toContain('incubationProjectIdRef.current = null')
+    expect(start).toContain('Number(incubationProjectIdRef.current)')
+    expect(start.indexOf('Number(incubationProjectIdRef.current)')).toBeLessThan(start.indexOf('/api/novel/projects'))
+    expect(start).toContain('/api/novel/projects')
+    expect(discard).not.toContain('incubationProjectIdRef.current = null')
+    expect(reset).toContain('incubationProjectIdRef.current = null')
+  })
 })

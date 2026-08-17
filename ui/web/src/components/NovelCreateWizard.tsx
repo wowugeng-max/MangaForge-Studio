@@ -183,7 +183,17 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 <Card size="small" title={STEP0_SECTION_TITLES.progress} style={{ borderRadius: 12 }}>
                   <Space direction="vertical" size={10} style={{ width: '100%' }}>
                     {incubation.phase === 'creating' && (
-                      <Text>正在创建空项目…</Text>
+                      <>
+                        <Text>正在创建空项目…</Text>
+                        <Button
+                          danger
+                          loading={discarding}
+                          disabled={adopting}
+                          onClick={() => { void discardIncubation() }}
+                        >
+                          丢弃
+                        </Button>
+                      </>
                     )}
                     {incubation.phase === 'running' && (
                       <>
@@ -192,6 +202,14 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                           <Tag bordered={false}>已用时 {formatElapsed(incubation.elapsedMs)}</Tag>
                         </Space>
                         <Text type="secondary">{incubation.hint || '内核开书进行中'}</Text>
+                        <Button
+                          danger
+                          loading={discarding}
+                          disabled={adopting}
+                          onClick={() => { void discardIncubation() }}
+                        >
+                          丢弃
+                        </Button>
                       </>
                     )}
                     {incubation.phase === 'failed' && (

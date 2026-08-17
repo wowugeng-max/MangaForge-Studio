@@ -363,23 +363,26 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     setArtifactPreview(null)
     incubationRef.current = { phase: 'creating' }
     setIncubation({ phase: 'creating' })
-    incubationProjectIdRef.current = null
     try {
-      const created = await fetchJson('/api/novel/projects', {
-        method: 'POST',
-        body: JSON.stringify(projectFormPayload()),
-      })
+      let projectId = Number(incubationProjectIdRef.current)
+      if (!Number.isFinite(projectId) || projectId <= 0) {
+        const created = await fetchJson('/api/novel/projects', {
+          method: 'POST',
+          body: JSON.stringify(projectFormPayload()),
+        })
+        if (generation !== pollGenerationRef.current || !openRef.current) return
+        if (created?.ok === false) {
+          setIncubation({ phase: 'failed', jobId: null, errorCode: created.code || 'UNKNOWN' })
+          return
+        }
+        projectId = Number(created.id || created.project?.id)
+        if (!projectId) {
+          setIncubation({ phase: 'failed', jobId: null, errorCode: 'PROJECT_ID_MISSING' })
+          return
+        }
+        incubationProjectIdRef.current = projectId
+      }
       if (generation !== pollGenerationRef.current || !openRef.current) return
-      if (created?.ok === false) {
-        setIncubation({ phase: 'failed', jobId: null, errorCode: created.code || 'UNKNOWN' })
-        return
-      }
-      const projectId = Number(created.id || created.project?.id)
-      if (!projectId) {
-        setIncubation({ phase: 'failed', jobId: null, errorCode: 'PROJECT_ID_MISSING' })
-        return
-      }
-      incubationProjectIdRef.current = projectId
       if (typeof window !== 'undefined') window.localStorage.setItem(projectSeedModelStorageKey, String(selectedKernelModelId))
 
       const job = await fetchJson(KERNEL_JOBS_PATH, {
@@ -399,7 +402,12 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
           },
         }),
       })
-      if (generation !== pollGenerationRef.current || !openRef.current) return
+      if (generation !== pollGenerationRef.current || !openRef.current) {
+        if (job?.ok && job?.job?.id) {
+          void fetchJson(`${KERNEL_JOBS_PATH}/${job.job.id}/cancel`, { method: 'POST' })
+        }
+        return
+      }
       if (!job.ok) {
         setIncubation({ phase: 'failed', jobId: null, errorCode: job.code || 'UNKNOWN' })
         return
@@ -479,14 +487,16 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
         const cancelled = await fetchJson(`${KERNEL_JOBS_PATH}/${jobId}/cancel`, { method: 'POST' })
         if (cancelled?.ok === false && !cancelAlreadySettled(cancelled)) {
           message.error(cancelled.error || cancelled.code || '取消失败')
-          return
+          return false
         }
       }
       setIncubation({ phase: 'idle' })
       setArtifactPreview(null)
       message.info('已丢弃本次孵化，空项目仍保留')
+      return true
     } catch {
       setIncubation({ phase: 'failed', jobId, errorCode: 'CANCEL_FAILED' })
+      return false
     } finally {
       setDiscarding(false)
     }
@@ -580,7 +590,14 @@ export function useCreateWizardController({ open, onCancel, onSuccess }: NovelCr
     })
   }
 
-  const handleModalCancel = () => {
+  const handleModalCancel = async () => {
+    const state = incubationRef.current
+    if (state.phase === 'running' || state.phase === 'awaiting_selection') {
+      const cancelled = await discardIncubation()
+      if (!cancelled) return
+    } else {
+      clearPoll()
+    }
     handleReset()
     onCancel()
   }

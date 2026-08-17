@@ -21,6 +21,12 @@ describe('domain upserts', () => {
     expect(parseChapterNoFromRelPath('大纲/细纲_第003章.md')).toBe(3)
     expect(parseChapterNoFromRelPath('大纲/卷纲_第1卷.md')).toBeNull()
     expect(parseChapterNoFromRelPath('大纲/大纲.md')).toBeNull()
+    expect(parseChapterNoFromRelPath('大纲/细纲.md')).toBeNull()
+  })
+  test('outline upsert parses chapter no from first heading when filename lacks it', () => {
+    const ws = makeWs()
+    const { chapterNo } = upsertOutlineDoc(ws, 1, '大纲/细纲.md', '# 第003章 初入怪谈\n细纲内容')
+    expect(chapterNo).toBe(3)
   })
   test('world upsert keyed by kernel_rel_path, second call updates in place', () => {
     const ws = makeWs()

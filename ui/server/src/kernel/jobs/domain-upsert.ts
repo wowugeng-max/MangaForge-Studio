@@ -3,10 +3,15 @@ import { openKernelDb } from '../db'
 
 const SUMMARY_MAX = 4000
 
-export function parseChapterNoFromRelPath(relPath: string): number | null {
+export function parseChapterNoFromRelPath(relPath: string, text = ''): number | null {
   const name = relPath.split('/').pop() || relPath
-  const match = name.match(/第\s*(\d+)\s*章/)
-  return match ? Number(match[1]) : null
+  const fromName = name.match(/第\s*(\d+)\s*章/)
+  if (fromName) return Number(fromName[1])
+  const heading = firstHeadingOf(text)
+  const fromHeading = heading.match(/第\s*(\d+)\s*章/)
+  if (fromHeading) return Number(fromHeading[1])
+  const fromBody = String(text || '').match(/第\s*(\d+)\s*章/)
+  return fromBody ? Number(fromBody[1]) : null
 }
 
 export function firstHeadingOf(text: string): string {
@@ -56,7 +61,7 @@ export function upsertCharacterSheet(ws: string, projectId: number, relPath: str
 
 export function upsertOutlineDoc(ws: string, projectId: number, relPath: string, text: string): { outlineId: number; chapterNo: number | null } {
   return withDb(ws, db => {
-    const chapterNo = parseChapterNoFromRelPath(relPath)
+    const chapterNo = parseChapterNoFromRelPath(relPath, text)
     const outlineType = chapterNo === null ? 'master' : 'chapter'
     const title = firstHeadingOf(text) || (relPath.split('/').pop() || relPath).replace(/\.md$/i, '')
     const summary = text.length > SUMMARY_MAX ? text.slice(0, SUMMARY_MAX) : text

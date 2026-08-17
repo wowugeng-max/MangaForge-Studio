@@ -126,6 +126,21 @@ describe('verb gates', () => {
     expect(gate.failedCode).toBe('KIND_COUNT_BELOW_MIN')
     expect(gate.failedStatus).toBe('failed')
   })
+  test('outline mix treats 第N章 in heading as 细纲 when filename lacks it', async () => {
+    const gate = await runPostHarvestGates({
+      workspace: '/tmp/nowhere', projectId: 1, chapterId: 0, contract: baseOpenContract,
+      artifacts: [
+        art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),
+        art('outline_doc', '大纲/大纲.md'), art('outline_doc', '大纲/细纲.md'),
+      ],
+      warnings: [],
+      readArtifactText: textReader({
+        '大纲/大纲.md': '# 全书大纲\n卷纲',
+        '大纲/细纲.md': '# 第003章 初入怪谈\n细纲',
+      }),
+    })
+    expect(gate.failedCode).toBeNull()
+  })
   test('required kind count below template min fails', async () => {
     const gate = await run([
       art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),
