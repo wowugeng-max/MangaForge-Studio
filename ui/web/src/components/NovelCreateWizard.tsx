@@ -1,19 +1,12 @@
 import React from 'react'
-import { Button, Form, Input, Modal, Result, Segmented, Select, Space, Steps, message } from 'antd'
+import { Alert, Button, Card, Collapse, Form, Input, Modal, Result, Segmented, Select, Space, Steps, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, ArrowRightOutlined, CheckCircleOutlined, RocketOutlined } from '@ant-design/icons'
-import {
-  evaluateLaunchpadReadiness,
-  summarizeFirst30Plan,
-} from './novel-entry/launchpadModel'
 import { CreateModeSection, type CreateWizardMode } from './novel-entry/create/CreateModeSection'
 import { GenreGuideSection } from './novel-entry/create/GenreGuideSection'
 import { SeedInputSection } from './novel-entry/create/SeedInputSection'
-import { SeedStatusBar } from './novel-entry/create/SeedStatusBar'
-import { DeepDraftReviewSection } from './novel-entry/create/DeepDraftReviewSection'
-import { GenerationProgressPanel } from './novel-entry/create/GenerationProgressPanel'
 import { CreateStepHeader } from './novel-entry/create/CreateStepHeader'
 import { CreateSummaryCard } from './novel-entry/create/CreateSummaryCard'
-import { CREATE_MODE_LABELS } from './novel-entry/create/createWizardCopy'
+import { CREATE_MODE_LABELS, STEP0_SECTION_TITLES } from './novel-entry/create/createWizardCopy'
 import {
   AUDIENCES,
   COMMERCIAL_TAGS,
@@ -22,10 +15,38 @@ import {
   LENGTH_TARGETS,
   STYLE_TAGS,
 } from './novel-entry/create/createWizardOptions'
-import { useCreateWizardController } from './novel-entry/create/useCreateWizardController'
-import { primaryGenreLockText } from './novel-entry/genreCatalogGuide'
+import { useCreateWizardController, type IncubationArtifact } from './novel-entry/create/useCreateWizardController'
 
 export type { NovelCreateWizardProps } from './novel-entry/create/useCreateWizardController'
+
+const { Text } = Typography
+
+const ARTIFACT_KIND_ORDER = ['world_doc', 'character_sheet', 'outline_doc'] as const
+const ARTIFACT_KIND_LABELS: Record<string, string> = {
+  world_doc: '世界观',
+  character_sheet: '角色',
+  outline_doc: '大纲',
+}
+
+function formatElapsed(ms: number) {
+  const total = Math.max(0, Math.floor(ms / 1000))
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  return minutes > 0 ? `${minutes}分${seconds}秒` : `${seconds}秒`
+}
+
+function groupArtifacts(artifacts: IncubationArtifact[]) {
+  const groups = new Map<string, IncubationArtifact[]>()
+  for (const artifact of artifacts) {
+    const kind = artifact.artifact_kind || 'other'
+    const list = groups.get(kind) || []
+    list.push(artifact)
+    groups.set(kind, list)
+  }
+  const ordered = ARTIFACT_KIND_ORDER.filter(kind => groups.has(kind)).map(kind => [kind, groups.get(kind)!] as const)
+  const rest = [...groups.entries()].filter(([kind]) => !ARTIFACT_KIND_ORDER.includes(kind as typeof ARTIFACT_KIND_ORDER[number]))
+  return [...ordered, ...rest]
+}
 
 export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
   open: boolean
@@ -36,76 +57,51 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
     form,
     current,
     creating,
-    createdId,
     seedIdea,
     setSeedIdea,
     createMode,
     setCreateMode,
-    seedLoading,
-    seedStream,
-    finalizingSeed,
-    autoCreating,
-    seed,
-    seedDiagnostics,
-    seedFinalized,
-    setSeedFinalized,
-    foundationAccepted,
-    setFoundationAccepted,
-    fillingGaps,
     selectedGenreFramework,
     genreCatalogLoading,
-    deepDraftReview,
-    setDeepDraftReview,
     launchpad,
-    setLaunchpad,
     modelsLoading,
     seedModelId,
     setSeedModelId,
-    selectedSeedDraftId,
-    setSelectedSeedDraftId,
-    seedDraftsLoading,
-    savingSeedDraft,
-    deletingSeedDraft,
     data,
     setData,
     updateLaunchpad,
     updateFirst30Plan,
-    updateDeepDraftReview,
-    updateDeepDraftCharacter,
-    updateDeepDraftVolume,
-    updateDeepDraftChapter,
-    removeDeepDraftItem,
-    foundationScore,
     first30Summary,
     launchpadReadiness,
-    foundationReadyToCreate,
-    outlinesAreLocalScaffold,
     activeGenreGuide,
     genreGuideGroups,
-    seedRecoveryView,
-    effectiveForeshadowingCount,
-    seedConfirmationSummary,
     handleNext,
     handlePrev,
-    handleCreate,
-    handleAutoCreate,
     handleDone,
     handleModalCancel,
     steps,
     onFormChange,
     modelOptions,
-    seedDraftOptions,
-    repairCurrentDeepDraftGaps,
-    saveCurrentSeedDraft,
-    loadSelectedSeedDraft,
-    deleteSelectedSeedDraft,
-    deriveProjectSeed,
-    fillSeedGaps,
-    finalizeProjectSeed,
     selectPrimaryGenre,
     selectGenreFramework,
-    seedDiagnosticsNeedReview,
+    incubation,
+    incubationBusy,
+    startDeepDraftIncubation,
+    adoptIncubation,
+    discardIncubation,
+    loadArtifactPreview,
+    artifactPreview,
+    previewLoadingId,
+    adopting,
+    discarding,
   } = useCreateWizardController({ open, onCancel, onSuccess })
+
+  const isDeepDraft = createMode === 'deep_draft'
+  const primaryDisabled = current === 0 && (
+    !data.title.trim()
+    || (createMode === 'manual' && !data.genre)
+    || (isDeepDraft && (!seedIdea.trim() || !seedModelId || incubation.phase === 'awaiting_selection'))
+  )
 
   return (
     <Modal
@@ -118,24 +114,26 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
     >
       <div style={{ textAlign: 'center', marginBottom: 24 }}>
         <h2 style={{ margin: '0 0 4px 0' }}>新书商业长篇启动台</h2>
-        <p style={{ color: '#666', margin: 0 }}>先确认卖点、前30章和长线承载，再进入故事规划</p>
+        <p style={{ color: '#666', margin: 0 }}>
+          {isDeepDraft ? '深度孵化：先建空项目，再跑 oh-story 开书，停在细纲后人工采纳' : '先确认卖点、前30章和长线承载，再进入故事规划'}
+        </p>
       </div>
 
-      <Steps
-        current={current}
-        items={steps}
-        style={{ marginBottom: 32 }}
-        size="small"
-      />
+      {!isDeepDraft && (
+        <Steps
+          current={current}
+          items={steps}
+          style={{ marginBottom: 32 }}
+          size="small"
+        />
+      )}
 
-      {/* 所有步骤共享同一个 Form 实例，通过 onValuesChange 同步到 data */}
       <Form
         form={form}
         layout="vertical"
         onValuesChange={onFormChange}
       >
 
-        {/* Step 0: Basic Info */}
         {current === 0 && (
           <>
             <Space direction="vertical" size={12} style={{ width: '100%', marginBottom: 16 }}>
@@ -143,8 +141,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 value={createMode}
                 onChange={(mode: CreateWizardMode) => {
                   setCreateMode(mode)
-                  setSeedFinalized(mode !== 'deep_draft' && Boolean(seed) && !seedDiagnosticsNeedReview(seedDiagnostics))
-                  setFoundationAccepted(false)
                 }}
               />
 
@@ -157,106 +153,127 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 onSelectFramework={selectGenreFramework}
               />
 
-              {createMode !== 'manual' && (
+              {isDeepDraft && (
                 <SeedInputSection
                   title={data.title}
                   lengthTarget={data.length_target}
                   idea={seedIdea}
                   modelId={seedModelId}
                   modelOptions={modelOptions}
-                  draftOptions={seedDraftOptions}
-                  selectedDraftId={selectedSeedDraftId}
-                  loading={seedLoading}
+                  draftOptions={[]}
+                  loading={incubationBusy}
                   modelsLoading={modelsLoading}
-                  draftsLoading={seedDraftsLoading}
-                  deletingDraft={deletingSeedDraft}
-                  showDraftControls={createMode === 'deep_draft'}
-                  showAutoCreate={createMode === 'quick_ai'}
-                  autoCreating={autoCreating}
-                  autoCreateDisabled={seedLoading || creating}
-                  autoCreateLabel={seed ? '用这个种子自动创建并进入工作台' : 'AI整理并自动创建项目'}
+                  showDraftControls={false}
+                  showAutoCreate={false}
                   lengthOptions={LENGTH_TARGETS}
                   onTitleChange={value => setData(prev => ({ ...prev, title: value }))}
-                  onLengthChange={value => {
-                    setData(prev => ({ ...prev, length_target: value }))
-                    setSeedFinalized(false)
-                  }}
+                  onLengthChange={value => setData(prev => ({ ...prev, length_target: value }))}
                   onIdeaChange={setSeedIdea}
                   onModelChange={setSeedModelId}
-                  onDraftChange={setSelectedSeedDraftId}
-                  onGenerate={deriveProjectSeed}
-                  onSaveDraft={saveCurrentSeedDraft}
-                  onLoadDraft={loadSelectedSeedDraft}
-                  onDeleteDraft={deleteSelectedSeedDraft}
-                  onAutoCreate={handleAutoCreate}
-                  generateLabel={createMode === 'deep_draft' ? '生成详细草稿' : 'AI整理创意'}
+                  onDraftChange={() => {}}
+                  onGenerate={startDeepDraftIncubation}
+                  onSaveDraft={() => {}}
+                  onLoadDraft={() => {}}
+                  onDeleteDraft={() => {}}
+                  generateLabel="开始深度孵化"
                 />
               )}
 
-              {seedLoading ? (
-                <GenerationProgressPanel state={seedStream.state} />
-              ) : seed ? (
-                <>
-                  <SeedStatusBar
-                    volumeCount={Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
-                    chapterCount={Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
-                    foreshadowingCount={effectiveForeshadowingCount}
-                    characterCount={createMode === 'deep_draft' ? deepDraftReview.characters.length : (Array.isArray(seed?.characters) ? seed.characters.length : 0)}
-                    score={createMode === 'deep_draft' ? {
-                      overall: foundationScore.overall,
-                      grade: foundationScore.grade,
-                      statusLabel: foundationScore.statusLabel,
-                      recommendCreate: foundationScore.recommendCreate,
-                    } : undefined}
-                    scoreSummary={createMode === 'deep_draft' ? foundationScore.summary : undefined}
-                    topRisks={createMode === 'deep_draft' ? foundationScore.topRisks : undefined}
-                    diagnosticsSuggestion={
-                      outlinesAreLocalScaffold
-                        ? String(seedDiagnostics?.suggestion || seed?.seed_diagnostics?.suggestion || '分卷/前30章细纲尚未由模型成功生成，请重新生成或换更强模型')
-                        : (seedRecoveryView.visible ? seedRecoveryView.message : undefined)
-                    }
-                    riskMessage={
-                      outlinesAreLocalScaffold
-                        ? '分卷/前30章细纲尚未由模型成功生成'
-                        : (seedRecoveryView.visible ? seedRecoveryView.title : undefined)
-                    }
-                    finalized={seedFinalized}
-                    regenerating={seedLoading}
-                    savingDraft={savingSeedDraft}
-                    finalizing={finalizingSeed}
-                    showDraftActions={createMode === 'deep_draft'}
-                    showFinalize={createMode === 'deep_draft'}
-                    showFoundationAccept={createMode === 'deep_draft'}
-                    foundationAccepted={foundationAccepted}
-                    showFillGaps={createMode === 'deep_draft' && (foundationScore.topRisks?.length || 0) > 0}
-                    fillingGaps={fillingGaps}
-                    onFillGaps={fillSeedGaps}
-                    onAcceptFoundation={() => setFoundationAccepted(true)}
-                    onClearFoundationAccept={() => setFoundationAccepted(false)}
-                    onRegenerate={deriveProjectSeed}
-                    onSaveDraft={saveCurrentSeedDraft}
-                    onFinalize={() => finalizeProjectSeed(false)}
-                    onConfirmFinalize={() => finalizeProjectSeed(true)}
-                    showConfirmFinalize={createMode === 'deep_draft' && seedDiagnosticsNeedReview(seedDiagnostics)}
-                    finalizeLabel="定稿并创建项目"
-                    confirmFinalizeLabel="我已确认，创建项目"
-                  />
-                  {createMode === 'deep_draft' && (
-                    <DeepDraftReviewSection
-                      model={deepDraftReview}
-                      onChange={updateDeepDraftReview}
-                      onChangeCharacter={updateDeepDraftCharacter}
-                      onChangeVolume={updateDeepDraftVolume}
-                      onChangeChapter={updateDeepDraftChapter}
-                      onRemoveItem={removeDeepDraftItem}
-                      onRepairGaps={repairCurrentDeepDraftGaps}
-                    />
-                  )}
-                </>
-              ) : null}
+              {isDeepDraft && incubation.phase !== 'idle' && (
+                <Card size="small" title={STEP0_SECTION_TITLES.progress} style={{ borderRadius: 12 }}>
+                  <Space direction="vertical" size={10} style={{ width: '100%' }}>
+                    {incubation.phase === 'creating' && (
+                      <Text>正在创建空项目…</Text>
+                    )}
+                    {incubation.phase === 'running' && (
+                      <>
+                        <Space wrap>
+                          <Tag color="processing" bordered={false}>phase: running</Tag>
+                          <Tag bordered={false}>已用时 {formatElapsed(incubation.elapsedMs)}</Tag>
+                        </Space>
+                        <Text type="secondary">{incubation.hint || '内核开书进行中'}</Text>
+                      </>
+                    )}
+                    {incubation.phase === 'failed' && (
+                      <Alert
+                        type="error"
+                        showIcon
+                        message={`孵化失败：${incubation.errorCode}`}
+                        description={incubation.jobId ? `job ${incubation.jobId}` : '任务尚未创建成功'}
+                      />
+                    )}
+                    {incubation.phase === 'awaiting_selection' && (
+                      <>
+                        <Alert
+                          type="success"
+                          showIcon
+                          message="开书已停在细纲，请预览后采纳或丢弃"
+                        />
+                        {groupArtifacts(incubation.artifacts).map(([kind, items]) => (
+                          <div key={kind}>
+                            <Text strong style={{ fontSize: 12, color: '#64748b' }}>
+                              {ARTIFACT_KIND_LABELS[kind] || kind}
+                            </Text>
+                            <div style={{ display: 'grid', gap: 6, marginTop: 6 }}>
+                              {items.map(item => (
+                                <Collapse
+                                  key={item.id}
+                                  size="small"
+                                  activeKey={artifactPreview?.id === item.id ? [item.id] : []}
+                                  onChange={() => { void loadArtifactPreview(item) }}
+                                  items={[{
+                                    key: item.id,
+                                    label: `${item.rel_path || item.id}${previewLoadingId === item.id ? '（加载中）' : ''}`,
+                                    children: artifactPreview?.id === item.id ? (
+                                      <pre style={{
+                                        margin: 0,
+                                        maxHeight: 280,
+                                        overflow: 'auto',
+                                        whiteSpace: 'pre-wrap',
+                                        fontSize: 12,
+                                        background: '#f8fafc',
+                                        padding: 8,
+                                        borderRadius: 8,
+                                      }}>
+                                        {artifactPreview.content || '（空）'}
+                                        {artifactPreview.truncated ? '\n\n…（已截断）' : ''}
+                                      </pre>
+                                    ) : (
+                                      <Text type="secondary">点击加载只读预览</Text>
+                                    ),
+                                  }]}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        <Space>
+                          <Button
+                            type="primary"
+                            icon={<RocketOutlined />}
+                            loading={adopting}
+                            disabled={!incubation.candidateId || discarding}
+                            onClick={() => adoptIncubation(incubation.candidateId)}
+                          >
+                            采纳
+                          </Button>
+                          <Button
+                            danger
+                            loading={discarding}
+                            disabled={adopting}
+                            onClick={() => { void discardIncubation() }}
+                          >
+                            丢弃
+                          </Button>
+                        </Space>
+                      </>
+                    )}
+                  </Space>
+                </Card>
+              )}
             </Space>
 
-            {(createMode === 'manual' || seed) && (
+            {createMode === 'manual' && (
               <>
                 <Form.Item
                   name="title"
@@ -335,7 +352,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
           </>
         )}
 
-        {/* Step 1: Commercial Hook */}
         {current === 1 && (
           <>
             <CreateStepHeader
@@ -420,7 +436,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
           </>
         )}
 
-        {/* Step 2: Long-form Capacity */}
         {current === 2 && (
           <>
             <CreateStepHeader
@@ -430,11 +445,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 { label: '长线冲突', ok: Boolean(launchpad.long_term_conflict.trim()) },
                 { label: '成长引擎', ok: Boolean(launchpad.growth_engine.trim()) },
                 { label: '分卷方向', ok: Boolean(launchpad.volume_direction.trim()) },
-                ...(seed ? [
-                  { label: `分卷 ${seed.volume_outlines?.length || 0}`, ok: (seed.volume_outlines?.length || 0) > 0 },
-                  { label: `细纲 ${seed.chapter_outlines?.length || 0}`, ok: (seed.chapter_outlines?.length || 0) > 0 },
-                  { label: `伏笔 ${effectiveForeshadowingCount}`, ok: effectiveForeshadowingCount > 0 },
-                ] : []),
               ]}
             />
             <Form.Item label="长篇主线目标">
@@ -490,11 +500,9 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
                 placeholder="第31-100章的阶段方向、升级节奏或风险点"
               />
             </Form.Item>
-
           </>
         )}
 
-        {/* Step 3: First 30 Chapters */}
         {current === 3 && (
           <>
             <CreateStepHeader
@@ -547,7 +555,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
 
       </Form>
 
-      {/* Step 4: Confirm — 从 data state 读取，不依赖 Form */}
       {current === 4 && (
         <div style={{ borderRadius: 12 }}>
           <CreateStepHeader
@@ -556,11 +563,6 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
               { label: launchpadReadiness.sellable.title, ok: launchpadReadiness.sellable.ready },
               { label: launchpadReadiness.first30.title, ok: launchpadReadiness.first30.ready },
               { label: launchpadReadiness.longform.title, ok: launchpadReadiness.longform.ready },
-              ...(createMode === 'deep_draft' ? [{
-                label: `基础分 ${foundationScore.overall}`,
-                ok: foundationScore.recommendCreate || foundationAccepted,
-              }] : []),
-              ...(seed ? [{ label: '种子已备', ok: true }] : [{ label: '种子待补', ok: false }]),
             ]}
           />
           <CreateSummaryCard
@@ -569,30 +571,19 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
             genre={data.genre}
             framework={selectedGenreFramework || activeGenreGuide?.framework || (data.sub_genres || [])[0] || ''}
             lengthLabel={LENGTH_TARGETS.find(item => item.value === data.length_target)?.label || '中篇'}
-            score={createMode === 'deep_draft' && seed ? {
-              overall: foundationScore.overall,
-              grade: foundationScore.grade,
-              statusLabel: foundationScore.statusLabel,
-              recommendCreate: foundationScore.recommendCreate || foundationAccepted,
-            } : undefined}
-            volumeCount={Number(seedDiagnostics?.outline_volume_count ?? seed?.volume_outlines?.length ?? 0)}
-            chapterCount={Number(seedDiagnostics?.outline_chapter_count ?? seed?.chapter_outlines?.length ?? 0)}
-            foreshadowingCount={effectiveForeshadowingCount}
-            characterCount={createMode === 'deep_draft' ? deepDraftReview.characters.length : (Array.isArray(seed?.characters) ? seed.characters.length : 0)}
+            volumeCount={0}
+            chapterCount={0}
+            foreshadowingCount={0}
             readinessTags={[
               { label: `${launchpadReadiness.sellable.title}${launchpadReadiness.sellable.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.sellable.ready },
               { label: `${launchpadReadiness.first30.title}${launchpadReadiness.first30.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.first30.ready },
               { label: `${launchpadReadiness.longform.title}${launchpadReadiness.longform.ready ? '就绪' : '待补'}`, ok: launchpadReadiness.longform.ready },
             ]}
-            topRisks={[
-              ...(createMode === 'deep_draft' ? foundationScore.topRisks : []),
-              ...launchpadReadiness.risks,
-            ].filter(Boolean).slice(0, 8)}
+            topRisks={launchpadReadiness.risks.filter(Boolean).slice(0, 8)}
           />
         </div>
       )}
 
-      {/* Step 5: Done */}
       {current === 5 && (
         <Result
           status="success"
@@ -615,35 +606,28 @@ export default function NovelCreateWizard({ open, onCancel, onSuccess }: {
         />
       )}
 
-      {/* Navigation Buttons */}
       {current < 5 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 24 }}>
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={handlePrev}
-            disabled={current === 0}
+            disabled={current === 0 || isDeepDraft}
           >
             上一步
           </Button>
           <Space>
             <Button onClick={handleModalCancel}> 取消</Button>
-            <Button
-              type="primary"
-              icon={current === 4 ? <RocketOutlined /> : <ArrowRightOutlined />}
-              onClick={handleNext}
-              loading={creating}
-              disabled={
-                (current === 0 && (
-                  !data.title.trim()
-                  || (createMode === 'manual' && !data.genre)
-                  || (createMode === 'quick_ai' && !seed)
-                  || (createMode === 'deep_draft' && (!seed || !seedFinalized || !foundationReadyToCreate))
-                ))
-                || (current === 4 && createMode === 'deep_draft' && !foundationReadyToCreate)
-              }
-            >
-              {current === 4 ? '创建项目' : '下一步'}
-            </Button>
+            {!(isDeepDraft && incubation.phase === 'awaiting_selection') && (
+              <Button
+                type="primary"
+                icon={current === 4 || isDeepDraft ? <RocketOutlined /> : <ArrowRightOutlined />}
+                onClick={handleNext}
+                loading={creating || incubationBusy}
+                disabled={primaryDisabled}
+              >
+                {isDeepDraft ? '开始深度孵化' : current === 4 ? '创建项目' : '下一步'}
+              </Button>
+            )}
           </Space>
         </div>
       )}

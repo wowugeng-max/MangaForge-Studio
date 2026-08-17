@@ -20,27 +20,22 @@ function packageJoin(dir: string) {
 }
 
 describe('NovelCreateWizard deep draft flow', () => {
-  test('creates a novel project after deep draft finalization succeeds', async () => {
+  test('deep draft incubation creates an empty project then an open_book kernel job', async () => {
     const monofile = readFileSync(join(import.meta.dir, 'NovelCreateWizard.tsx'), 'utf8')
     const controller = readFileSync(join(import.meta.dir, 'novel-entry/create/useCreateWizardController.ts'), 'utf8')
-    const seedPipeline = readFileSync(join(import.meta.dir, 'novel-entry/create/useCreateWizardSeedPipeline.ts'), 'utf8')
-    const source = [monofile, controller, seedPipeline, packageJoin('novel-entry')].join('\n')
-    const finalizeStart = seedPipeline.indexOf('const finalizeProjectSeed = async')
-    const finalizeEnd = seedPipeline.indexOf('return {', finalizeStart)
-    const finalizeBlock = seedPipeline.slice(finalizeStart, finalizeEnd)
+    const source = [monofile, controller, packageJoin('novel-entry')].join('\n')
 
-    expect(controller).toContain('createSeedPipelineActions')
-    expect(finalizeBlock).toContain('createProjectFromFinalizedSeed')
-    expect(finalizeBlock).toContain('create_project: true')
-    expect(finalizeBlock).toContain('author_confirmed')
-    expect(finalizeBlock).toContain('finishCreatedProjectFromFinalizeResponse(res.data)')
-    expect(source).toContain('project_id')
+    expect(controller).toContain("verb: 'open_book'")
+    expect(controller).toContain('/api/kernel/jobs')
+    expect(controller).toContain('startDeepDraftIncubation')
+    expect(controller).toContain('adoptIncubation')
+    expect(controller).toContain('discardIncubation')
+    expect(controller).not.toContain('createSeedPipelineActions')
+    expect(controller).not.toContain('deriveProjectSeed')
+    expect(monofile).not.toContain('quick_ai')
+    expect(monofile).toContain('采纳')
+    expect(monofile).toContain('丢弃')
     expect(source).toContain('project?.id')
-    expect(finalizeBlock).toContain('setSeedFinalized(true)')
-    expect(source).toContain('定稿并创建项目')
-    expect(source).toContain('我已确认，创建项目')
-    expect(source).toContain('finalizeProjectSeed(true)')
-    expect(source).toContain('normalizeProjectSeedForUi')
     expect(monofile).toContain('useCreateWizardController')
   })
 

@@ -1,7 +1,6 @@
 export const CREATE_MODE_LABELS = {
   manual: { title: '手动开书', hint: '先建项目' },
-  quick_ai: { title: 'AI 快速', hint: '一键整理' },
-  deep_draft: { title: '深度孵化', hint: '生成后修订' },
+  deep_draft: { title: '深度孵化', hint: 'oh-story 开书：设定+大纲+细纲，停在细纲，人工采纳' },
 } as const
 
 export const STEP0_SECTION_TITLES = {

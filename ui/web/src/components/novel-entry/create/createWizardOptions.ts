@@ -48,4 +48,4 @@ export const COMMERCIAL_TAGS = [
 ]
 
 
-export type CreateMode = 'manual' | 'quick_ai' | 'deep_draft'
+export type CreateMode = 'manual' | 'deep_draft'

@@ -4,7 +4,7 @@ import { CREATE_MODE_LABELS, STEP0_SECTION_TITLES } from './createWizardCopy'
 
 export type CreateWizardMode = keyof typeof CREATE_MODE_LABELS
 
-const MODE_ORDER: CreateWizardMode[] = ['manual', 'quick_ai', 'deep_draft']
+const MODE_ORDER: CreateWizardMode[] = ['manual', 'deep_draft']
 
 export function CreateModeSection(props: {
   value: CreateWizardMode
@@ -12,7 +12,7 @@ export function CreateModeSection(props: {
 }) {
   return (
     <Card size="small" title={STEP0_SECTION_TITLES.mode} style={{ borderRadius: 12, background: '#fbfdff' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
         {MODE_ORDER.map(key => {
           const item = CREATE_MODE_LABELS[key]
           const active = props.value === key
