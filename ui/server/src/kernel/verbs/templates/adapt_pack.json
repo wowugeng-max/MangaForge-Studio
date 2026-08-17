@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "verb": "adapt_pack",
+  "label": "适配 skill",
+  "subject_type": "pack",
+  "capability": "attachment",
+  "required_kinds": [{ "kind": "contract_json", "min": 1 }],
+  "optional_kinds": [],
+  "forbidden_required_kinds": ["chapter_text", "review_report"],
+  "allowed_domain_writes": [],
+  "forbidden_domain_writes": ["chapters", "reviews", "outlines", "worldbuilding", "characters"],
+  "template_gates": [],
+  "allowed_gates": ["write_outside_scope"],
+  "mention_policy": "optional",
+  "commit_mode": "manual",
+  "allowed_replace_bindings": false
+}

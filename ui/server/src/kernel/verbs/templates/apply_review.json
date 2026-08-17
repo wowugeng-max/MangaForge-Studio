@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "verb": "apply_review",
+  "label": "按建议改稿",
+  "subject_type": "chapter",
+  "capability": "rewrite",
+  "required_kinds": [{ "kind": "chapter_text", "min": 1 }],
+  "optional_kinds": [],
+  "forbidden_required_kinds": ["review_report"],
+  "allowed_domain_writes": ["chapters", "chapter_versions", "reviews"],
+  "forbidden_domain_writes": ["outlines"],
+  "template_gates": ["require_chapter_file", "require_matching_review", "paragraph_retention_70"],
+  "allowed_gates": ["require_chapter_file", "require_matching_review", "paragraph_retention_70", "write_outside_scope"],
+  "mention_policy": "optional",
+  "commit_mode": "auto_if_single",
+  "allowed_replace_bindings": false
+}

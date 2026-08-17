@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "verb": "open_book",
+  "label": "深度孵化",
+  "subject_type": "project",
+  "capability": "outline",
+  "required_kinds": [
+    { "kind": "world_doc", "min": 1 },
+    { "kind": "character_sheet", "min": 1 },
+    { "kind": "outline_doc", "min": 2 }
+  ],
+  "optional_kinds": ["tracking_doc"],
+  "forbidden_required_kinds": ["chapter_text", "review_report"],
+  "allowed_domain_writes": ["worldbuilding", "characters", "outlines"],
+  "forbidden_domain_writes": ["chapters", "reviews"],
+  "template_gates": ["reject_chapter_text_artifact", "require_outline_mix"],
+  "allowed_gates": ["reject_chapter_text_artifact", "require_outline_mix", "write_outside_scope"],
+  "mention_policy": "required",
+  "commit_mode": "manual",
+  "allowed_replace_bindings": false
+}

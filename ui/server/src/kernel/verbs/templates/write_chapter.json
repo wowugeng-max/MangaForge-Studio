@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "verb": "write_chapter",
+  "label": "写本章",
+  "subject_type": "chapter",
+  "capability": "rewrite",
+  "required_kinds": [{ "kind": "chapter_text", "min": 1 }],
+  "optional_kinds": ["tracking_doc"],
+  "forbidden_required_kinds": ["review_report"],
+  "allowed_domain_writes": ["chapters", "chapter_versions"],
+  "forbidden_domain_writes": ["outlines", "reviews"],
+  "template_gates": ["require_chapter_file"],
+  "allowed_gates": ["require_chapter_file", "write_outside_scope"],
+  "mention_policy": "required",
+  "commit_mode": "auto_if_single",
+  "allowed_replace_bindings": false
+}

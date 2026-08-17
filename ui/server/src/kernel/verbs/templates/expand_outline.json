@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "verb": "expand_outline",
+  "label": "扩写大纲",
+  "subject_type": "project",
+  "capability": "outline",
+  "required_kinds": [{ "kind": "outline_doc", "min": 1 }],
+  "optional_kinds": ["world_doc", "character_sheet"],
+  "forbidden_required_kinds": ["chapter_text", "review_report"],
+  "allowed_domain_writes": ["worldbuilding", "characters", "outlines"],
+  "forbidden_domain_writes": ["chapters", "reviews"],
+  "template_gates": ["reject_chapter_text_artifact"],
+  "allowed_gates": ["reject_chapter_text_artifact", "write_outside_scope"],
+  "mention_policy": "required",
+  "commit_mode": "manual",
+  "allowed_replace_bindings": false
+}

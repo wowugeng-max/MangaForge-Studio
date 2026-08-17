@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "verb": "review_chapter",
+  "label": "审稿",
+  "subject_type": "chapter",
+  "capability": "review",
+  "required_kinds": [{ "kind": "review_report", "min": 1 }],
+  "optional_kinds": ["tracking_doc"],
+  "forbidden_required_kinds": ["chapter_text"],
+  "allowed_domain_writes": ["reviews"],
+  "forbidden_domain_writes": ["chapters", "outlines"],
+  "template_gates": ["require_chapter_file", "reject_chapter_text_artifact"],
+  "allowed_gates": ["require_chapter_file", "reject_chapter_text_artifact", "reject_solo_fallback", "require_reviewer_agents", "write_outside_scope"],
+  "mention_policy": "required",
+  "commit_mode": "auto_if_single",
+  "allowed_replace_bindings": false
+}
