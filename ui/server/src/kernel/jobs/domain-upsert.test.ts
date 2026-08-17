@@ -28,6 +28,20 @@ describe('domain upserts', () => {
     const { chapterNo } = upsertOutlineDoc(ws, 1, '大纲/细纲.md', '# 第003章 初入怪谈\n细纲内容')
     expect(chapterNo).toBe(3)
   })
+  test('master outline body mentioning 第N章 does not parse as chapter or spawn a row', () => {
+    const ws = makeWs()
+    const text = '# 全书大纲\n第1章 初入怪谈的卷纲摘要'
+    expect(parseChapterNoFromRelPath('大纲/大纲.md', text)).toBeNull()
+    const { outlineId, chapterNo } = upsertOutlineDoc(ws, 1, '大纲/大纲.md', text)
+    expect(chapterNo).toBeNull()
+    if (chapterNo !== null) ensureEmptyChapterRow(ws, 1, chapterNo, '全书大纲', outlineId)
+    const db = openKernelDb(ws)
+    const outline = db.query(`SELECT outline_type FROM outlines WHERE id = ?`).get(outlineId) as any
+    const chapters = db.query(`SELECT id FROM chapters WHERE project_id = 1`).all() as any[]
+    db.close()
+    expect(outline.outline_type).toBe('master')
+    expect(chapters).toEqual([])
+  })
   test('world upsert keyed by kernel_rel_path, second call updates in place', () => {
     const ws = makeWs()
     const id1 = upsertWorldDoc(ws, 1, '设定/势力/铁誓盟.md', '全文A')

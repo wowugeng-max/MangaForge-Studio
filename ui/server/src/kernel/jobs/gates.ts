@@ -5,6 +5,7 @@ import { latestOhStoryReviewForChapter, ohStoryReviewMatchesChapterText } from '
 import type { KernelContract } from '../contracts/schema'
 import { resolveContractVerb } from '../verbs/infer'
 import { getVerbTemplate } from '../verbs/registry'
+import { firstHeadingOf } from './domain-upsert'
 
 export type GateResult = { gate: string; ok: boolean; code?: string; message?: string }
 
@@ -39,9 +40,8 @@ export async function runPostHarvestGates(input: {
   const hasChapterParse = (artifact: GateArtifact) => {
     const name = artifact.rel_path.split('/').pop() || artifact.rel_path
     if (/第\s*\d+\s*章/.test(name)) return true
-    const text = input.readArtifactText(artifact)
-    const heading = String(text || '').match(/^#+\s*(.+)$/m)?.[1] || ''
-    return /第\s*\d+\s*章/.test(heading) || /第\s*\d+\s*章/.test(text)
+    const heading = firstHeadingOf(input.readArtifactText(artifact))
+    return /第\s*\d+\s*章/.test(heading)
   }
 
   for (const gate of input.contract.gates) {

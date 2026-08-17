@@ -141,6 +141,33 @@ describe('verb gates', () => {
     })
     expect(gate.failedCode).toBeNull()
   })
+  test('outline mix ignores 第N章 in 总纲 body; mix with filename or heading 细纲 passes', async () => {
+    const masterBody = '# 全书大纲\n第1章 初入怪谈的卷纲摘要'
+    const shared = [
+      art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),
+      art('outline_doc', '大纲/大纲.md'),
+    ]
+    const byFilename = await runPostHarvestGates({
+      workspace: '/tmp/nowhere', projectId: 1, chapterId: 0, contract: baseOpenContract,
+      artifacts: [...shared, art('outline_doc', '大纲/细纲_第001章.md')],
+      warnings: [],
+      readArtifactText: textReader({
+        '大纲/大纲.md': masterBody,
+        '大纲/细纲_第001章.md': '# 第001章\n细纲',
+      }),
+    })
+    expect(byFilename.failedCode).toBeNull()
+    const byHeading = await runPostHarvestGates({
+      workspace: '/tmp/nowhere', projectId: 1, chapterId: 0, contract: baseOpenContract,
+      artifacts: [...shared, art('outline_doc', '大纲/细纲.md')],
+      warnings: [],
+      readArtifactText: textReader({
+        '大纲/大纲.md': masterBody,
+        '大纲/细纲.md': '# 第001章\n细纲',
+      }),
+    })
+    expect(byHeading.failedCode).toBeNull()
+  })
   test('required kind count below template min fails', async () => {
     const gate = await run([
       art('world_doc', '设定/世界观.md'), art('character_sheet', '设定/角色/楚弦.md'),

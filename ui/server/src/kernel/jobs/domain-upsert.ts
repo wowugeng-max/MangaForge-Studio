@@ -10,8 +10,7 @@ export function parseChapterNoFromRelPath(relPath: string, text = ''): number | 
   const heading = firstHeadingOf(text)
   const fromHeading = heading.match(/第\s*(\d+)\s*章/)
   if (fromHeading) return Number(fromHeading[1])
-  const fromBody = String(text || '').match(/第\s*(\d+)\s*章/)
-  return fromBody ? Number(fromBody[1]) : null
+  return null
 }
 
 export function firstHeadingOf(text: string): string {
