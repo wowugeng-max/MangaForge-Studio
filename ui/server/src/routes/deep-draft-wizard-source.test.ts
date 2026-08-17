@@ -27,4 +27,61 @@ describe('deep-draft wizard source contract', () => {
     expect(controller).toContain("verb: 'open_book'")
     expect(controller).toContain('/api/kernel/jobs')
   })
+
+  test('aborts in-flight start after cancel and when the mounted wizard closes', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    const start = controller.slice(
+      controller.indexOf('const startDeepDraftIncubation'),
+      controller.indexOf('const loadArtifactPreview'),
+    )
+    expect(controller).toContain('if (!open) clearPoll()')
+    expect(start.indexOf('const generation = pollGenerationRef.current')).toBeGreaterThan(start.indexOf('clearPoll()'))
+    expect(start).toContain('generation !== pollGenerationRef.current')
+    expect(start).toContain('!openRef.current')
+    expect(start.split('await fetchJson').length - 1).toBeGreaterThanOrEqual(2)
+    const afterFirstAwait = start.slice(start.indexOf('await fetchJson'))
+    expect(afterFirstAwait).toContain('generation !== pollGenerationRef.current')
+    expect(afterFirstAwait).toContain('!openRef.current')
+  })
+
+  test('does not start a second incubation from awaiting_selection or double-click', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    const wizard = read('NovelCreateWizard.tsx')
+    const start = controller.slice(
+      controller.indexOf('const startDeepDraftIncubation'),
+      controller.indexOf('const loadArtifactPreview'),
+    )
+    const busyStart = controller.indexOf('const incubationBusy')
+    const busy = controller.slice(busyStart, controller.indexOf('return {', busyStart))
+    expect(start).toContain("phase === 'awaiting_selection'")
+    expect(start.indexOf("incubationRef.current = { phase: 'creating' }")).toBeGreaterThan(-1)
+    expect(start.indexOf("incubationRef.current = { phase: 'creating' }")).toBeLessThan(start.indexOf('await fetchJson'))
+    expect(busy).toContain('awaiting_selection')
+    expect(busy).toContain('adopting')
+    expect(wizard).toContain('loading={incubationBusy}')
+    expect(wizard).toContain('disabled={primaryDisabled || incubationBusy}')
+  })
+
+  test('poll stops on fetch errors and committed status; failed cancel is not success', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    const poll = controller.slice(
+      controller.indexOf('const pollIncubation'),
+      controller.indexOf('const startDeepDraftIncubation'),
+    )
+    const discard = controller.slice(
+      controller.indexOf('const discardIncubation'),
+      controller.indexOf('const handleNext'),
+    )
+    expect(poll).toContain('ok === false')
+    expect(poll).toContain('!detail?.job')
+    expect(poll).toContain("status === 'committed'")
+    expect(discard).toContain('ok === false')
+  })
+
+  test('does not skip models solely by numeric database id 302', () => {
+    const controller = read('novel-entry/create/useCreateWizardController.ts')
+    expect(controller).not.toContain('Number(model?.id) === 302')
+    expect(controller).toContain('302.ai')
+    expect(controller).toContain('kernel-codex-gpt-5.6-luna')
+  })
 })
