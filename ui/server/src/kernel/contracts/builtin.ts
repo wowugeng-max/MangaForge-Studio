@@ -28,7 +28,7 @@ const reviewFull: KernelContract = {
   ],
   write_scope: ['审稿/', '追踪/'],
   ignore: ['.story-review/'],
-  gates: ['reject_solo_fallback', 'require_reviewer_agents', 'require_chapter_file', 'reject_chapter_text_artifact'],
+  gates: ['reject_solo_fallback', 'require_spawn_evidence', 'require_reviewer_agents', 'require_chapter_file', 'reject_chapter_text_artifact'],
   commit: { mode: 'auto_if_single', domain_writes: ['reviews'] },
   sandbox: 'workspace-write',
   approval: 'never',

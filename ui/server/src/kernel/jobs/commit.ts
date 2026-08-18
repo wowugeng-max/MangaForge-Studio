@@ -41,9 +41,14 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
 
   const artifacts = detail.artifacts.filter((a: any) => a.candidate_id === candidateId)
   const chapterId = Number(detail.job.subject_id)
+  let spawnEvidence = { subagent_threads: [] as Array<{ thread_id: string; parent_thread_id: string; agent: string }>, agent_hints: [] as string[] }
+  try {
+    const meta = JSON.parse(candidate.metadata || '{}')
+    if (meta.spawn_evidence) spawnEvidence = meta.spawn_evidence
+  } catch { /* 缺 metadata 视为零 spawn */ }
   const gate = await runPostHarvestGates({
     workspace: ws, projectId: detail.job.project_id, chapterId, contract,
-    artifacts, warnings: [], readArtifactText: readVaultText,
+    artifacts, warnings: [], spawnEvidence, readArtifactText: readVaultText,
   })
   if (gate.failedCode) return { ok: false, status: 409, code: gate.failedCode, message: 'commit-time gate failed' }
 

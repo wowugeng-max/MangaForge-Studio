@@ -192,6 +192,7 @@ export async function createAndRunKernelJob(
             workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
             artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
             warnings: result.warnings,
+            spawnEvidence: result.spawnEvidence,
             readArtifactText: (artifact) => {
               try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
             },

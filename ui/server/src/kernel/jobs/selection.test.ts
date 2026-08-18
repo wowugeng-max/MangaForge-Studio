@@ -22,6 +22,11 @@ function fakeReviewContract() {
   return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', verb: 'review_chapter', label: '假审稿' }
 }
 
+const SPAWN_OK = {
+  subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }],
+  agent_hints: ['story-architect'],
+}
+
 function stubRunner() {
   return async (input: any) => {
     const dir = mkdtempSync(join(tmpdir(), 'sel-art-'))
@@ -30,7 +35,7 @@ function stubRunner() {
     return {
       ok: true, jobDir: dir, projectDir: dir, threadId: 't', turnId: 'u',
       artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report', sha256: 'h', byte_size: 8, copied_path: join(dir, '审稿/第002章.md') }],
-      warnings: [], lastMessage: '', spawnEvidence: { subagent_threads: [], agent_hints: [] }, eventsPath: join(dir, 'e.jsonl'),
+      warnings: [], lastMessage: '', spawnEvidence: SPAWN_OK, eventsPath: join(dir, 'e.jsonl'),
     }
   }
 }

@@ -10,7 +10,7 @@
   "allowed_domain_writes": ["reviews"],
   "forbidden_domain_writes": ["chapters", "outlines"],
   "template_gates": ["require_chapter_file", "reject_chapter_text_artifact"],
-  "allowed_gates": ["require_chapter_file", "reject_chapter_text_artifact", "reject_solo_fallback", "require_reviewer_agents", "write_outside_scope"],
+  "allowed_gates": ["require_chapter_file", "reject_chapter_text_artifact", "reject_solo_fallback", "require_reviewer_agents", "require_spawn_evidence", "write_outside_scope"],
   "mention_policy": "required",
   "commit_mode": "auto_if_single",
   "allowed_replace_bindings": false

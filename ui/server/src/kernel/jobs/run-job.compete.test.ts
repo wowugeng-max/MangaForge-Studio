@@ -21,6 +21,11 @@ function fakeReviewContract() {
   return { ...base, id: 'oh-story-core.story-review.fast', variant: 'fast', verb: 'review_chapter', label: '假审稿（并跑对照）' }
 }
 
+const SPAWN_OK = {
+  subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }],
+  agent_hints: ['story-architect'],
+}
+
 function stubRunner(reportByContract: Record<string, string>) {
   const started: string[] = []
   const runner = async (input: any) => {
@@ -33,7 +38,7 @@ function stubRunner(reportByContract: Record<string, string>) {
     return {
       ok: true, jobDir: dir, projectDir: dir, threadId: 't', turnId: 'u',
       artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report', sha256: 'h', byte_size: 8, copied_path: join(dir, '审稿/第002章.md') }],
-      warnings: [], lastMessage: text, spawnEvidence: { subagent_threads: [], agent_hints: [] }, eventsPath: join(dir, 'e.jsonl'),
+      warnings: [], lastMessage: text, spawnEvidence: SPAWN_OK, eventsPath: join(dir, 'e.jsonl'),
     }
   }
   return { runner, started }

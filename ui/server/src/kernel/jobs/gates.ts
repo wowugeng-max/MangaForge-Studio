@@ -24,6 +24,7 @@ export async function runPostHarvestGates(input: {
   contract: KernelContract
   artifacts: GateArtifact[]
   warnings: Array<{ warning: string; rel_path: string }>
+  spawnEvidence?: { subagent_threads: Array<{ thread_id: string; parent_thread_id: string; agent: string }>; agent_hints: string[] }
   readArtifactText: (artifact: GateArtifact) => string
 }): Promise<{ results: GateResult[]; failedCode: string | null; failedStatus: 'gated' | 'failed' | null }> {
   const results: GateResult[] = []
@@ -78,6 +79,11 @@ export async function runPostHarvestGates(input: {
       const head = input.readArtifactText(reportArtifact).slice(0, 2048)
       if (soloDetected(head)) results.push({ gate, ok: false, code: 'SOLO_FALLBACK' })
       else results.push({ gate, ok: true })
+      continue
+    }
+    if (gate === 'require_spawn_evidence') {
+      const n = input.spawnEvidence?.subagent_threads.length || 0
+      results.push(n < 1 ? { gate, ok: false, code: 'NO_SPAWN' } : { gate, ok: true })
       continue
     }
     if (gate === 'require_chapter_file') {

@@ -100,4 +100,28 @@ describe('phase-4 acceptance over fixture engine', () => {
     const chapter = await getNovelChapter(ws, ch2.id, project.id)
     expect(chapter?.chapter_text).toBe('第二章。')
   })
+
+  test('full review without spawn is gated NO_SPAWN and does not insert reviews', async () => {
+    const { ws, project, ch2 } = await seed()
+    const created = await createAndRunKernelJob(ws, {
+      project_id: project.id, subject_type: 'chapter', subject_id: ch2.id,
+      contract_ids: ['oh-story-core.story-review.full'], model_id: 9,
+    }, {
+      skipRuntimeCheck: true,
+      engineArgv: [process.execPath, FIXTURE],
+      engineEnv: {
+        FAKE_SKILLS: JSON.stringify([{ name: 'story-review', path: '.agents/skills/story-review' }]),
+        FAKE_WRITE_FILE: '审稿/第002章.md',
+        FAKE_WRITE_CONTENT: 'Fallback: none\n无 spawn 的报告',
+        FAKE_AGENT_MESSAGE: '完成',
+      },
+    })
+    if (!created.ok) throw new Error('create failed')
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.candidates[0].error_code).toBe('NO_SPAWN')
+    expect(detail.candidates[0].status).toBe('gated')
+    expect(detail.job.status).toBe('failed')
+    expect((await listNovelReviewsByType(ws, project.id, 'oh_story_review')).length).toBe(0)
+  })
 })

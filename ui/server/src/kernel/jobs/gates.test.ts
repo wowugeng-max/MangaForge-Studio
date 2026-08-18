@@ -12,6 +12,10 @@ const reviewContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-cor
 const applyContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')!
 
 const EIGHT_PARAGRAPHS = Array.from({ length: 8 }, (_, i) => `原文段${i}。`).join('\n\n')
+const SPAWN_OK = {
+  subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }],
+  agent_hints: ['story-architect'],
+}
 
 async function seed(chapterText = EIGHT_PARAGRAPHS) {
   const ws = mkdtempSync(join(tmpdir(), 'gates-'))
@@ -32,9 +36,9 @@ describe('runPostHarvestGates', () => {
       artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report' }],
       warnings: [],
     }
-    const pass = await runPostHarvestGates({ ...base, readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: none\nEffective Mode: multi\n正文' }) })
+    const pass = await runPostHarvestGates({ ...base, spawnEvidence: SPAWN_OK, readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: none\nEffective Mode: multi\n正文' }) })
     expect(pass.failedCode).toBeNull()
-    const solo = await runPostHarvestGates({ ...base, readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: solo (agents unavailable)\n正文' }) })
+    const solo = await runPostHarvestGates({ ...base, spawnEvidence: SPAWN_OK, readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: solo (agents unavailable)\n正文' }) })
     expect(solo.failedCode).toBe('SOLO_FALLBACK')
     const missing = await runPostHarvestGates({ ...base, artifacts: [], readArtifactText: textReader({}) })
     expect(missing.failedCode).toBe('SOLO_FALLBACK')
@@ -45,7 +49,42 @@ describe('runPostHarvestGates', () => {
     const result = await runPostHarvestGates({
       workspace: ws, projectId: project.id, chapterId: chapter.id, contract: reviewContract,
       artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report' }], warnings: [],
+      spawnEvidence: SPAWN_OK,
       readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: none\n第三段提到 solo 模式的风险。' }),
+    })
+    expect(result.failedCode).toBeNull()
+  })
+
+  test('full review with zero spawn evidence gates NO_SPAWN', async () => {
+    const { ws, project, chapter } = await seed()
+    const base = {
+      workspace: ws, projectId: project.id, chapterId: chapter.id, contract: reviewContract,
+      artifacts: [{ rel_path: '审稿/第002章.md', artifact_kind: 'review_report' }],
+      warnings: [],
+      readArtifactText: textReader({ '审稿/第002章.md': 'Fallback: none\n正文' }),
+    }
+    const none = await runPostHarvestGates({ ...base, spawnEvidence: { subagent_threads: [], agent_hints: [] } })
+    expect(none.failedCode).toBe('NO_SPAWN')
+    const ok = await runPostHarvestGates({
+      ...base,
+      spawnEvidence: { subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }], agent_hints: ['story-architect'] },
+    })
+    expect(ok.failedCode).toBeNull()
+  })
+
+  test('apply contract ignores missing spawn evidence', async () => {
+    const { ws, project, chapter } = await seed()
+    await createNovelReview(ws, {
+      project_id: project.id, review_type: 'oh_story_review',
+      payload: JSON.stringify({ chapter_id: chapter.id, chapter_text_hash: ohStoryChapterTextHash(EIGHT_PARAGRAPHS), report_text: 'r' }),
+    })
+    const keep = EIGHT_PARAGRAPHS + '\n\n新增段。'
+    const result = await runPostHarvestGates({
+      workspace: ws, projectId: project.id, chapterId: chapter.id, contract: applyContract,
+      artifacts: [{ rel_path: '正文/第002章_二.md', artifact_kind: 'chapter_text' }],
+      warnings: [],
+      spawnEvidence: { subagent_threads: [], agent_hints: [] },
+      readArtifactText: textReader({ '正文/第002章_二.md': keep }),
     })
     expect(result.failedCode).toBeNull()
   })
