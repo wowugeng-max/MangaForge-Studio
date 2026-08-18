@@ -21,7 +21,9 @@
 - 测试命令统一 `cd /Users/ruiyaosong/MangaForge-Studio/.worktrees/codex-kernel-ledger-projection/ui/server && bun test <相对路径>`；conventional commits，每任务一提交。
 - 新代码全在 `ui/server/src/kernel/codex/`（探针改动在 `kernel/probe.ts`，路由改动在 `routes/kernel-routes.ts`）。
 
-### 本分期新增决定（实现后需折入 spec v1.2）
+### 本分期新增决定（已折入 spec v1.2，2026-08-18）
+
+> 以 `docs/superpowers/specs/2026-08-15-codex-kernel-vault-design.md` v1.2 为准。本表 idle 120s 已被 xhigh 超时覆盖，不要按本表实现。
 
 | 决定 | 取值 |
 |---|---|
@@ -1663,5 +1665,5 @@ git commit -m "feat(kernel): candidate dry-run cli for phase-3 acceptance"
 
 - 分期 3 验收 = Task 9 fixture 演练 + 真机清单第 1-4 条（真机部分依赖 codex 安装，属部署前置）。
 - 明确不做（分期 4-5 计划再排）：`POST /api/kernel/jobs` 编排、门执行（`reject_solo_fallback` 等收回后门）、commit/选优、进度轮询接口（7.4）、旧按钮阻塞桥接、并跑。`run-candidate.ts` 已把「一个候选」封成纯函数，分期 4 的 job 编排在它外面包状态机即可。
-- spec v1.2 待折入：`ENGINE_FAILED` 终态码、key 缺失归 `PROVIDER_TRANSLATE_FAILED`、probe body `model_id`、probe 结果类型、`implemented_reason` 字段。
+- spec v1.2 已折入：`ENGINE_FAILED`、key 缺失归 `PROVIDER_TRANSLATE_FAILED`、probe body `model_id`、probe 结果类型、`implemented_reason`。turn 超时以 spec v1.2 为准（本表 120s 作废）。
 - 风险复述：真 app-server 字段名可能与「协议形状约定」有出入——客户端已宽容读取（`threadId ?? thread.id` 等），仍有出入时只改 `session.ts` 的读取处与 fixture，不改协议方法集。

@@ -19,7 +19,7 @@
 - 提交后其余 `succeeded` 候选保持 `succeeded`（不改状态）——账本可追溯谁没被选。
 - 测试命令与提交规范同分期 4。
 
-### 本分期新增决定（实现后折入 spec v1.2）
+### 本分期新增决定（已折入 spec v1.2，2026-08-18）
 
 | 决定 | 取值 |
 |---|---|
@@ -424,5 +424,5 @@ git commit -m "feat(kernel): orphan job recovery and terminal job dir cleanup"
 ## 收尾与遗留
 
 - 分期 5 完成后整个 spec v1.1 的 1-5 期闭环；剩余：分期 6（outline / 画布 prompt 合同）**须另开 brainstorm + spec**（当前 spec 明确列为非目标，无设计可依），不得直接写实现计划。
-- spec v1.2 汇总折入：分期 3/4/5 三份计划头部「新增决定」表全部条目。
-- UI 侧（另排）：选优界面（候选对比视图）、进度轮询接入 7.4 对象、合同多选入口。本计划只交付后端语义。
+- spec v1.2 已汇总折入：见 `docs/superpowers/specs/2026-08-15-codex-kernel-vault-design.md`。并跑主键以 **verb** 为准（不是本计划写作时的 capability）。
+- UI 侧（另排）：选优界面、进度轮询接入 7.4、合同多选入口。本计划只交付后端语义。

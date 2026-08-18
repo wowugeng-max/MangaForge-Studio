@@ -463,7 +463,7 @@ POST /api/kernel/jobs
 
 ## 与旧文档的关系
 
-- **扩展** `2026-08-15-codex-kernel-vault-design.md`：打开 `subject_type=project`（仅已实现模板的动词）；`outline` capability 在开书采纳路径落地；并跑主键改为动词；新增 mount / kind / 门 / prompt 变量如上；`world` 挂载升级为按 `kernel_rel_path` 回放；收存增加「outputs 顺序 = glob 命中优先级」规则；内核 spec 终态错误表回填 `ENGINE_FAILED` / `CANCELLED`（本次修订已同步改该文件）。内核 spec 第 11 条画布不切、不改 Codex、领域表为真相，全部保留。
+- **扩展** `2026-08-15-codex-kernel-vault-design.md`（**v1.2** 已收回本文件已落地的内核语义：verb 主键、开书、`ENGINE_FAILED`/`CANCELLED`、投影/门/prompt 变量）。细纲扩写、写正文仍另开实现计划。内核 spec 画布不切、不改 Codex、领域表为真相，全部保留。
 - **覆盖** 内核 spec 分期第 6 条「outline 另开」中的开书部分：本文件即该另开 spec。细纲扩写、写正文仍另开实现计划。
 - **废止** 深度孵化作为产品路径时对 `project-seed/derive-stream` 的依赖。seed API 可暂留，向导 `deep_draft` 不得调用。
 - **不替代** oh-story 三按钮的内核桥接与 70% 改稿门、solo 门。

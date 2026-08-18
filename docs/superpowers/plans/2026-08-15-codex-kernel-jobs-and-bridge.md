@@ -19,7 +19,7 @@
 - 朱雀/指纹不回退入库；不出现新的 solo 提示词路径；`KERNEL_RUNTIME_UNAVAILABLE` 时旧按钮直接 503，禁止静默改走旧 LLM 管线。
 - 测试命令统一 `cd /Users/ruiyaosong/MangaForge-Studio/.worktrees/codex-kernel-ledger-projection/ui/server && bun test <相对路径>`；conventional commits，每任务一提交。
 
-### 本分期新增决定（实现后折入 spec v1.2）
+### 本分期新增决定（已折入 spec v1.2，2026-08-18）
 
 | 决定 | 取值 |
 |---|---|
@@ -1715,5 +1715,5 @@ git commit -m "test(kernel): phase-4 acceptance over fixture engine"
 ## 收尾与遗留
 
 - 明确不做：并跑选优（分期 5：`contract_ids` >1 的并行执行与选优 UI 语义）、进度 WebSocket（轮询 1s 已够）、job 目录清理策略（终态后删 `project/`/`codex-home/`——留分期 5 一并做，账本与 vault 已耐久）。
-- spec v1.2 待折入：候选目录 `candidates/{id}` 层级、vault 文件布局、deslop/apply 旧回包不含 `review_id`、`CANDIDATE_NOT_SUCCEEDED`/`JOB_NOT_FOUND`/`CANDIDATE_NOT_FOUND`/`CANCELLED` 补充码、auto commit 失败落 `awaiting_selection` 的行为。
+- spec v1.2 已折入：候选目录 `candidates/{id}`、vault 布局、deslop/apply 旧回包不含 `review_id`、补充错误码、auto commit 失败落 `awaiting_selection`。
 - 风险：`createAndRunKernelJob` 的后台 Promise 在进程重启后丢失——running 状态的 job 会悬挂。分期 5 加启动时「孤儿 job 标记 failed(`ENGINE_FAILED`)」的恢复逻辑；本期记录在案。
