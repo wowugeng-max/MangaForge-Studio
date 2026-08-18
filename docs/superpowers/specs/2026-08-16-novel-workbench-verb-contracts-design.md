@@ -1,11 +1,18 @@
 # 小说工作台动词与合同模板
 
 日期：2026-08-16  
-状态：待用户审阅（v1.1，2026-08-17 按审核意见修订）  
+状态：待用户审阅（v1.2，2026-08-18：扩纲运行时已落地）  
 前置：
 
 - `2026-08-15-codex-kernel-vault-design.md`（内核账本、合同、投影、第一批审稿/去AI/改稿合同。本文件是其「另开」的 outline / 开书规范，并补上工作台动词层）
 - oh-story `story-long-write` 开书场景：Phase 1→2→3，默认停在细纲，不自动写正文
+
+### v1.2 修订要点（2026-08-18，扩纲运行时落地）
+
+1. 内置 `oh-story-core.story-long-write.expand` 已 `implemented=true`，动词 `expand_outline`。`commit.mode=manual`；`outlines.upsert`；禁 `outlines.replace`；禁写 `chapters`。
+2. 无工作台扩纲按钮。入口 `POST /api/kernel/jobs`。无大纲 → 400 `FOUNDATION_PRECONDITION`。
+3. `oh-story-core.story-long-write.outline` 仍 `implemented=false`，不当开书、不当扩纲。
+4. 写章 / 续写 / 回炉 / `adapt_pack` 仍未做。替换 `generateChapterForGroup` 必须另开 spec。
 
 ### v1.1 修订要点（按 2026-08-17 审核）
 
@@ -276,9 +283,10 @@ oh-story 审稿的 `reject_solo_fallback` / `require_reviewer_agents` **不是**
 | 按建议改稿 | `apply_review` | `oh-story-core.story-apply.surgical` |
 | oh-story 去AI | `deslop_chapter` | `oh-story-core.story-deslop.file` |
 | 深度孵化 | `open_book` | `oh-story-core.story-long-write.open`（新建；prompt 走开书，停在细纲） |
-| （以后）扩纲 / 写章 / 续写 / 回炉 | 上表 | 同 skill 不同 variant，或其它包 |
+| 扩纲 | `expand_outline` | `oh-story-core.story-long-write.expand`（无工作台按钮；`outlines.upsert`） |
+| （以后）写章 / 续写 / 回炉 | 上表 | 同 skill 不同 variant，或其它包 |
 
-已有内置 `oh-story-core.story-long-write.outline` 保持 `implemented=false`，**不**当开书合同。扩纲切片再登记 `*.expand`（或启用/替换 `.outline`），本文件不混用。
+已有内置 `oh-story-core.story-long-write.outline` 保持 `implemented=false`，**不**当开书合同，也**不**当扩纲合同。扩纲用 `*.expand`，本文件不混用。
 
 旧路由已由 D 补丁下线为 410（短 spec 第 3 节）；三动词入口为 `POST /api/kernel/jobs`，verb 见上表。
 
@@ -290,6 +298,7 @@ oh-story 审稿的 `reject_solo_fallback` / `require_reviewer_agents` **不是**
 | `oh-story-core.story-deslop.file` | `deslop_chapter` |
 | `oh-story-core.story-apply.surgical` | `apply_review` |
 | `oh-story-core.story-long-write.open` | `open_book` |
+| `oh-story-core.story-long-write.expand` | `expand_outline` |
 
 ## Job API 与数据流
 
@@ -436,7 +445,7 @@ POST /api/kernel/jobs
 
 - 审稿/改稿/去AI 行为与现网测试保持一致，请求带上 `verb`。
 
-写章/续写/扩纲/适配的测试在各自实现计划里写，不挤进开书验收。
+写章/续写/适配的测试在各自实现计划里写，不挤进开书验收。扩纲测试见 `2026-08-18-expand-outline-runtime.md`。
 
 ## 非目标
 
@@ -459,11 +468,11 @@ POST /api/kernel/jobs
 | **1 基板** | 动词/模板登记、实例 `verb` 校验、`subject_type=project`、`user_brief`、新 kind 与 upsert、新门、job 存 verb、选优按动词、project 投影 | 上节「基板」测试全绿，不接真 Codex |
 | **2 开书产品** | 内置 `oh-story-core.story-long-write.open`；向导去掉 AI 快速；深度孵化 job + 轮询 + 只读预览 + 采纳；关掉该模式的 derive-stream | 上节「开书产品」+ 真机 |
 | **3 收编现网** | 三按钮标动词；旧路由补 verb | 现网三按钮行为不变（该验收在 D 补丁前有效；此后三按钮走 kernel jobs 路径，旧路由 410） |
-| 4+ | 扩纲已有实现计划（`docs/superpowers/plans/2026-08-18-expand-outline-runtime.md`）→ 写章（替换 `generateChapterForGroup` 必须另开 spec）→ 续写 → 回炉 → 适配 | 扩纲按该计划验收；写章仍须另开 spec；其余各自动独立计划 |
+| 4+ | 扩纲已落地（`docs/superpowers/plans/2026-08-18-expand-outline-runtime.md`）→ 写章（替换 `generateChapterForGroup` 必须另开 spec）→ 续写 → 回炉 → 适配 | 扩纲按该计划验收（已过）；写章仍须另开 spec；其余各自动独立计划 |
 
 ## 与旧文档的关系
 
-- **扩展** `2026-08-15-codex-kernel-vault-design.md`（**v1.2** 已收回本文件已落地的内核语义：verb 主键、开书、`ENGINE_FAILED`/`CANCELLED`、投影/门/prompt 变量）。扩纲运行时已落地；写正文仍另开实现计划。内核 spec 画布不切、不改 Codex、领域表为真相，全部保留。
+- **扩展** `2026-08-15-codex-kernel-vault-design.md`（**v1.3** 已收回开书+扩纲落地状态）。写正文仍另开实现计划。内核 spec 画布不切、不改 Codex、领域表为真相，全部保留。
 - **覆盖** 内核 spec 分期第 6 条「outline 另开」中的开书部分：本文件即该另开 spec。扩纲运行时已落地；写正文仍另开实现计划。
 - **废止** 深度孵化作为产品路径时对 `project-seed/derive-stream` 的依赖。seed API 可暂留，向导 `deep_draft` 不得调用。
 - **不替代** oh-story 三按钮的内核桥接与 70% 改稿门、solo 门。
