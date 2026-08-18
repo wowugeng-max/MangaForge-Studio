@@ -8,7 +8,15 @@ import {
 } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
 import { BUILTIN_KERNEL_CONTRACTS } from '../contracts/builtin'
+import { openKernelDb } from '../db'
 import { projectKernelSubject, renderUserBriefMarkdown } from './project'
+
+function seedOutlineRow(ws: string, projectId: number, row: { outline_type: string; title: string; summary: string; raw_payload: string }) {
+  const db = openKernelDb(ws)
+  db.query(`INSERT INTO outlines (project_id, outline_type, title, summary, raw_payload) VALUES (?,?,?,?,?)`)
+    .run(projectId, row.outline_type, row.title, row.summary, row.raw_payload)
+  db.close()
+}
 
 const reviewContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
 const applyContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')!
@@ -164,5 +172,20 @@ describe('projectKernelSubject', () => {
   test('renderUserBriefMarkdown renders all five fields', () => {
     const md = renderUserBriefMarkdown(JSON.stringify({ title: 'T', genre: 'G', idea: 'I', length_target: 'long', constraints: 'C' }))
     for (const s of ['T', 'G', 'I', 'long', 'C']) expect(md).toContain(s)
+  })
+
+  test('outline mount replays committed outline files by kernel_rel_path', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    seedOutlineRow(ws, project.id, {
+      outline_type: 'chapter', title: '第3章 夜谈', summary: '截断摘要',
+      raw_payload: JSON.stringify({ kernel_rel_path: '大纲/细纲_第003章.md', chapter_no: 3, kernel_full_text: '# 第3章 夜谈\n完整细纲全文' }),
+    })
+    seedOutlineRow(ws, project.id, { outline_type: 'master', title: '旧总纲', summary: '旧行摘要', raw_payload: '{}' })
+    const contract: any = { ...reviewContract, projection: { mounts: ['outline', 'skill_tree'] } }
+    const dir = mkdtempSync(join(tmpdir(), 'proj-outline-'))
+    await projectKernelSubject({ workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir, subjectType: 'project' })
+    expect(readFileSync(join(dir, '大纲/细纲_第003章.md'), 'utf8')).toContain('完整细纲全文')
+    expect(readFileSync(join(dir, '大纲/总纲.md'), 'utf8')).toContain('旧行摘要')
   })
 })

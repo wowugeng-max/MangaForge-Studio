@@ -101,10 +101,20 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
   }
   if (mounts.includes('outline')) {
     const outlines = await listNovelOutlines(workspace, projectId)
-    const master = outlines.filter((o: any) => String(o.outline_type || 'master') === 'master')
-    const detail = outlines.filter((o: any) => String(o.outline_type || 'master') !== 'master')
+    const legacyRows: any[] = []
+    for (const row of outlines) {
+      const payload = parseWorldPayload((row as any).raw_payload)
+      const relPath = String(payload.kernel_rel_path || '')
+      if (relPath && !relPath.includes('..')) {
+        writeProjected(projectDir, relPath, String(payload.kernel_full_text || row.summary || ''), files)
+      } else {
+        legacyRows.push(row)
+      }
+    }
+    const master = legacyRows.filter((o: any) => String(o.outline_type || 'master') === 'master')
+    const detail = legacyRows.filter((o: any) => String(o.outline_type || 'master') !== 'master')
     const renderOutline = (rows: any[]) => rows.map(o => `# ${o.title}\n\n${String(o.summary || '')}`.trim()).join('\n\n---\n\n') || '（空）'
-    if (chapter || outlines.length) {
+    if (legacyRows.length) {
       writeProjected(projectDir, '大纲/总纲.md', renderOutline(master), files)
       writeProjected(projectDir, '大纲/细纲.md', renderOutline(detail), files)
     }

@@ -69,7 +69,7 @@ export function upsertOutlineDoc(ws: string, projectId: number, relPath: string,
     const outlineType = chapterNo === null ? 'master' : 'chapter'
     const title = firstHeadingOf(text) || (relPath.split('/').pop() || relPath).replace(/\.md$/i, '')
     const summary = text.length > SUMMARY_MAX ? text.slice(0, SUMMARY_MAX) : text
-    const payload = JSON.stringify({ kernel_rel_path: relPath, ...(chapterNo === null ? {} : { chapter_no: chapterNo }) })
+    const payload = JSON.stringify({ kernel_rel_path: relPath, kernel_full_text: text, ...(chapterNo === null ? {} : { chapter_no: chapterNo }) })
     const byPath = conn.query(`
       SELECT id FROM outlines WHERE project_id = ? AND json_extract(raw_payload, '$.kernel_rel_path') = ?
     `).get(projectId, relPath) as any

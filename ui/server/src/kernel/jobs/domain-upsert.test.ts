@@ -89,9 +89,11 @@ describe('domain upserts', () => {
     const db = openKernelDb(ws)
     const outline = db.query(`SELECT outline_type FROM outlines WHERE id = ?`).get(outlineId) as any
     const chapter = db.query(`SELECT chapter_text, outline_id, title FROM chapters WHERE project_id = 1 AND chapter_no = 1`).get() as any
+    const row = db.query(`SELECT raw_payload FROM outlines WHERE id = ?`).get(outlineId) as any
     db.close()
     expect(outline.outline_type).toBe('chapter')
     expect(chapter.chapter_text).toBe('')
     expect(chapter.outline_id).toBe(outlineId)
+    expect(JSON.parse(row.raw_payload).kernel_full_text).toContain('细纲内容')
   })
 })
