@@ -77,14 +77,23 @@ describe('oh-story core routes', () => {
     expect(res.body).toEqual({ ok: true, revision: 'deadbeef' })
   })
 
-  test('POST review returns CHAPTER_NOT_FOUND when chapter is missing', async () => {
+  test('POST review/deslop/apply return 410 ROUTE_REMOVED without creating a job', async () => {
     const { handlers } = routeHarness({
-      getChapter: async () => null,
       createKernelJob: async () => { throw new Error('should not create job') },
     })
-    const res = await callRoute(handlers.get('POST /api/novel/oh-story/core/review'), chapterBody)
-    expect([400, 404]).toContain(res.statusCode)
-    expect(res.body.code).toBe('CHAPTER_NOT_FOUND')
+    for (const path of [
+      'POST /api/novel/oh-story/core/review',
+      'POST /api/novel/oh-story/core/deslop',
+      'POST /api/novel/oh-story/core/apply',
+    ]) {
+      const res = await callRoute(handlers.get(path), chapterBody)
+      expect(res.statusCode).toBe(410)
+      expect(res.body).toEqual({
+        ok: false,
+        code: 'ROUTE_REMOVED',
+        error: '请改用 POST /api/kernel/jobs',
+      })
+    }
   })
 
   test('readOhStoryCoreAgentResult throws when the provider returned an error or empty body', () => {

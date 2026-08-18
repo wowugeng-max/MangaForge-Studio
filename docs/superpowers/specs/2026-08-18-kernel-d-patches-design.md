@@ -1,7 +1,7 @@
 # 内核 D 后置补丁（短 spec）
 
 日期：2026-08-18  
-状态：待实现  
+状态：已落地  
 对照：`2026-08-15-codex-kernel-vault-design.md` v1.2「尚未落地 D」  
 实现计划：`docs/superpowers/plans/2026-08-18-kernel-d-patches.md`
 

@@ -22,14 +22,14 @@
 3. **取消关全部会话：** `POST .../cancel` 关闭该 job 所有活跃 app-server；queued/running 候选一律 `failed(CANCELLED)`，job `cancelled`，再清目录。
 4. **孤儿恢复：** 服务启动 `recoverOrphanKernelJobs`：账本 `queued`/`running` 且不在进程内 live map 的 job → `failed(ENGINE_FAILED, 进程重启导致任务中断)`，未终态候选同码。
 5. **终态目录清理：** 候选收敛后（含 `awaiting_selection`）以及 cancel / 孤儿路径，删除各候选的 `project/` 与 `codex-home/`；保留 `events.jsonl`、`snapshot/`、`artifacts/`。vault 已在收敛前入库。
-6. **0.147 spawn 证据：** 除 `thread/started` 的 `parentThreadId` 外，还记录 `item/*` 且 `item.type=collabAgentToolCall`、`item.tool=spawnAgent` 的 `senderThreadId` / `receiverThreadIds`。**现状**仍只记录、不升结构门（D 计划 Task 2 升 `require_spawn_evidence` / `NO_SPAWN`）。
+6. **0.147 spawn 证据：** 除 `thread/started` 的 `parentThreadId` 外，还记录 `item/*` 且 `item.type=collabAgentToolCall`、`item.tool=spawnAgent` 的 `senderThreadId` / `receiverThreadIds`。full 审稿合同带 `require_spawn_evidence`：零 spawn → `NO_SPAWN` gated。
 7. **xhigh：** 隔离 `config.toml` 写根级 `model_reasoning_effort`（取模型 `context_ui_params.reasoning_effort` / `model_reasoning_effort`）。xhigh 静默推理可数分钟无通知，因此 **废止** 分期 3 的 idle 120s / hard 30min。
 8. **turn 超时（现行）：** 默认 idle 10min / hard 45min；`open_book` idle 15min / hard 60min。探针 ④ spawn：xhigh 时 idle 300s / hard 720s，否则 60s / 120s。
 9. **改稿「原句出现」门禁：** `paragraph_retention_70` = 原文按空行切段后，每段须作为**连续子串**出现在新正文（`includes`，不是语义相似）。原文 ≥8 段且 verbatim 保留 <70% → `OH_STORY_APPLY_REWROTE_TOO_MUCH`。
 10. **0.147 argv / sandbox：** `codex app-server` 拒绝 `--ignore-user-config`（该旗标仅 `exec`）；隔离只靠 job `CODEX_HOME`。`thread/start` 的 sandbox 发 **kebab-case**（`workspace-write`），不是驼峰。
 11. **磁盘：** 候选根为 `jobs/{job_id}/candidates/{candidate_id}/`；vault 为 `vault/{artifact_id}/{basename}`。
 12. **提交：** 审稿/改稿走既有 novel API（`BEGIN` 之前，避免 SQLite 死锁）；开书 upsert + `kernel_commits` + 状态在同一 `BEGIN IMMEDIATE`。自动 commit 失败 → job 留在 `awaiting_selection`。
-13. **HTTP：** 新 UI 必须 `POST /jobs` 202 后轮询；旧 oh-story 三按钮桥接 **现状**仍阻塞至终态（兼容现网前端，不是产品路径）。D 计划 Task 3 改为 410 `ROUTE_REMOVED`。
+13. **HTTP：** 新 UI 必须 `POST /jobs` 202 后轮询。旧 oh-story 三按钮路由已 410 `ROUTE_REMOVED`（D 补丁）。
 14. **开书已落地：** `subject_type=project`、`outline` 的 `open_book` 实例可执行。扩纲运行时计划已写（C，`2026-08-18-expand-outline-runtime.md`），代码未做；画布 `prompt` 仍否（B，须另开 brainstorm）。
 
 ### v1.1 修订要点（按 2026-08-15 核对分析）
@@ -430,9 +430,9 @@ Codex 只认文件。小说数据在 SQLite。每次候选运行前，网关把�
 主协议：`codex app-server`，stdio JSON-RPC。  
 网关拉起子进程，工作目录为投影 `project/`，argv = `{binary} app-server`（**不加** `--ignore-user-config`：Codex 0.147 的 `app-server` 拒绝该旗标，它只属于 `exec`），环境：
 
-- `CODEX_HOME={candidate}/codex-home`（隔离用户 `~/.codex` 的唯一手段）
+- `CODEX_HOME={candidate}/codex-home`
+- `HOME={candidate}`（硬隔离：切断 `$HOME/.agents/skills` 与 `$HOME/.codex`）
 - `MANGAFORGE_CODEX_KEY`（及合同需要的其它 key）
-- 可选硬隔离：把子进程 `HOME` 指向 job 目录，切断 `$HOME/.agents/skills` 的个人技能发现（**尚未启用**；先过探针再开）
 
 key 缺失无法构造供应商环境 → 同步 `PROVIDER_TRANSLATE_FAILED`（与翻译失败同类）。
 
@@ -479,7 +479,7 @@ key 缺失无法构造供应商环境 → 同步 `PROVIDER_TRANSLATE_FAILED`（�
 - `thread/started`：`parentThreadId`（或 `thread.parentThreadId`）非空 → 一条 subagent thread
 - `item/*` 且 `item.type=collabAgentToolCall`、`item.tool=spawnAgent`：`senderThreadId` 为父、`receiverThreadIds[]` 为子（Codex 0.147 主证据面）
 
-第一期只记录，供人工与报告 `Fallback:` 行比对；不因「零 spawn」单独 gated。D 计划 Task 2 升为 full 审稿结构门 `require_spawn_evidence` / `NO_SPAWN`。
+full 审稿 `require_spawn_evidence`：`subagent_threads.length < 1` → 候选 `gated` / `NO_SPAWN`。`reject_solo_fallback` 仍排在前面。其它动词不跑此门。
 
 **编排 / 取消 / 孤儿：**
 
@@ -617,14 +617,14 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | `reject_chapter_text_artifact` | `REJECT_CHAPTER_TEXT` | 收回 `chapter_text`，或快照差异出现 `正文/` 前缀（含 write_scope 外）→ `gated`。开书/审稿结构门 |
 | `reject_outline_artifact` | `REJECT_OUTLINE` | 收回 `outline_doc`，或快照差异出现 `大纲/` 前缀 → `gated`。去AI 用 |
 | `require_outline_mix` | `KIND_COUNT_BELOW_MIN` | `outline_doc` 须「章号可解析」与「不可解析」各 ≥1，否则候选 `failed` |
-| `kind_count` | `KIND_COUNT_BELOW_MIN` | 某必收 kind 份数不足 → 候选 `failed`（产物缺失，非质量门） |
+| `require_spawn_evidence` | `NO_SPAWN` | `subagent_threads.length < 1` → 候选 `gated`。只挂 full 审稿；commit 时从 `metadata.spawn_evidence` 重读 |
 
 门默认在收存之后、commit 之前跑；`require_reviewer_agents` 与 `require_matching_review` 的前提检查在投影后、启动前即执行（表内已注）。`gated` 产物仍进 `kernel_artifacts`，便于排错，不写领域表。`KIND_COUNT_BELOW_MIN` 是 `failed` 不是 `gated`。
 
 两点说明：
 
 - `OH_STORY_APPLY_*` 沿用现网错误码是有意的（同决议 10 对 `REWROTE_TOO_MUCH` 的处理）：旧路由零映射。通用合同需要中性别名时到 schema v2 再加。
-- skill 自报不可尽信：网关按 7.2 记录 spawn 证据。现状只记录、供人工与 `Fallback:` 行比对；D 计划 Task 2 升为结构门（full 审稿须 ≥1 次 spawn 证据）。
+- skill 自报不可尽信：网关按 7.2 记录 spawn 证据。full 审稿 `require_spawn_evidence`，零 spawn → `NO_SPAWN` gated。
 
 ## HTTP 接口
 
@@ -675,7 +675,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | 按建议改稿 | `apply_review` | `["oh-story-core.story-apply.surgical"]` |
 | 深度孵化 | `open_book` | `["oh-story-core.story-long-write.open"]` |
 
-旧路由 `POST /api/novel/oh-story/core/{review,deslop,apply}` **现状**仍内部转调内核并**阻塞至 job 终态**再回包（兼容现网同步前端），形状保持可用，并带 `kernel_job_id`。deslop/apply 回包不再含 `review_id`。这是过渡兼容，不是产品路径：新 UI（含章节质量面板）必须改打 `/api/kernel/jobs` 并轮询，否则一次审稿会把 HTTP 占死十几分钟。
+旧路由 `POST /api/novel/oh-story/core/{review,deslop,apply}` 已 410 `{ ok: false, code: 'ROUTE_REMOVED', error: '请改用 POST /api/kernel/jobs' }`，不再 `createAndRunKernelJob`。GET `/core` 与 POST `/install` 保留。全部产品流量走 `POST /api/kernel/jobs` 后轮询。
 
 ### 10.3 查询与取消
 
@@ -716,14 +716,16 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | `CANDIDATE_NOT_FOUND` | 404 | 无此候选 |
 | `CANDIDATE_NOT_SUCCEEDED` | 409 | 候选不是 succeeded |
 | `ARTIFACT_NOT_FOUND` | 404 | 无此产物 |
+| `ROUTE_REMOVED` | 410 | 旧 `POST /novel/oh-story/core/{review,deslop,apply}` 已下线，改打 `POST /kernel/jobs` |
 
-终态错误（写入候选 / 任务 `error_code`；旧路由阻塞桥接与 `commit` 接口按本表映射 HTTP）：
+终态错误（写入候选 / 任务 `error_code`；`commit` 接口按本表映射 HTTP）：
 
 | 码 | HTTP | 含义 |
 |---|---|---|
 | `SKILL_NOT_FOUND` | 409 | `skills/list` 预检未发现合同 skill |
 | `REVIEWERS_MISSING` | 409 | 未部署四个 reviewer |
 | `SOLO_FALLBACK` | 409 | 完整审稿降级 solo |
+| `NO_SPAWN` | 409 | full 审稿零 spawn 证据 |
 | `OH_STORY_APPLY_NO_REVIEW` | 409 | 没有可用审稿，先审稿 |
 | `OH_STORY_APPLY_STALE_REVIEW` | 409 | 审稿过期，先重新审稿 |
 | `OH_STORY_APPLY_REWROTE_TOO_MUCH` | 409 | 原句出现不足 70%（改动过大） |
@@ -737,7 +739,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 `CAPABILITY_MIXED` 已废止，不要再发、不要再测。
 
-创建任务返回 202 之后发生的失败（投影、启动、门）都是终态错误，不是 HTTP 响应；只有旧路由桥接和 `commit` 才把它们映射回 HTTP。
+创建任务返回 202 之后发生的失败（投影、启动、门）都是终态错误，不是 HTTP 响应；只有 `commit` 才把它们映射回 HTTP。旧三按钮路由已 410，不再映射终态码。
 
 ## Codex 源码：默认不动，只允许这六处补丁
 
@@ -745,7 +747,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 1. 供应商线协议对不上（上游主线已收缩为 responses-only；先考虑锁仍支持 chat 的旧版、或第一期只用 `codex_responses` 供应商，补丁是最后手段）。
 2. 自定义 header / User-Agent 被丢掉（`http_headers` 已见于当前 config 参考，预计不触发）。
-3. 隔离 `CODEX_HOME` 仍去读 `~/.codex` 或弹 ChatGPT 登录（0.147 `app-server` 已拒绝 `--ignore-user-config`，不得靠补回该旗标「修复」；硬隔离 `$HOME` 仍未启用）。
+3. 隔离 `CODEX_HOME` 仍去读 `~/.codex` 或弹 ChatGPT 登录（0.147 `app-server` 已拒绝 `--ignore-user-config`，不得靠补回该旗标「修复」；硬隔离 `$HOME=jobDir` 已启用）。
 4. 按 7.5 写入 `[agents.<name>]` 注册后 `agent_type` 仍不可用，导致 oh-story 降级 solo。
 5. skill 发现不认 `.agents/skills` 符号链接（官方文档已确认支持符号链接，另有 `skills/extraRoots/set` 备选，预计不触发）。
 6. JSONL / app-server 完全没有文件变更信息，且目录 diff 也无法实现收存（item 事件已含 file edit，且先做 diff；本条是最后手段）。
@@ -772,7 +774,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | 现有 | 本 spec 之后 |
 |---|---|
 | oh-story solo runner / `compile-prompt.ts` 写死 solo | 第一批合同验收后删除或变成测试夹具，不再被按钮调用 |
-| `POST /api/novel/oh-story/core/*` | 转内核；错误码兼容。**现状仍阻塞至终态**（兼容旧前端）；新 UI 必须改轮询 |
+| `POST /api/novel/oh-story/core/{review,deslop,apply}` | 410 `ROUTE_REMOVED`；请改打 `POST /api/kernel/jobs`。GET `/core` 与 POST `/install` 保留 |
 | 写作 skill 市场 | 保留为提示词编译器；不自动变内核合同 |
 | 画布 skill 编译器 | 不动；将来用 `prompt` 合同另开 |
 | `executeNovelAgent` 生成正文 / 大纲向导 | 深度孵化已改走 `open_book`；写章/扩纲未登记合同的流程仍走旧 API |
@@ -812,7 +814,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | 1 账本与合同 | 已落地 | 表、磁盘、校验、HTTP 读合同 |
 | 2 投影与供应商翻译 | 已落地 | 含 `[agents.<name>]`、探针 ①②⑤ |
 | 3 app-server 客户 | 已落地 | 探针 ③④；单候选 `$story-review`；spawn 证据 |
-| 4 第一批三合同 + 旧按钮转调 | 已落地 | 审稿/去AI/改稿；阻塞桥接仍在，新 UI 不再调用 |
+| 4 第一批三合同 + 旧按钮转调 | 已落地 | 审稿/去AI/改稿；阻塞桥接已 410 `ROUTE_REMOVED` |
 | 5 并跑选优 | 已落地 | 并行 ≤8、取消全关、孤儿、清目录；章节质检面板已轮询/多选/对比 commit |
 | 6 outline / 画布 prompt | **未做完** | 开书已由动词 spec 覆盖；扩纲运行时计划已写（C）；画布 `prompt` 仍须另开 brainstorm（B） |
 
@@ -823,13 +825,13 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | 序 | 项 | 开做条件 | 产出 |
 |---|---|---|---|
 | 1 | **A 内核 UI** | **已落地**（`2026-08-18-kernel-job-ui`） | 质检三按钮 `POST /kernel/jobs` + 1s 轮询、同动词多选 ≤8、`awaiting_selection` 对比后 commit |
-| 2 | **D 后置补丁** | A 合入后 | 短 spec `2026-08-18-kernel-d-patches-design.md`；实现计划 `2026-08-18-kernel-d-patches.md` |
+| 2 | **D 后置补丁** | **已落地**（`2026-08-18-kernel-d-patches`） | `$HOME` 硬隔离、full 审稿 `NO_SPAWN`、旧三按钮 410 `ROUTE_REMOVED` |
 | 3 | **C 动词 4+** | D 之后或与 D 并行（不挡 UI） | 扩纲运行时计划 `2026-08-18-expand-outline-runtime.md`（无工作台按钮）。写章必须另开 spec；续写/回炉/适配仍未开计划 |
 | 4 | **B 分期 6** | 须另开 brainstorm | 画布 `prompt` 合同。扩纲运行时归 C，本片只剩画布 |
 
 ### A. 内核操作面（已落地）
 
-实现：`docs/superpowers/plans/2026-08-18-kernel-job-ui.md`。章节质检面板走 `POST /api/kernel/jobs` + 1s 轮询 7.4、取消、同动词多选 ≤8、`awaiting_selection` 对比后 commit；产物预览走 `GET /api/kernel/artifacts/:id/content`。开书向导仍 2s 轮询，未改。旧 `POST /novel/oh-story/core/{review,deslop,apply}` 阻塞桥接由 D 计划改为 410。
+实现：`docs/superpowers/plans/2026-08-18-kernel-job-ui.md`。章节质检面板走 `POST /api/kernel/jobs` + 1s 轮询 7.4、取消、同动词多选 ≤8、`awaiting_selection` 对比后 commit；产物预览走 `GET /api/kernel/artifacts/:id/content`。开书向导仍 2s 轮询，未改。旧 `POST /novel/oh-story/core/{review,deslop,apply}` 已 410。
 
 ### B. 内核分期 6（须另开 brainstorm + spec）
 
@@ -845,19 +847,19 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 - 开书后 `选题决策.md` 与扫榜的关系（规范明确不占用该文件名）
 - 替换 `generateChapterForGroup` 必须另开 spec
 
-### D. 内核已知后置
+### D. 内核已知后置（三项已落地）
 
 短 spec：`docs/superpowers/specs/2026-08-18-kernel-d-patches-design.md`。实现计划：`docs/superpowers/plans/2026-08-18-kernel-d-patches.md`。
 
-- `$HOME` 硬隔离：计划 Task 1（`HOME=jobDir`）
-- spawn 升结构门：计划 Task 2（`require_spawn_evidence` / `NO_SPAWN`）
-- 旧阻塞桥接下线：计划 Task 3（三条 POST 410 `ROUTE_REMOVED`）
+- `$HOME` 硬隔离：**已落地**（`HOME=jobDir`）
+- spawn 升结构门：**已落地**（`require_spawn_evidence` / `NO_SPAWN`）
+- 旧阻塞桥接下线：**已落地**（三条 POST 410 `ROUTE_REMOVED`）
 - 7.4 进度对象仍单 `candidate_id`（并跑时 UI 读 `candidates[]`）——本 D 不改
 
 ## 风险
 
 - app-server 协议仍有实验字段。客户只使用本 spec 点名的方法：`initialize`（+ `initialized` 通知）、`thread/start`、`turn/start`、`turn/interrupt`、`skills/list`，以及被动消费 `thread/started` / `turn/started` / `item/*` / `turn/completed`。新方法未写入本文件不得调用。
-- oh-story 在 Codex 上若 custom agent 不可用会自己 solo。必须靠 `require_reviewer_agents` + `reject_solo_fallback` 挡住，不能信 skill 自己汇报成功；spawn 证据（`thread/started` + 0.147 `collabAgentToolCall`/`spawnAgent`）用于事后比对。**现状**不单独 gated；D 计划 Task 2 升为 full 审稿结构门。
+- oh-story 在 Codex 上若 custom agent 不可用会自己 solo。必须靠 `require_reviewer_agents` + `reject_solo_fallback` 挡住，不能信 skill 自己汇报成功；full 审稿另加 `require_spawn_evidence`（零 spawn → `NO_SPAWN` gated）。
 - xhigh 静默推理可数分钟无通知。idle 超时必须大于该间隙；误用分期 3 的 120s 会把活任务打成 `ENGINE_FAILED`。
 - 投影与库双写可能漂移。领域表是用户真相；投影是一次性输入。提交后以领域表为准，不要反向用旧投影覆盖库。
 - Pack 更新导致报告格式变化。收存认路径和门，不认「=== 故事审查报告」这种标题。
@@ -871,4 +873,4 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 - **废止** 分期 3 计划中的 idle 120s / hard 30min、sandbox 驼峰发送、`app-server` 带 `--ignore-user-config`、按 capability 并跑 / `CAPABILITY_MIXED`。
 - **扩展** 由 `2026-08-16-novel-workbench-verb-contracts-design.md`：开书、verb 主键、投影/门补丁。本 v1.2 把已落地内核语义收回本文。
 - **不替代** 画布 skill 编译器，直到另开 prompt 合同实现计划。
-- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；本文继续锁定后端合同。D 计划 `2026-08-18-kernel-d-patches.md`、扩纲计划 `2026-08-18-expand-outline-runtime.md` 已写、代码未做。B（画布 `prompt`）仍须另开 brainstorm。
+- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；**D 后置补丁已按** `2026-08-18-kernel-d-patches` **落地**。扩纲计划 `2026-08-18-expand-outline-runtime.md` 已写、代码未做。B（画布 `prompt`）仍须另开 brainstorm。

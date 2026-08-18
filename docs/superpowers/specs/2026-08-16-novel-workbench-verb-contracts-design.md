@@ -280,7 +280,7 @@ oh-story 审稿的 `reject_solo_fallback` / `require_reviewer_agents` **不是**
 
 已有内置 `oh-story-core.story-long-write.outline` 保持 `implemented=false`，**不**当开书合同。扩纲切片再登记 `*.expand`（或启用/替换 `.outline`），本文件不混用。
 
-旧路由 `POST /api/novel/oh-story/core/{review,deslop,apply}` 继续转调内核，内部补 `verb`。现网验收行为不变。
+旧路由已由 D 补丁下线为 410（短 spec 第 3 节）；三动词入口为 `POST /api/kernel/jobs`，verb 见上表。
 
 无 `verb` 字段的内置 id 推断：
 
@@ -324,7 +324,7 @@ POST /api/kernel/jobs
 - 并发判重分粒度：`subject_type=project` / `pack` 的动词按 `project_id` + `verb` 只允许一个非终态 job（`queued` / `running` / `awaiting_selection`）；章级动词按 `project_id` + `verb` + `subject_id` 判重，不同章可并行。违反 → 409 `PROJECT_JOB_RUNNING`。
 - 运行时不可用：503 `KERNEL_RUNTIME_UNAVAILABLE`，禁止回退 derive-stream / `executeAgent`。
 - 开书与其它 `commit.mode=manual` 的动词：HTTP **202 + 轮询** `GET /api/kernel/jobs/:id`（及现有 progress）。禁止像现网审稿按钮那样把向导请求阻塞到 Codex 结束。
-- 现网三按钮路由第一期仍可阻塞至终态（兼容现前端）；新 UI / 深度孵化必须异步。
+- 旧三按钮路由已 410 `ROUTE_REMOVED`（D 补丁）；全部流量走 `POST /api/kernel/jobs` 异步轮询。
 
 `kernel_jobs` 增列：`verb TEXT NOT NULL DEFAULT ''`（SQLite 增列限制要求带默认；旧行按合同 id 回填，回填后 `''` 视为非法）、`verb_params TEXT`（JSON，默认 `{}`）、`subject_key TEXT`（默认 `''`）、`brief_json TEXT`（开书创意；可为空）。
 
@@ -458,7 +458,7 @@ POST /api/kernel/jobs
 |---|---|---|
 | **1 基板** | 动词/模板登记、实例 `verb` 校验、`subject_type=project`、`user_brief`、新 kind 与 upsert、新门、job 存 verb、选优按动词、project 投影 | 上节「基板」测试全绿，不接真 Codex |
 | **2 开书产品** | 内置 `oh-story-core.story-long-write.open`；向导去掉 AI 快速；深度孵化 job + 轮询 + 只读预览 + 采纳；关掉该模式的 derive-stream | 上节「开书产品」+ 真机 |
-| **3 收编现网** | 三按钮标动词；旧路由补 verb | 现网三按钮行为不变 |
+| **3 收编现网** | 三按钮标动词；旧路由补 verb | 现网三按钮行为不变（该验收在 D 补丁前有效；此后三按钮走 kernel jobs 路径，旧路由 410） |
 | 4+ | 扩纲 → 写章（替换 `generateChapterForGroup` 必须另开 spec）→ 续写 → 回炉 → 适配 | 各自动独立计划 |
 
 ## 与旧文档的关系
