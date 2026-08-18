@@ -549,12 +549,14 @@ describe('oh-story quality panel actions', () => {
     expect(html).not.toContain('>已审稿<')
   })
 
-  test('workspace apply action posts /novel/oh-story/core/apply', async () => {
-    const source = await Bun.file(new URL('./shell/workspace-repair-task-handlers.tsx', import.meta.url)).text()
-    expect(source).toContain("runOhStoryCoreAction('apply')")
-    expect(source).toContain('/novel/oh-story/core/${action}')
-    expect(source).toContain('OH_STORY_APPLY_NO_REVIEW')
-    expect(source).toContain('先对本稿重新审稿')
+  test('workspace apply action starts a kernel job instead of blocking oh-story HTTP', async () => {
+    const handlers = await Bun.file(new URL('./shell/workspace-repair-task-handlers.tsx', import.meta.url)).text()
+    const starter = await Bun.file(new URL('./shell/start-chapter-kernel-job.ts', import.meta.url)).text()
+    expect(handlers).toContain("runOhStoryCoreAction('apply')")
+    expect(handlers).not.toContain('/novel/oh-story/core/${action}')
+    expect(handlers).toContain('startChapterKernelJob')
+    expect(starter).toContain('SAVE_FAILED')
+    expect(starter).toContain('先对本稿重新审稿')
   })
 
   test('stops wiring old quality and revision launches in the writing shell', async () => {

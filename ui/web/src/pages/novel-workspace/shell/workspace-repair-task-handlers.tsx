@@ -14,11 +14,10 @@ import {
 import {
   chapterHasProse,
 } from '../utils'
-import {
-  latestOhStoryReviewForChapter,
-  ohStoryReviewMatchesChapterText,
-  parseOhStoryReviewPayload,
-} from '../oh-story-review-match'
+import { axiosKernelRequest, createKernelJobApi } from '../../../kernel/jobs/client'
+import { kernelJobUserMessage } from '../../../kernel/jobs/messages'
+import type { KernelJobAction } from '../../../kernel/jobs/types'
+import { assertOhStoryApplyReady, startChapterKernelJob } from './start-chapter-kernel-job'
 
 export type RepairTaskHandlerDeps = {
   activeChapter: any
@@ -653,72 +652,37 @@ export function createRepairTaskHandlers(deps: RepairTaskHandlerDeps) {
     return null
   }
 
-  const ohStoryCoreErrorCode = (error: any) => String(error?.response?.data?.code || error?.code || '')
-
-  const runOhStoryCoreAction = async (action: 'review' | 'deslop' | 'apply') => {
+  const runOhStoryCoreAction = async (action: KernelJobAction) => {
     const chapterId = Number(activeChapter?.id || 0)
     if (!chapterId) return message.warning('请先选择章节')
     if (!projectId) return message.warning('请先选择项目')
     if (!selectedModelId) return message.warning('请先选择模型')
-    if (!await flushPendingSave()) return
     if (action === 'apply') {
-      const latest = latestOhStoryReviewForChapter(
-        (reviews || []).filter((item: any) => item.review_type === 'oh_story_review'),
-        Number(activeChapter?.id || 0),
-      )
-      if (!latest) {
-        message.warning('先对本稿重新审稿')
-        return
-      }
-      const hash = String(parseOhStoryReviewPayload(latest).chapter_text_hash || '')
-      if (hash && !ohStoryReviewMatchesChapterText(latest, String(activeChapter?.chapter_text || ''))) {
-        message.warning('先对本稿重新审稿')
+      const ready = assertOhStoryApplyReady({ reviews, chapter: activeChapter })
+      if (!ready.ok) {
+        message.warning(ready.warning)
         return
       }
     }
-    const label = action === 'review' ? 'oh-story 审稿' : action === 'deslop' ? 'oh-story 去AI' : '按建议改稿'
     setProseQualityLoading(true)
     try {
-      const postAction = () => apiClient.post(`/novel/oh-story/core/${action}`, {
-        project_id: projectId,
-        chapter_id: chapterId,
-        model_id: selectedModelId,
+      const api = createKernelJobApi(axiosKernelRequest(apiClient))
+      const started = await startChapterKernelJob({
+        flushPendingSave,
+        createJob: api.createJob,
+        input: {
+          projectId: Number(projectId),
+          chapterId,
+          modelId: Number(selectedModelId),
+          action,
+        },
       })
-      try {
-        await postAction()
-      } catch (error: any) {
-        if (action === 'apply' || ohStoryCoreErrorCode(error) !== 'OH_STORY_CORE_NOT_INSTALLED') throw error
-        message.info('正在安装 oh-story 核心套件…')
-        await apiClient.post('/novel/oh-story/core/install')
-        await postAction()
+      if (!started.ok) {
+        const mapped = kernelJobUserMessage(started.code)
+        if (mapped?.kind === 'warning') message.warning(mapped.text)
+        else if (mapped?.kind === 'info') message.info(mapped.text)
+        else message.error(mapped?.text || started.message || '创建任务失败')
       }
-      await loadProjectModules()
-      message.success(`${label}完成`)
-    } catch (error: any) {
-      const code = ohStoryCoreErrorCode(error)
-      if (code === 'OH_STORY_APPLY_NO_REVIEW' || code === 'OH_STORY_APPLY_STALE_REVIEW') {
-        message.warning('先对本稿重新审稿')
-        return
-      }
-      if (code === 'OH_STORY_APPLY_REWROTE_TOO_MUCH') {
-        message.warning('这次改动太大，像整章重写。请再试一次')
-        return
-      }
-      if (code === 'OH_STORY_CORE_EMPTY_OUTPUT' || code === 'OH_STORY_CORE_NOT_PROSE') {
-        message.error('这次没有改出正文')
-        return
-      }
-      if (code === 'OH_STORY_CORE_NOT_INSTALLED') {
-        message.error('先安装 oh-story 核心套件')
-        return
-      }
-      if (Number(error?.response?.status) === 404 && !code) {
-        message.error(action === 'apply'
-          ? '当前写作服务还没有按建议改稿接口，请重启 API 后再试'
-          : `${label}接口不存在，请重启 API 后再试`)
-        return
-      }
-      message.error(error?.response?.data?.error || error?.message || `${label}失败`)
     } finally {
       setProseQualityLoading(false)
     }

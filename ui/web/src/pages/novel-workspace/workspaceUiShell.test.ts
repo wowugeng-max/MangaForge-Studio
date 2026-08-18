@@ -29,6 +29,10 @@ function repairHandlerFixture(overrides: Partial<RepairTaskHandlerDeps> = {}) {
       status_url: '/api/novel/editor-revisions/88?project_id=3',
     },
   }))
+  const apiRequest = mock(async () => ({
+    status: 202,
+    data: { ok: true, job: { id: 'job-1', status: 'queued' } },
+  }))
   const loadProjectModules = mock(async () => {})
   const loadProductionTasks = mock(async () => {})
   const createEditorReportForChapter = mock(async () => null)
@@ -48,7 +52,7 @@ function repairHandlerFixture(overrides: Partial<RepairTaskHandlerDeps> = {}) {
   const noop = () => {}
   const deps: RepairTaskHandlerDeps = {
     activeChapter: { id: 11, chapter_no: 1, title: '起雾' },
-    apiClient: { post: apiPost },
+    apiClient: { post: apiPost, request: apiRequest },
     chapters: [],
     createEditorReportForChapter,
     executeStyleSampleTaskBookRebuild: noop,
@@ -85,6 +89,7 @@ function repairHandlerFixture(overrides: Partial<RepairTaskHandlerDeps> = {}) {
   return {
     handlers: createRepairTaskHandlers(deps),
     apiPost,
+    apiRequest,
     createEditorReportForChapter,
     flushPendingSave,
     loadProjectModules,
@@ -741,14 +746,20 @@ describe('commercial writing workspace UI shell monotest shim', () => {
 })
 
 describe('oh-story core actions use the selected text model', () => {
-  test('deslop posts the workspace model_id instead of falling back to the image favorite', async () => {
+  test('deslop posts a chapter kernel job with the workspace model_id', async () => {
     const fixture = repairHandlerFixture()
     await fixture.handlers.ohStoryDeslop()
-    expect(fixture.apiPost).toHaveBeenCalledWith('/novel/oh-story/core/deslop', {
-      project_id: 3,
-      chapter_id: 11,
-      model_id: 7,
-    })
+    expect(fixture.apiRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      url: '/kernel/jobs',
+      data: {
+        project_id: 3,
+        subject_type: 'chapter',
+        subject_id: 11,
+        verb: 'deslop_chapter',
+        model_id: 7,
+      },
+    }))
   })
 
   test('apply posts when the latest review exists but hash is not hydrated yet', async () => {
@@ -763,14 +774,14 @@ describe('oh-story core actions use the selected text model', () => {
       }],
     })
     await fixture.handlers.ohStoryApply()
-    expect(fixture.apiPost).toHaveBeenCalledWith('/novel/oh-story/core/apply', {
-      project_id: 3,
-      chapter_id: 11,
-      model_id: 7,
-    })
+    expect(fixture.apiRequest).toHaveBeenCalledWith(expect.objectContaining({
+      method: 'POST',
+      url: '/kernel/jobs',
+      data: expect.objectContaining({ verb: 'apply_review', model_id: 7, subject_id: 11 }),
+    }))
   })
 
-  test('apply 404 tells the user the writing API needs a restart', async () => {
+  test('apply runtime unavailable tells the user to install Codex', async () => {
     const fixture = repairHandlerFixture({
       activeChapter: { id: 11, chapter_no: 1, title: '起雾', chapter_text: '楚弦咽气的时候。' },
       reviews: [{
@@ -781,13 +792,12 @@ describe('oh-story core actions use the selected text model', () => {
         payload: { chapter_id: 11 },
       }],
     })
-    fixture.apiPost.mockImplementation(async () => {
-      const error: any = new Error('Request failed with status code 404')
-      error.response = { status: 404, data: {} }
-      throw error
-    })
+    fixture.apiRequest.mockImplementation(async () => ({
+      status: 503,
+      data: { code: 'KERNEL_RUNTIME_UNAVAILABLE', error: 'no codex' },
+    }))
     await fixture.handlers.ohStoryApply()
-    expect(fixture.error).toHaveBeenCalledWith('当前写作服务还没有按建议改稿接口，请重启 API 后再试')
+    expect(fixture.error).toHaveBeenCalledWith('内核不可用，装好 Codex 后再试')
   })
 
   test('apply rewrite-too-much toast tells the user not to full-rewrite', async () => {
@@ -801,14 +811,10 @@ describe('oh-story core actions use the selected text model', () => {
         payload: { chapter_id: 11 },
       }],
     })
-    fixture.apiPost.mockImplementation(async () => {
-      const error: any = new Error('这次改动太大，像整章重写。请再试一次')
-      error.response = {
-        status: 409,
-        data: { code: 'OH_STORY_APPLY_REWROTE_TOO_MUCH', error: '这次改动太大，像整章重写。请再试一次' },
-      }
-      throw error
-    })
+    fixture.apiRequest.mockImplementation(async () => ({
+      status: 409,
+      data: { code: 'OH_STORY_APPLY_REWROTE_TOO_MUCH', error: '这次改动太大，像整章重写。请再试一次' },
+    }))
     await fixture.handlers.ohStoryApply()
     expect(fixture.warning).toHaveBeenCalledWith('这次改动太大，像整章重写。请再试一次')
   })
