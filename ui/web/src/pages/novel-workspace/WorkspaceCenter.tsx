@@ -154,6 +154,12 @@ export function WorkspaceCenter({
   onOhStoryReview,
   onOhStoryApply,
   onOhStoryDeslop,
+  kernelJobAction = null,
+  kernelJobElapsedSec,
+  kernelJobHint = '',
+  ohStoryAction = null,
+  ohStoryElapsedSec,
+  onCancelKernelJob,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -237,6 +243,12 @@ export function WorkspaceCenter({
   onOhStoryReview?: () => void | Promise<void>
   onOhStoryApply?: () => void | Promise<void>
   onOhStoryDeslop?: () => void | Promise<void>
+  kernelJobAction?: 'review' | 'deslop' | 'apply' | null
+  kernelJobElapsedSec?: number
+  kernelJobHint?: string
+  ohStoryAction?: 'review' | 'deslop' | 'apply' | null
+  ohStoryElapsedSec?: number
+  onCancelKernelJob?: () => void | Promise<void>
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -897,6 +909,12 @@ export function WorkspaceCenter({
             onOhStoryReview={onOhStoryReview}
             onOhStoryApply={onOhStoryApply}
             onOhStoryDeslop={onOhStoryDeslop}
+            kernelJobAction={kernelJobAction}
+            kernelJobElapsedSec={kernelJobElapsedSec}
+            kernelJobHint={kernelJobHint}
+            ohStoryAction={ohStoryAction}
+            ohStoryElapsedSec={ohStoryElapsedSec}
+            onCancelKernelJob={onCancelKernelJob}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}
             onLoadEditorRevisionDiagnostics={onLoadEditorRevisionDiagnostics}

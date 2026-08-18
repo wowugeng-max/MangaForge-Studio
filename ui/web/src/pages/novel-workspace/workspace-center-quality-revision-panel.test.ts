@@ -541,6 +541,11 @@ describe('oh-story quality panel actions', () => {
     expect(buttonMarkup(html, 'oh-story 去AI')).not.toContain('disabled=""')
   })
 
+  test('shows a cancel control while a kernel job is running', () => {
+    const html = renderPanel(7, null, { ohStoryAction: 'review', ohStoryElapsedSec: 5, onCancelKernelJob: () => {} })
+    expect(html).toContain('取消')
+  })
+
   test('marks a hashless or mismatched review as 正文已改', () => {
     const html = renderPanel(7, null, {
       ohStoryReviews: [ohStoryReview(7)],

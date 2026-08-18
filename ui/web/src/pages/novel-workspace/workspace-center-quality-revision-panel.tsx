@@ -245,8 +245,12 @@ export function WorkspaceCenterQualityRevisionPanel({
   onOhStoryReview,
   onOhStoryApply,
   onOhStoryDeslop,
+  kernelJobAction = null,
+  kernelJobElapsedSec,
+  kernelJobHint = '',
   ohStoryAction = null,
   ohStoryElapsedSec,
+  onCancelKernelJob,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -264,8 +268,12 @@ export function WorkspaceCenterQualityRevisionPanel({
   onOhStoryReview?: () => void | Promise<void>
   onOhStoryApply?: () => void | Promise<void>
   onOhStoryDeslop?: () => void | Promise<void>
+  kernelJobAction?: OhStoryCoreBusyAction | null
+  kernelJobElapsedSec?: number
+  kernelJobHint?: string
   ohStoryAction?: OhStoryCoreBusyAction | null
   ohStoryElapsedSec?: number
+  onCancelKernelJob?: () => void | Promise<void>
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -315,24 +323,26 @@ export function WorkspaceCenterQualityRevisionPanel({
   const [localOhStoryAction, setLocalOhStoryAction] = React.useState<OhStoryCoreBusyAction | null>(null)
   const [ohStoryNowMs, setOhStoryNowMs] = React.useState(() => Date.now())
   const ohStoryStartedAtRef = React.useRef<number | null>(null)
-  const busyAction = ohStoryAction ?? localOhStoryAction
+  const busyAction = kernelJobAction ?? ohStoryAction ?? localOhStoryAction
 
   React.useEffect(() => {
     if (hasReview) setOpen(true)
   }, [hasReview, chapterId, latest?.id])
   React.useEffect(() => {
-    if (!busyAction || ohStoryElapsedSec != null) return
+    if (!busyAction || kernelJobElapsedSec != null || ohStoryElapsedSec != null) return
     const timer = setInterval(() => setOhStoryNowMs(Date.now()), 1_000)
     return () => clearInterval(timer)
-  }, [busyAction, ohStoryElapsedSec])
+  }, [busyAction, kernelJobElapsedSec, ohStoryElapsedSec])
 
   if (!hasProse) return null
 
-  const busyElapsedSec = ohStoryElapsedSec != null
-    ? ohStoryElapsedSec
-    : ohStoryStartedAtRef.current
-      ? Math.floor((ohStoryNowMs - ohStoryStartedAtRef.current) / 1000)
-      : 0
+  const busyElapsedSec = kernelJobElapsedSec != null
+    ? kernelJobElapsedSec
+    : ohStoryElapsedSec != null
+      ? ohStoryElapsedSec
+      : ohStoryStartedAtRef.current
+        ? Math.floor((ohStoryNowMs - ohStoryStartedAtRef.current) / 1000)
+        : 0
   const runOhStoryAction = (action: OhStoryCoreBusyAction, handler?: () => void | Promise<void>) => {
     if (busyAction) return
     ohStoryStartedAtRef.current = Date.now()
@@ -346,6 +356,7 @@ export function WorkspaceCenterQualityRevisionPanel({
 
   const summaryBits = [
     busyAction ? ohStoryBusySummary(busyAction, busyElapsedSec) : '',
+    busyAction && kernelJobHint ? kernelJobHint : '',
     revisionActive && currentEditorRevisionTask
       ? `修订中·${editorRevisionPhaseLabel(currentEditorRevisionTask.phase)}`
       : '',
@@ -398,6 +409,18 @@ export function WorkspaceCenterQualityRevisionPanel({
               runOhStoryAction('deslop', onOhStoryDeslop)
             }}
           >oh-story 去AI</Button>
+          {busyAction && onCancelKernelJob ? (
+            <Button
+              size="small"
+              danger
+              autoInsertSpace={false}
+              onClick={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                void onCancelKernelJob()
+              }}
+            >取消</Button>
+          ) : null}
         </span>
       </summary>
 

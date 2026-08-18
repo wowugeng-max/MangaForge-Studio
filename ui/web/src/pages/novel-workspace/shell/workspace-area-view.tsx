@@ -5,6 +5,8 @@ import { StoryPlanningWorkspace } from '../StoryPlanningWorkspace'
 import { WorkspaceCenter } from '../WorkspaceCenter'
 import { StoryAssetsWorkspace } from '../StoryAssetsWorkspace'
 import type { WorkspaceArea } from './workspace-types'
+import apiClient from '../../../api/client'
+import { useChapterKernelJob } from './use-chapter-kernel-job'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -76,6 +78,7 @@ export type NovelWorkspaceAreaViewProps = {
   ohStoryReview?: any
   ohStoryDeslop?: any
   ohStoryApply?: any
+  flushPendingSave?: any
   refreshActiveProseQuality: any
   repairActiveDeslopGate: any
   repairChapterPreflightMaterials: any
@@ -196,6 +199,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     ohStoryReview,
     ohStoryDeslop,
     ohStoryApply,
+    flushPendingSave,
     refreshActiveProseQuality,
     repairActiveDeslopGate,
     repairChapterPreflightMaterials,
@@ -246,6 +250,25 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     writingCockpitModel,
     writingRecommendation,
   } = props
+
+  const kernelJob = useChapterKernelJob({
+    apiClient,
+    projectId: Number(projectId || 0),
+    chapterId: Number(activeChapterId || activeChapter?.id || 0),
+    modelId: Number(selectedModelId || 0),
+    reviews: Array.isArray(ohStoryReviews) ? ohStoryReviews : [],
+    chapter: activeChapter,
+    flushPendingSave: async () => {
+      if (typeof flushPendingSave !== 'function') return true
+      return Boolean(await flushPendingSave())
+    },
+    loadProjectModules: async () => {
+      await loadProjectModules?.()
+    },
+  })
+  const kernelBusyAction = kernelJob.state.phase === 'running' ? kernelJob.state.action : null
+  const kernelBusyElapsedSec = kernelJob.state.phase === 'running' ? kernelJob.state.elapsedSec : undefined
+  const kernelBusyHint = kernelJob.state.phase === 'running' ? kernelJob.state.hint : ''
 
   if (workspaceArea === 'autoCreation') {
     return (
@@ -365,9 +388,15 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
           if (repaired) void refreshActiveProseQuality?.('preflight_repair')
         }}
         onApplyEditorRevision={applyEditorRevision}
-        onOhStoryReview={ohStoryReview}
-        onOhStoryApply={ohStoryApply}
-        onOhStoryDeslop={ohStoryDeslop}
+        onOhStoryReview={() => { void kernelJob.start('review') }}
+        onOhStoryApply={() => { void kernelJob.start('apply') }}
+        onOhStoryDeslop={() => { void kernelJob.start('deslop') }}
+        kernelJobAction={kernelBusyAction}
+        kernelJobElapsedSec={kernelBusyElapsedSec}
+        kernelJobHint={kernelBusyHint}
+        ohStoryAction={kernelBusyAction}
+        ohStoryElapsedSec={kernelBusyElapsedSec}
+        onCancelKernelJob={() => { void kernelJob.cancel() }}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}
         onLoadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}
