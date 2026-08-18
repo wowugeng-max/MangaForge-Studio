@@ -127,4 +127,10 @@ describe('runKernelCandidate', () => {
     expect(phases).toEqual(['projecting', 'starting', 'running', 'harvesting'])
     expect(sessionSeen).toBe(true)
   })
+
+  test('runKernelCandidate isolates HOME to the job directory', async () => {
+    const source = await Bun.file(new URL('./run-candidate.ts', import.meta.url)).text()
+    expect(source).toContain('isolatedHome: jobDir')
+    expect(source).toContain("codexHome: join(jobDir, 'codex-home')")
+  })
 })

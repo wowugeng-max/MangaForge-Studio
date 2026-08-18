@@ -106,6 +106,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
     session = await startCodexSession({
       binary: runtime.binary,
       projectDir,
+      isolatedHome: jobDir,
       codexHome: join(jobDir, 'codex-home'),
       envKey: key.key,
       sandbox: contract.sandbox,

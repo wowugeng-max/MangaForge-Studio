@@ -149,7 +149,9 @@ async function defaultRunSkillsProbe(ws: string, runtime: KernelRuntimeInfo): Pr
   const home = join(dir, 'codex-home')
   mkdirSync(home, { recursive: true })
   writeFileSync(join(home, 'config.toml'), built.toml)
-  const session = await startCodexSession({ binary: runtime.binary, projectDir: dir, codexHome: home, envKey: 'probe' })
+  const session = await startCodexSession({
+    binary: runtime.binary, projectDir: dir, codexHome: home, envKey: 'probe', isolatedHome: dirname(home),
+  })
   try {
     const skills = await session.listSkills()
     return skills.some(skill => skill.name === 'story-review')
@@ -181,6 +183,7 @@ async function defaultRunAgentsSpawnProbe(ws: string, runtime: KernelRuntimeInfo
   const recorder = createKernelEventsRecorder(jobDir)
   const session = await startCodexSession({
     binary: runtime.binary, projectDir, codexHome: join(jobDir, 'codex-home'), envKey: key.key, sink: recorder.sink,
+    isolatedHome: jobDir,
   })
   try {
     const xhigh = effort === 'xhigh'

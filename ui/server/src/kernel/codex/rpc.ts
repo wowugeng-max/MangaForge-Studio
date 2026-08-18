@@ -12,6 +12,10 @@ export type CodexRpcClient = {
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000
 
+export function mergeCodexRpcEnv(inputEnv: Record<string, string>): Record<string, string> {
+  return { PATH: process.env.PATH || '', HOME: process.env.HOME || '', ...inputEnv }
+}
+
 export function spawnCodexRpc(input: {
   argv: string[]
   cwd: string
@@ -21,7 +25,7 @@ export function spawnCodexRpc(input: {
   const sink = input.sink || (() => {})
   const proc = Bun.spawn(input.argv, {
     cwd: input.cwd,
-    env: { PATH: process.env.PATH || '', HOME: process.env.HOME || '', ...input.env },
+    env: mergeCodexRpcEnv(input.env),
     stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
   })
 

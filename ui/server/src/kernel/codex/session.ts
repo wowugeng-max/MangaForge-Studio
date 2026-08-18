@@ -1,4 +1,5 @@
 // ui/server/src/kernel/codex/session.ts
+import { join } from 'node:path'
 import { spawnCodexRpc, type CodexRpcClient, type RpcEventSink } from './rpc'
 import { DEFAULT_HARD_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS } from './turn-timeouts'
 
@@ -35,13 +36,19 @@ export async function startCodexSession(input: {
   argv?: string[]
   sink?: RpcEventSink
   extraEnv?: Record<string, string>
+  isolatedHome?: string
 }): Promise<CodexSession> {
   const rpc: CodexRpcClient = spawnCodexRpc({
     // 0.147+ `codex app-server` rejects `--ignore-user-config` (that flag is `exec`-only).
     // Isolation is CODEX_HOME pointing at the job's config.toml, not the user ~/.codex.
     argv: input.argv ?? [input.binary, 'app-server'],
     cwd: input.projectDir,
-    env: { CODEX_HOME: input.codexHome, MANGAFORGE_CODEX_KEY: input.envKey, ...(input.extraEnv || {}) },
+    env: {
+      CODEX_HOME: input.codexHome,
+      MANGAFORGE_CODEX_KEY: input.envKey,
+      HOME: input.isolatedHome || join(input.codexHome, '..'),
+      ...(input.extraEnv || {}),
+    },
     sink: input.sink,
   })
   let threadId: string

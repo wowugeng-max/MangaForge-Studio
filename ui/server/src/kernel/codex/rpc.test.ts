@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { spawnCodexRpc } from './rpc'
+import { spawnCodexRpc, mergeCodexRpcEnv } from './rpc'
 
 const PEER = `
 const decoder = new TextDecoder()
@@ -104,5 +104,15 @@ describe('spawnCodexRpc', () => {
     await expect(client.request('die', {}, 5000)).rejects.toThrow(/rpc stdout closed/)
     expect(Date.now() - started).toBeLessThan(2000)
     client.kill()
+  })
+})
+
+describe('mergeCodexRpcEnv', () => {
+  test('lets input HOME override the process home', () => {
+    const env = mergeCodexRpcEnv({ HOME: '/tmp/kernel-job-home', CODEX_HOME: '/tmp/kernel-job-home/codex-home' })
+    expect(env.HOME).toBe('/tmp/kernel-job-home')
+    expect(env.CODEX_HOME).toBe('/tmp/kernel-job-home/codex-home')
+    expect(env.HOME).not.toBe(process.env.HOME)
+    expect(env.PATH).toBeTruthy()
   })
 })
