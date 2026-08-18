@@ -69,6 +69,10 @@ describe('instance vs template validation', () => {
     expect(validateInstanceAgainstTemplate(expand)).toEqual({ ok: true })
     expect(expand.commit.mode).toBe('manual')
     expect(expand.outputs.some(o => o.binding === 'outlines.replace')).toBe(false)
+    const kinds = expand.outputs.map(o => o.artifact_kind)
+    expect(kinds.indexOf('character_sheet')).toBeLessThan(kinds.indexOf('world_doc'))
+    expect(expand.outputs.find(o => o.artifact_kind === 'character_sheet')?.glob).toBe('设定/角色/*.md')
+    expect(expand.outputs.find(o => o.artifact_kind === 'world_doc')?.glob).toBe('设定/**/*.md')
     expect(expand.invoke.prompt).toContain('扩写大纲')
     expect(expand.invoke.prompt).toContain('不要写正文')
     const legacy = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')!

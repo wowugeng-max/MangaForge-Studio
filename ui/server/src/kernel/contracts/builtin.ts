@@ -170,9 +170,9 @@ const longWriteExpand: KernelContract = {
   },
   projection: { mounts: ['outline', 'world', 'characters', 'tracking', 'skill_tree', 'agents'] },
   outputs: [
+    { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: false },
     { artifact_kind: 'outline_doc', glob: '大纲/**/*.md', binding: 'outlines.upsert', required: true },
     { artifact_kind: 'world_doc', glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: false },
-    { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: false },
     { artifact_kind: 'tracking_doc', glob: '追踪/**/*.md', binding: 'kernel_only', required: false },
   ],
   write_scope: ['设定/', '大纲/', '追踪/'],
