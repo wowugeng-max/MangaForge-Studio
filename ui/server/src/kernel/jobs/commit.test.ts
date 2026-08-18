@@ -20,6 +20,14 @@ async function seedReviewJob() {
   const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: EIGHT })
   insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
   insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'succeeded' })
+  updateKernelCandidate(ws, 'cand-1', {
+    metadata: JSON.stringify({
+      spawn_evidence: {
+        subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }],
+        agent_hints: ['story-architect'],
+      },
+    }),
+  })
   const vaultFile = join(mkdtempSync(join(tmpdir(), 'commit-vault-')), '第002章.md')
   writeFileSync(vaultFile, 'Fallback: none\n完整审稿报告')
   insertKernelArtifact(ws, { id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'review_report', rel_path: '审稿/第002章.md', sha256: 'h', byte_size: 10, vault_path: vaultFile })
@@ -60,6 +68,14 @@ describe('commitKernelCandidate', () => {
     const chapter = await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '二', chapter_text: EIGHT })
     insertKernelJob(ws, { id: 'job-1', project_id: project.id, workspace_scope: 'novel', title: '', status: 'awaiting_selection', capability: 'review', subject_type: 'chapter', subject_id: chapter.id, model_provider_id: 'any', model_id: 9, error_code: '', error_message: '', verb: '', verb_params: '{}', subject_key: '', brief_json: '' })
     insertKernelCandidate(ws, { id: 'cand-1', job_id: 'job-1', contract_id: 'oh-story-core.story-review.full', pack_id: 'oh-story-core', pack_revision: 'r', skill_name: 'story-review', status: 'succeeded' })
+    updateKernelCandidate(ws, 'cand-1', {
+      metadata: JSON.stringify({
+        spawn_evidence: {
+          subagent_threads: [{ thread_id: 's', parent_thread_id: 't', agent: 'story-architect' }],
+          agent_hints: ['story-architect'],
+        },
+      }),
+    })
     insertKernelArtifact(ws, { id: 'art-1', candidate_id: 'cand-1', artifact_kind: 'review_report', rel_path: '审稿/第002章.md', sha256: 'h', byte_size: 10, vault_path: join(ws, 'missing-review.md') })
     expect(await commitKernelCandidate(ws, 'job-1', 'cand-1')).toMatchObject({ ok: false, status: 500, code: 'OUTPUT_MISSING' })
     const detail = getKernelJobDetail(ws, 'job-1')!
