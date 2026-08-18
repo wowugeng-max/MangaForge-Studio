@@ -561,6 +561,23 @@ describe('oh-story quality panel actions', () => {
     expect(html).not.toContain('oh-story-core.story-deslop.file')
   })
 
+  test('renders kernel candidate compare while awaiting selection', () => {
+    const html = renderPanel(7, null, {
+      kernelJobDetail: {
+        ok: true,
+        job: { id: 'job-1', status: 'awaiting_selection' },
+        candidates: [
+          { id: 'cand-a', contract_id: 'oh-story-core.story-review.full', status: 'succeeded', last_message_excerpt: '完整审稿摘录' },
+          { id: 'cand-b', contract_id: 'user.review.fast', status: 'succeeded', last_message_excerpt: '假审稿摘录' },
+          { id: 'cand-c', contract_id: 'user.review.solo', status: 'gated', error_code: 'SOLO_FALLBACK' },
+        ],
+        artifacts: [],
+      },
+    })
+    expect(html).toContain('完整审稿摘录')
+    expect(html).toContain('SOLO_FALLBACK')
+  })
+
   test('marks a hashless or mismatched review as 正文已改', () => {
     const html = renderPanel(7, null, {
       ohStoryReviews: [ohStoryReview(7)],

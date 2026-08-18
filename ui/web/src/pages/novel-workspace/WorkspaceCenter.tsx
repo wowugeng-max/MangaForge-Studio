@@ -164,6 +164,11 @@ export function WorkspaceCenter({
   kernelSelectedContractIds,
   kernelSelectedContractIdsByAction,
   onKernelSelectedContractIdsChange,
+  kernelJobDetail = null,
+  kernelCandidatePreview = null,
+  kernelCommitBusy = false,
+  onKernelPreviewArtifact,
+  onKernelCommitCandidate,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -257,6 +262,11 @@ export function WorkspaceCenter({
   kernelSelectedContractIds?: string[]
   kernelSelectedContractIdsByAction?: Record<'review' | 'deslop' | 'apply', string[]>
   onKernelSelectedContractIdsChange?: (action: 'review' | 'deslop' | 'apply', ids: string[]) => void
+  kernelJobDetail?: any
+  kernelCandidatePreview?: { content: string; truncated: boolean } | null
+  kernelCommitBusy?: boolean
+  onKernelPreviewArtifact?: (artifactId: string) => void
+  onKernelCommitCandidate?: (candidateId: string) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -927,6 +937,11 @@ export function WorkspaceCenter({
             kernelSelectedContractIds={kernelSelectedContractIds}
             kernelSelectedContractIdsByAction={kernelSelectedContractIdsByAction}
             onKernelSelectedContractIdsChange={onKernelSelectedContractIdsChange}
+            kernelJobDetail={kernelJobDetail}
+            kernelCandidatePreview={kernelCandidatePreview}
+            kernelCommitBusy={kernelCommitBusy}
+            onKernelPreviewArtifact={onKernelPreviewArtifact}
+            onKernelCommitCandidate={onKernelCommitCandidate}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}
             onLoadEditorRevisionDiagnostics={onLoadEditorRevisionDiagnostics}

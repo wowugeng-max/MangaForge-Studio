@@ -194,7 +194,7 @@ export function useChapterKernelJob(deps: {
         setState({ phase: 'failed', action, jobId: started.jobId, errorCode: String(terminal.job.error_code || 'ENGINE_FAILED') })
         return
       }
-      runningRef.current = false
+      runningRef.current = true
       setState({ phase: 'awaiting_selection', action, jobId: started.jobId, detail: terminal })
     } catch (error: any) {
       runningRef.current = false
@@ -220,6 +220,7 @@ export function useChapterKernelJob(deps: {
     }
     await deps.loadProjectModules()
     message.success('已采纳所选候选')
+    runningRef.current = false
     setState({ phase: 'idle' })
   }, [api, deps, state])
 

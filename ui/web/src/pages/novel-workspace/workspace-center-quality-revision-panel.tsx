@@ -5,6 +5,8 @@ import {
   DEFAULT_CHAPTER_CONTRACT_IDS,
   type KernelContractOption,
 } from '../../kernel/jobs/contracts-for-action'
+import type { KernelJobDetail } from '../../kernel/jobs/types'
+import { KernelCandidateCompare, type KernelCandidatePreview } from './workspace-kernel-candidate-compare'
 import { ohStoryChapterTextHash } from './oh-story-chapter-text-hash'
 import {
   parseReviewPayload,
@@ -260,6 +262,11 @@ export function WorkspaceCenterQualityRevisionPanel({
   kernelSelectedContractIds,
   kernelSelectedContractIdsByAction,
   onKernelSelectedContractIdsChange,
+  kernelJobDetail = null,
+  kernelCandidatePreview = null,
+  kernelCommitBusy = false,
+  onKernelPreviewArtifact,
+  onKernelCommitCandidate,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -287,6 +294,11 @@ export function WorkspaceCenterQualityRevisionPanel({
   kernelSelectedContractIds?: string[]
   kernelSelectedContractIdsByAction?: Record<OhStoryCoreBusyAction, string[]>
   onKernelSelectedContractIdsChange?: (action: OhStoryCoreBusyAction, ids: string[]) => void
+  kernelJobDetail?: KernelJobDetail | null
+  kernelCandidatePreview?: KernelCandidatePreview | null
+  kernelCommitBusy?: boolean
+  onKernelPreviewArtifact?: (artifactId: string) => void
+  onKernelCommitCandidate?: (candidateId: string) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -338,6 +350,7 @@ export function WorkspaceCenterQualityRevisionPanel({
   const [pickerAction, setPickerAction] = React.useState<OhStoryCoreBusyAction>('review')
   const ohStoryStartedAtRef = React.useRef<number | null>(null)
   const busyAction = kernelJobAction ?? ohStoryAction ?? localOhStoryAction
+  const awaitingSelection = kernelJobDetail?.job?.status === 'awaiting_selection'
 
   React.useEffect(() => {
     if (hasReview) setOpen(true)
@@ -371,6 +384,7 @@ export function WorkspaceCenterQualityRevisionPanel({
   const summaryBits = [
     busyAction ? ohStoryBusySummary(busyAction, busyElapsedSec) : '',
     busyAction && kernelJobHint ? kernelJobHint : '',
+    kernelJobDetail?.job?.status === 'awaiting_selection' ? '待选优' : '',
     revisionActive && currentEditorRevisionTask
       ? `修订中·${editorRevisionPhaseLabel(currentEditorRevisionTask.phase)}`
       : '',
@@ -396,7 +410,7 @@ export function WorkspaceCenterQualityRevisionPanel({
           <Button
             size="small"
             loading={busyAction === 'review'}
-            disabled={Boolean(busyAction) && busyAction !== 'review'}
+            disabled={(Boolean(busyAction) && busyAction !== 'review') || awaitingSelection}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
@@ -406,7 +420,7 @@ export function WorkspaceCenterQualityRevisionPanel({
           <Button
             size="small"
             loading={busyAction === 'apply'}
-            disabled={Boolean(busyAction) && busyAction !== 'apply'}
+            disabled={(Boolean(busyAction) && busyAction !== 'apply') || awaitingSelection}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
@@ -416,14 +430,14 @@ export function WorkspaceCenterQualityRevisionPanel({
           <Button
             size="small"
             loading={busyAction === 'deslop'}
-            disabled={Boolean(busyAction) && busyAction !== 'deslop'}
+            disabled={(Boolean(busyAction) && busyAction !== 'deslop') || awaitingSelection}
             onClick={(event) => {
               event.preventDefault()
               event.stopPropagation()
               runOhStoryAction('deslop', onOhStoryDeslop)
             }}
           >oh-story 去AI</Button>
-          {busyAction && onCancelKernelJob ? (
+          {(busyAction || awaitingSelection) && onCancelKernelJob ? (
             <Button
               size="small"
               danger
@@ -488,6 +502,16 @@ export function WorkspaceCenterQualityRevisionPanel({
               })}
             </Space>
           </div>
+        ) : null}
+
+        {awaitingSelection && kernelJobDetail ? (
+          <KernelCandidateCompare
+            detail={kernelJobDetail}
+            preview={kernelCandidatePreview}
+            committing={kernelCommitBusy}
+            onPreview={(artifactId) => { void onKernelPreviewArtifact?.(artifactId) }}
+            onCommit={(candidateId) => { void onKernelCommitCandidate?.(candidateId) }}
+          />
         ) : null}
 
         {currentEditorRevisionTask ? (

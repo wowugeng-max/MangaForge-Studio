@@ -269,6 +269,15 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
   const kernelBusyAction = kernelJob.state.phase === 'running' ? kernelJob.state.action : null
   const kernelBusyElapsedSec = kernelJob.state.phase === 'running' ? kernelJob.state.elapsedSec : undefined
   const kernelBusyHint = kernelJob.state.phase === 'running' ? kernelJob.state.hint : ''
+  const [kernelPreview, setKernelPreview] = React.useState<{ content: string; truncated: boolean } | null>(null)
+  const [kernelCommitBusy, setKernelCommitBusy] = React.useState(false)
+  const kernelJobDetail = kernelJob.state.phase === 'awaiting_selection' ? kernelJob.state.detail : null
+
+  React.useEffect(() => {
+    if (kernelJob.state.phase === 'awaiting_selection') return
+    setKernelPreview(null)
+    setKernelCommitBusy(false)
+  }, [kernelJob.state.phase])
 
   if (workspaceArea === 'autoCreation') {
     return (
@@ -401,6 +410,18 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         kernelSelectedContractIds={kernelJob.selectedContractIds.review}
         kernelSelectedContractIdsByAction={kernelJob.selectedContractIds}
         onKernelSelectedContractIdsChange={kernelJob.setSelectedContractIds}
+        kernelJobDetail={kernelJobDetail}
+        kernelCandidatePreview={kernelPreview}
+        kernelCommitBusy={kernelCommitBusy}
+        onKernelPreviewArtifact={(artifactId) => {
+          void kernelJob.loadArtifact(artifactId).then((result) => {
+            setKernelPreview(result)
+          })
+        }}
+        onKernelCommitCandidate={(candidateId) => {
+          setKernelCommitBusy(true)
+          void kernelJob.commit(candidateId).finally(() => setKernelCommitBusy(false))
+        }}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}
         onLoadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}
