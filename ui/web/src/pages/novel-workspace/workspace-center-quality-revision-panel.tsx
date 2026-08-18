@@ -1,5 +1,10 @@
 import React from 'react'
-import { Button, Modal, Space, Spin, Tag, Typography } from 'antd'
+import { Button, Checkbox, Modal, Space, Spin, Tag, Typography } from 'antd'
+import {
+  contractsForAction,
+  DEFAULT_CHAPTER_CONTRACT_IDS,
+  type KernelContractOption,
+} from '../../kernel/jobs/contracts-for-action'
 import { ohStoryChapterTextHash } from './oh-story-chapter-text-hash'
 import {
   parseReviewPayload,
@@ -251,6 +256,10 @@ export function WorkspaceCenterQualityRevisionPanel({
   ohStoryAction = null,
   ohStoryElapsedSec,
   onCancelKernelJob,
+  kernelContracts = [],
+  kernelSelectedContractIds,
+  kernelSelectedContractIdsByAction,
+  onKernelSelectedContractIdsChange,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -274,6 +283,10 @@ export function WorkspaceCenterQualityRevisionPanel({
   ohStoryAction?: OhStoryCoreBusyAction | null
   ohStoryElapsedSec?: number
   onCancelKernelJob?: () => void | Promise<void>
+  kernelContracts?: KernelContractOption[]
+  kernelSelectedContractIds?: string[]
+  kernelSelectedContractIdsByAction?: Record<OhStoryCoreBusyAction, string[]>
+  onKernelSelectedContractIdsChange?: (action: OhStoryCoreBusyAction, ids: string[]) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -322,6 +335,7 @@ export function WorkspaceCenterQualityRevisionPanel({
   const hasReview = Boolean(latest && reportText)
   const [localOhStoryAction, setLocalOhStoryAction] = React.useState<OhStoryCoreBusyAction | null>(null)
   const [ohStoryNowMs, setOhStoryNowMs] = React.useState(() => Date.now())
+  const [pickerAction, setPickerAction] = React.useState<OhStoryCoreBusyAction>('review')
   const ohStoryStartedAtRef = React.useRef<number | null>(null)
   const busyAction = kernelJobAction ?? ohStoryAction ?? localOhStoryAction
 
@@ -425,6 +439,57 @@ export function WorkspaceCenterQualityRevisionPanel({
       </summary>
 
       <div className="novel-quality-revision-body">
+        {kernelContracts.length ? (
+          <div className="novel-quality-revision-contracts">
+            <Text type="secondary" style={{ fontSize: 12 }}>并跑合同</Text>
+            <Space wrap size={[4, 4]} style={{ margin: '4px 0 8px' }}>
+              {([
+                ['review', '审稿'],
+                ['apply', '改稿'],
+                ['deslop', '去AI'],
+              ] as Array<[OhStoryCoreBusyAction, string]>).map(([action, label]) => (
+                <Button
+                  key={action}
+                  size="small"
+                  type={pickerAction === action ? 'primary' : 'default'}
+                  autoInsertSpace={false}
+                  onClick={() => setPickerAction(action)}
+                >{label}</Button>
+              ))}
+            </Space>
+            <Space wrap size={[8, 8]}>
+              {contractsForAction(kernelContracts, pickerAction).map((item) => {
+                const selectedForPicker = kernelSelectedContractIdsByAction?.[pickerAction]
+                  ?? (pickerAction === 'review' ? kernelSelectedContractIds : undefined)
+                  ?? []
+                const defaultId = DEFAULT_CHAPTER_CONTRACT_IDS[pickerAction]
+                const options = contractsForAction(kernelContracts, pickerAction)
+                const checkedIds = selectedForPicker.length
+                  ? selectedForPicker
+                  : options.some(option => option.id === defaultId)
+                    ? [defaultId]
+                    : options[0]
+                      ? [options[0].id]
+                      : []
+                const checked = checkedIds.includes(item.id)
+                return (
+                  <Checkbox
+                    key={item.id}
+                    checked={checked}
+                    disabled={!checked && checkedIds.length >= 8}
+                    onChange={(event) => {
+                      const next = event.target.checked
+                        ? [...checkedIds, item.id].slice(0, 8)
+                        : checkedIds.filter(id => id !== item.id)
+                      onKernelSelectedContractIdsChange?.(pickerAction, next)
+                    }}
+                  >{item.label}</Checkbox>
+                )
+              })}
+            </Space>
+          </div>
+        ) : null}
+
         {currentEditorRevisionTask ? (
           <EditorRevisionStatusStrip
             task={currentEditorRevisionTask}

@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { message } from 'antd'
 import { axiosKernelRequest, createKernelJobApi } from '../../../kernel/jobs/client'
+import {
+  contractsForAction,
+  DEFAULT_CHAPTER_CONTRACT_IDS,
+  resolveContractIdsForCreate,
+} from '../../../kernel/jobs/contracts-for-action'
 import { kernelJobUserMessage } from '../../../kernel/jobs/messages'
 import { pollKernelJob } from '../../../kernel/jobs/poll'
-import type { CreateKernelJobInput, KernelJobAction, KernelJobDetail } from '../../../kernel/jobs/types'
+import type { CreateKernelJobInput, KernelContractListItem, KernelJobAction, KernelJobDetail } from '../../../kernel/jobs/types'
 import { assertOhStoryApplyReady, startChapterKernelJob } from './start-chapter-kernel-job'
 
 export type ChapterKernelJobState =
@@ -58,6 +63,7 @@ export function useChapterKernelJob(deps: {
     [deps.api, deps.apiClient],
   )
   const [state, setState] = useState<ChapterKernelJobState>({ phase: 'idle' })
+  const [contracts, setContracts] = useState<KernelContractListItem[]>([])
   const [selectedContractIds, setSelectedByAction] = useState<Record<KernelJobAction, string[]>>({
     review: [],
     deslop: [],
@@ -70,6 +76,28 @@ export function useChapterKernelJob(deps: {
   useEffect(() => () => {
     abortRef.current?.abort()
   }, [])
+
+  useEffect(() => {
+    void api.listContracts().then((result) => {
+      if (!result.ok) return
+      setContracts(result.contracts)
+    })
+  }, [api])
+
+  useEffect(() => {
+    if (!contracts.length) return
+    setSelectedByAction((prev) => {
+      const next = { ...prev }
+      for (const action of ['review', 'deslop', 'apply'] as KernelJobAction[]) {
+        if (next[action].length) continue
+        const options = contractsForAction(contracts, action)
+        const defaultId = DEFAULT_CHAPTER_CONTRACT_IDS[action]
+        const picked = options.find(item => item.id === defaultId)?.id || options[0]?.id
+        next[action] = picked ? [picked] : []
+      }
+      return next
+    })
+  }, [contracts])
 
   const setSelectedContractIds = useCallback((action: KernelJobAction, ids: string[]) => {
     setSelectedByAction(prev => ({ ...prev, [action]: ids }))
@@ -106,7 +134,10 @@ export function useChapterKernelJob(deps: {
       chapterId: deps.chapterId,
       modelId: deps.modelId,
       action,
-      contractIds: deps.resolveContractIds?.(action),
+      contractIds: deps.resolveContractIds?.(action) ?? resolveContractIdsForCreate(
+        selectedContractIds[action],
+        DEFAULT_CHAPTER_CONTRACT_IDS[action],
+      ),
     }
     setState({ phase: 'running', action, jobId: '', hint: 'queued', elapsedSec: 0 })
     const started = await startChapterKernelJob({
@@ -170,7 +201,7 @@ export function useChapterKernelJob(deps: {
       if (error?.name === 'AbortError' || controller.signal.aborted) return
       setState({ phase: 'failed', action, jobId: started.jobId, errorCode: 'ENGINE_FAILED' })
     }
-  }, [api, deps])
+  }, [api, deps, selectedContractIds])
 
   const cancel = useCallback(async () => {
     const jobId = state.phase === 'running' || state.phase === 'awaiting_selection' ? state.jobId : ''
@@ -200,6 +231,7 @@ export function useChapterKernelJob(deps: {
 
   return {
     state,
+    contracts,
     selectedContractIds,
     setSelectedContractIds,
     start,

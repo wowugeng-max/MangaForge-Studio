@@ -397,6 +397,10 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         ohStoryAction={kernelBusyAction}
         ohStoryElapsedSec={kernelBusyElapsedSec}
         onCancelKernelJob={() => { void kernelJob.cancel() }}
+        kernelContracts={kernelJob.contracts}
+        kernelSelectedContractIds={kernelJob.selectedContractIds.review}
+        kernelSelectedContractIdsByAction={kernelJob.selectedContractIds}
+        onKernelSelectedContractIdsChange={kernelJob.setSelectedContractIds}
         onCancelEditorRevision={cancelEditorRevision}
         onRetryEditorRevision={retryEditorRevision}
         onLoadEditorRevisionDiagnostics={loadEditorRevisionDiagnostics}

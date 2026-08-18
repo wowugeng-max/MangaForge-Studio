@@ -546,6 +546,21 @@ describe('oh-story quality panel actions', () => {
     expect(html).toContain('取消')
   })
 
+  test('lists same-verb kernel contracts for compete', () => {
+    const html = renderPanel(7, null, {
+      kernelContracts: [
+        { id: 'oh-story-core.story-review.full', label: '完整审稿', verb: 'review_chapter', implemented: true },
+        { id: 'user.review.fast', label: '假审稿', verb: 'review_chapter', implemented: true },
+        { id: 'oh-story-core.story-deslop.file', label: '去AI', verb: 'deslop_chapter', implemented: true },
+        { id: 'pending.review', label: '未实现', verb: 'review_chapter', implemented: false },
+      ],
+      kernelSelectedContractIds: ['oh-story-core.story-review.full'],
+    })
+    expect(html).toContain('完整审稿')
+    expect(html).toContain('假审稿')
+    expect(html).not.toContain('oh-story-core.story-deslop.file')
+  })
+
   test('marks a hashless or mismatched review as 正文已改', () => {
     const html = renderPanel(7, null, {
       ohStoryReviews: [ohStoryReview(7)],

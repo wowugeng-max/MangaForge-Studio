@@ -160,6 +160,10 @@ export function WorkspaceCenter({
   ohStoryAction = null,
   ohStoryElapsedSec,
   onCancelKernelJob,
+  kernelContracts,
+  kernelSelectedContractIds,
+  kernelSelectedContractIdsByAction,
+  onKernelSelectedContractIdsChange,
   onCancelEditorRevision,
   onRetryEditorRevision,
   onLoadEditorRevisionDiagnostics,
@@ -249,6 +253,10 @@ export function WorkspaceCenter({
   ohStoryAction?: 'review' | 'deslop' | 'apply' | null
   ohStoryElapsedSec?: number
   onCancelKernelJob?: () => void | Promise<void>
+  kernelContracts?: Array<{ id: string; label: string; verb?: string; implemented: boolean }>
+  kernelSelectedContractIds?: string[]
+  kernelSelectedContractIdsByAction?: Record<'review' | 'deslop' | 'apply', string[]>
+  onKernelSelectedContractIdsChange?: (action: 'review' | 'deslop' | 'apply', ids: string[]) => void
   onCancelEditorRevision?: (runId: number) => void | Promise<unknown>
   onRetryEditorRevision?: (runId: number) => void | Promise<unknown>
   onLoadEditorRevisionDiagnostics?: (runId: number) => Promise<Record<string, unknown>>
@@ -915,6 +923,10 @@ export function WorkspaceCenter({
             ohStoryAction={ohStoryAction}
             ohStoryElapsedSec={ohStoryElapsedSec}
             onCancelKernelJob={onCancelKernelJob}
+            kernelContracts={kernelContracts}
+            kernelSelectedContractIds={kernelSelectedContractIds}
+            kernelSelectedContractIdsByAction={kernelSelectedContractIdsByAction}
+            onKernelSelectedContractIdsChange={onKernelSelectedContractIdsChange}
             onCancelEditorRevision={onCancelEditorRevision}
             onRetryEditorRevision={onRetryEditorRevision}
             onLoadEditorRevisionDiagnostics={onLoadEditorRevisionDiagnostics}
