@@ -2,6 +2,7 @@
 import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { loadOhStoryCoreSuite } from '../../novel-writing/oh-story-core/store'
+import { listNovelOutlines } from '../../novel'
 import { readKernelEvents } from '../codex/events'
 import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
@@ -91,6 +92,12 @@ export async function validateCreateKernelJob(
     briefJson = JSON.stringify(brief)
     if (Buffer.byteLength(briefJson, 'utf8') > 32 * 1024) {
       return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '创意超过 32KiB 上限' }
+    }
+  }
+  if (verb === 'expand_outline') {
+    const outlines = await listNovelOutlines(ws, body.project_id)
+    if (!Array.isArray(outlines) || outlines.length === 0) {
+      return { ok: false, status: 400, code: 'FOUNDATION_PRECONDITION', message: '扩纲需要账本里已有大纲' }
     }
   }
   const dedupe = template.subject_type === 'project'

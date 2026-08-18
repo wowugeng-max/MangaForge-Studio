@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createNovelChapter, createNovelProject, listNovelReviewsByType } from '../../novel'
+import { createNovelChapter, createNovelOutline, createNovelProject, listNovelReviewsByType } from '../../novel'
 import { getKernelJobDetail, insertKernelJob } from './repo'
 import { cancelKernelJob, candidateStatusAfterGate, createAndRunKernelJob, getKernelJobProgress, validateCreateKernelJob } from './run-job'
 
@@ -200,6 +200,22 @@ describe('verb-based job creation', () => {
       contract_ids: ['oh-story-core.story-review.full'],
     }, { skipRuntimeCheck: true })
     expect(result.ok).toBe(true)
+  })
+
+  test('expand_outline requires an existing outline and project subject', async () => {
+    const { ws, project } = await seed()
+    const body = {
+      project_id: project.id, subject_type: 'project' as const, subject_id: project.id,
+      verb: 'expand_outline', model_id: 9,
+    }
+    expect(((await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })) as any).code).toBe('FOUNDATION_PRECONDITION')
+    await createNovelOutline(ws, { project_id: project.id, outline_type: 'master', title: '总纲', summary: '已有总纲' })
+    const ok = await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) expect(ok.contracts.map(c => c.id)).toEqual(['oh-story-core.story-long-write.expand'])
+    expect(((await validateCreateKernelJob(ws, {
+      ...body, subject_type: 'chapter', subject_id: 1,
+    }, { skipRuntimeCheck: true })) as any).code).toBe('SUBJECT_TYPE_MISMATCH')
   })
 })
 
