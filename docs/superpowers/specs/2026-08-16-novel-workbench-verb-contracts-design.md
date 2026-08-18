@@ -443,7 +443,7 @@ POST /api/kernel/jobs
 - 不改 Codex 源码。
 - 不把画布切进内核。
 - 不把旧写作 skill 市场（提示词编译器）升成内核合同。
-- 不在第一期编码实现扩纲、写章、续写、回炉、`adapt_pack`（规范位保留）。
+- 扩纲运行时已按 `docs/superpowers/plans/2026-08-18-expand-outline-runtime.md` 落地；写章、续写、回炉、`adapt_pack` 仍未做（规范位保留）。
 - 不复活 project-seed JSON 作为深度孵化的产品真相。
 - 不在采纳前提供编辑 vault 再提交。
 - 不因取消/失败自动删除空项目。
@@ -459,12 +459,12 @@ POST /api/kernel/jobs
 | **1 基板** | 动词/模板登记、实例 `verb` 校验、`subject_type=project`、`user_brief`、新 kind 与 upsert、新门、job 存 verb、选优按动词、project 投影 | 上节「基板」测试全绿，不接真 Codex |
 | **2 开书产品** | 内置 `oh-story-core.story-long-write.open`；向导去掉 AI 快速；深度孵化 job + 轮询 + 只读预览 + 采纳；关掉该模式的 derive-stream | 上节「开书产品」+ 真机 |
 | **3 收编现网** | 三按钮标动词；旧路由补 verb | 现网三按钮行为不变（该验收在 D 补丁前有效；此后三按钮走 kernel jobs 路径，旧路由 410） |
-| 4+ | 扩纲 → 写章（替换 `generateChapterForGroup` 必须另开 spec）→ 续写 → 回炉 → 适配 | 各自动独立计划 |
+| 4+ | 扩纲已有实现计划（`docs/superpowers/plans/2026-08-18-expand-outline-runtime.md`）→ 写章（替换 `generateChapterForGroup` 必须另开 spec）→ 续写 → 回炉 → 适配 | 扩纲按该计划验收；写章仍须另开 spec；其余各自动独立计划 |
 
 ## 与旧文档的关系
 
-- **扩展** `2026-08-15-codex-kernel-vault-design.md`（**v1.2** 已收回本文件已落地的内核语义：verb 主键、开书、`ENGINE_FAILED`/`CANCELLED`、投影/门/prompt 变量）。细纲扩写、写正文仍另开实现计划。内核 spec 画布不切、不改 Codex、领域表为真相，全部保留。
-- **覆盖** 内核 spec 分期第 6 条「outline 另开」中的开书部分：本文件即该另开 spec。细纲扩写、写正文仍另开实现计划。
+- **扩展** `2026-08-15-codex-kernel-vault-design.md`（**v1.2** 已收回本文件已落地的内核语义：verb 主键、开书、`ENGINE_FAILED`/`CANCELLED`、投影/门/prompt 变量）。扩纲运行时已落地；写正文仍另开实现计划。内核 spec 画布不切、不改 Codex、领域表为真相，全部保留。
+- **覆盖** 内核 spec 分期第 6 条「outline 另开」中的开书部分：本文件即该另开 spec。扩纲运行时已落地；写正文仍另开实现计划。
 - **废止** 深度孵化作为产品路径时对 `project-seed/derive-stream` 的依赖。seed API 可暂留，向导 `deep_draft` 不得调用。
 - **不替代** oh-story 三按钮的内核桥接与 70% 改稿门、solo 门。
 - **不替代** `2026-08-14-writing-skill-marketplace-design.md`（那是提示词包，不是内核合同）。
