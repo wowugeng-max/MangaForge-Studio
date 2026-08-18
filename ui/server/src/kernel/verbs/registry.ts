@@ -2,7 +2,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { validateVerbTemplate, type VerbTemplate } from './schema'
 
-export const IMPLEMENTED_VERBS = ['open_book', 'review_chapter', 'apply_review', 'deslop_chapter'] as const
+export const IMPLEMENTED_VERBS = ['open_book', 'review_chapter', 'apply_review', 'deslop_chapter', 'expand_outline'] as const
 
 const TEMPLATES_DIR = join(import.meta.dir, 'templates')
 let cache: Map<string, VerbTemplate> | null = null

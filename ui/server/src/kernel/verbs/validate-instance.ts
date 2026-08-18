@@ -39,6 +39,9 @@ export function validateInstanceAgainstTemplate(contract: KernelContract):
       errors.push(`domain write ${table} is forbidden for verb ${verb}`)
     }
   }
+  if (contract.commit.mode !== template.commit_mode && contract.commit.mode !== 'never') {
+    errors.push(`commit.mode ${contract.commit.mode} must be ${template.commit_mode} (or never) for verb ${verb}`)
+  }
   for (const gate of template.template_gates) {
     if (!contract.gates.includes(gate as any)) errors.push(`template gate ${gate} missing from instance gates`)
   }

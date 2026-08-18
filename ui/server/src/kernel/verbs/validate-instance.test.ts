@@ -63,4 +63,24 @@ describe('instance vs template validation', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.errors.join(' ')).toContain('current_chapter')
   })
+  test('expand instance upserts outlines and is implemented; replace outline variant stays unimplemented', () => {
+    const expand = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')!
+    expect(resolveContractVerb(expand)).toBe('expand_outline')
+    expect(validateInstanceAgainstTemplate(expand)).toEqual({ ok: true })
+    expect(expand.commit.mode).toBe('manual')
+    expect(expand.outputs.some(o => o.binding === 'outlines.replace')).toBe(false)
+    expect(expand.invoke.prompt).toContain('扩写大纲')
+    expect(expand.invoke.prompt).toContain('不要写正文')
+    const legacy = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')!
+    expect(resolveContractVerb(legacy)).toBeNull()
+  })
+  test('instance commit mode must match the template commit_mode', () => {
+    const expand = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')!
+    const auto = { ...expand, commit: { ...expand.commit, mode: 'auto_if_single' } }
+    const result = validateInstanceAgainstTemplate(auto as any)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.errors.join(' ')).toContain('commit.mode')
+    const never = { ...expand, commit: { ...expand.commit, mode: 'never' } }
+    expect(validateInstanceAgainstTemplate(never as any).ok).toBe(true)
+  })
 })

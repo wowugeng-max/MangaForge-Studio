@@ -17,8 +17,10 @@ describe('verb defaults', () => {
     expect(defaults.apply_review).toEqual(['oh-story-core.story-apply.surgical'])
     expect(defaults.deslop_chapter).toEqual(['oh-story-core.story-deslop.file'])
     expect(defaults.open_book).toEqual(['oh-story-core.story-long-write.open'])
+    expect(defaults.expand_outline).toEqual(['oh-story-core.story-long-write.expand'])
     const onDisk = JSON.parse(readFileSync(join(ws, '.mangaforge/kernel/verb-defaults.json'), 'utf8'))
     expect(onDisk.open_book).toEqual(['oh-story-core.story-long-write.open'])
+    expect(onDisk.expand_outline).toEqual(['oh-story-core.story-long-write.expand'])
   })
   test('user edits survive reload (seed does not overwrite)', () => {
     const ws = mkdtempSync(join(tmpdir(), 'verb-defaults-2-'))
@@ -31,7 +33,7 @@ describe('verb defaults', () => {
     writeDefaults(ws, JSON.stringify({
       review_chapter: 'oh-story-core.story-review.full',
     }))
-    expect(loadVerbDefaults(ws).review_chapter).toBeUndefined()
+    expect(loadVerbDefaults(ws).review_chapter).toEqual(['oh-story-core.story-review.full'])
   })
   test('root JSON array falls back to builtins', () => {
     const ws = mkdtempSync(join(tmpdir(), 'verb-defaults-arr-'))
@@ -41,6 +43,7 @@ describe('verb defaults', () => {
       apply_review: ['oh-story-core.story-apply.surgical'],
       deslop_chapter: ['oh-story-core.story-deslop.file'],
       open_book: ['oh-story-core.story-long-write.open'],
+      expand_outline: ['oh-story-core.story-long-write.expand'],
     })
   })
   test('keeps a valid array of contract ids', () => {
@@ -49,5 +52,14 @@ describe('verb defaults', () => {
       review_chapter: ['my-pack.my-review.v1'],
     }))
     expect(loadVerbDefaults(ws).review_chapter).toEqual(['my-pack.my-review.v1'])
+  })
+  test('fills missing expand_outline without overwriting user review_chapter', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'verb-defaults-fill-'))
+    writeDefaults(ws, JSON.stringify({
+      review_chapter: ['my-pack.my-review.v1'],
+    }))
+    const defaults = loadVerbDefaults(ws)
+    expect(defaults.review_chapter).toEqual(['my-pack.my-review.v1'])
+    expect(defaults.expand_outline).toEqual(['oh-story-core.story-long-write.expand'])
   })
 })

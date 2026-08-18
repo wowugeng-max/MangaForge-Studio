@@ -149,7 +149,41 @@ const longWriteOpen: KernelContract = {
   approval: 'never',
 }
 
-export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen]
+const longWriteExpand: KernelContract = {
+  schema_version: 1,
+  id: 'oh-story-core.story-long-write.expand',
+  pack_id: 'oh-story-core',
+  skill_name: 'story-long-write',
+  variant: 'expand',
+  verb: 'expand_outline',
+  capability: 'outline',
+  label: '扩写大纲',
+  invoke: {
+    mention: '$story-long-write',
+    prompt: [
+      '扩写大纲。',
+      '在现有 大纲/ 与 设定/ 上新增或修改细纲、卷纲；至少改一份 大纲/ 下的 markdown。',
+      '可以更新 设定/ 世界观或角色档案。',
+      '不要写正文，不要创建 正文/ 下的任何文件。',
+      '不要删除或整份替换已有总纲文件名为目的；用修改或新增文件表达扩写。',
+    ].join('\n'),
+  },
+  projection: { mounts: ['outline', 'world', 'characters', 'tracking', 'skill_tree', 'agents'] },
+  outputs: [
+    { artifact_kind: 'outline_doc', glob: '大纲/**/*.md', binding: 'outlines.upsert', required: true },
+    { artifact_kind: 'world_doc', glob: '设定/**/*.md', binding: 'worldbuilding.upsert', required: false },
+    { artifact_kind: 'character_sheet', glob: '设定/角色/*.md', binding: 'characters.upsert', required: false },
+    { artifact_kind: 'tracking_doc', glob: '追踪/**/*.md', binding: 'kernel_only', required: false },
+  ],
+  write_scope: ['设定/', '大纲/', '追踪/'],
+  ignore: ['.story-review/'],
+  gates: ['reject_chapter_text_artifact'],
+  commit: { mode: 'manual', domain_writes: ['worldbuilding', 'characters', 'outlines'] },
+  sandbox: 'workspace-write',
+  approval: 'never',
+}
+
+export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen, longWriteExpand]
 
 export function isBuiltinKernelContractId(id: string): boolean {
   return BUILTIN_KERNEL_CONTRACTS.some(contract => contract.id === id)

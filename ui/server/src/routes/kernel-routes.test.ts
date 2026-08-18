@@ -33,6 +33,7 @@ describe('kernel contract routes', () => {
     expect(res.body.contracts.map((c: { id: string }) => c.id).sort()).toEqual([
       'oh-story-core.story-apply.surgical',
       'oh-story-core.story-deslop.file',
+      'oh-story-core.story-long-write.expand',
       'oh-story-core.story-long-write.open',
       'oh-story-core.story-long-write.outline',
       'oh-story-core.story-review.full',

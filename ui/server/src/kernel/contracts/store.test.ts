@@ -9,7 +9,7 @@ import { deleteUserKernelContract, loadKernelContracts, saveUserKernelContract, 
 function tempWs() { return mkdtempSync(join(tmpdir(), 'kernel-contracts-')) }
 
 describe('builtin contracts', () => {
-  test('all five builtins pass validation', () => {
+  test('all six builtins pass validation', () => {
     for (const contract of BUILTIN_KERNEL_CONTRACTS) {
       const result = validateKernelContract(contract)
       expect(result.ok).toBe(true)
@@ -18,12 +18,14 @@ describe('builtin contracts', () => {
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-deslop.file')?.verb).toBe('deslop_chapter')
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')?.verb).toBe('apply_review')
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')?.verb).toBeUndefined()
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')?.verb).toBe('expand_outline')
     expect(BUILTIN_KERNEL_CONTRACTS.map(c => c.id)).toEqual([
       'oh-story-core.story-review.full',
       'oh-story-core.story-deslop.file',
       'oh-story-core.story-apply.surgical',
       'oh-story-core.story-long-write.outline',
       'oh-story-core.story-long-write.open',
+      'oh-story-core.story-long-write.expand',
     ])
   })
 })
@@ -35,6 +37,7 @@ describe('contract store', () => {
     expect(readdirSync(join(ws, '.mangaforge', 'kernel', 'contracts')).sort()).toEqual([
       'oh-story-core.story-apply.surgical.json',
       'oh-story-core.story-deslop.file.json',
+      'oh-story-core.story-long-write.expand.json',
       'oh-story-core.story-long-write.open.json',
       'oh-story-core.story-long-write.outline.json',
       'oh-story-core.story-review.full.json',
@@ -51,6 +54,9 @@ describe('contract store', () => {
     const open = contracts.find(c => c.id === 'oh-story-core.story-long-write.open')!
     expect(open.verb).toBe('open_book')
     expect(open.implemented).toBe(true)
+    const expand = contracts.find(c => c.id === 'oh-story-core.story-long-write.expand')!
+    expect(expand.verb).toBe('expand_outline')
+    expect(expand.implemented).toBe(true)
   })
 
   test('user contract with same artifact kind installs without code change (扩展 8.1)', () => {

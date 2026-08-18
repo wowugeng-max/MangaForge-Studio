@@ -7,6 +7,7 @@ const BUILTIN_DEFAULTS: Record<string, string[]> = {
   apply_review: ['oh-story-core.story-apply.surgical'],
   deslop_chapter: ['oh-story-core.story-deslop.file'],
   open_book: ['oh-story-core.story-long-write.open'],
+  expand_outline: ['oh-story-core.story-long-write.expand'],
 }
 
 function defaultsPath(ws: string): string {
@@ -28,16 +29,22 @@ function sanitizeVerbDefaults(parsed: unknown): Record<string, string[]> | null 
 
 export function loadVerbDefaults(ws: string): Record<string, string[]> {
   const path = defaultsPath(ws)
+  let loaded: Record<string, string[]>
   if (!existsSync(path)) {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, JSON.stringify(BUILTIN_DEFAULTS, null, 2))
-    return { ...BUILTIN_DEFAULTS }
+    loaded = { ...BUILTIN_DEFAULTS }
+  } else {
+    try {
+      loaded = sanitizeVerbDefaults(JSON.parse(readFileSync(path, 'utf8'))) ?? { ...BUILTIN_DEFAULTS }
+    } catch {
+      loaded = { ...BUILTIN_DEFAULTS }
+    }
   }
-  try {
-    return sanitizeVerbDefaults(JSON.parse(readFileSync(path, 'utf8'))) ?? { ...BUILTIN_DEFAULTS }
-  } catch {
-    return { ...BUILTIN_DEFAULTS }
+  for (const [verb, ids] of Object.entries(BUILTIN_DEFAULTS)) {
+    if (!loaded[verb]?.length) loaded[verb] = [...ids]
   }
+  return loaded
 }
 
 export function saveVerbDefaults(ws: string, defaults: Record<string, string[]>): void {
