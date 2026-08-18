@@ -109,10 +109,12 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
           }
         }
       }
-      for (const row of outlineRows) {
-        if (row.chapterNo === null) continue
-        const chapterId2 = ensureEmptyChapterRow(ws, detail.job.project_id, row.chapterNo, row.title, row.outlineId, db)
-        if (chapterId2) commits.push({ domain_table: 'chapters', domain_row_id: chapterId2 })
+      if (detail.job.verb === 'open_book') {
+        for (const row of outlineRows) {
+          if (row.chapterNo === null) continue
+          const chapterId2 = ensureEmptyChapterRow(ws, detail.job.project_id, row.chapterNo, row.title, row.outlineId, db)
+          if (chapterId2) commits.push({ domain_table: 'chapters', domain_row_id: chapterId2 })
+        }
       }
       const now = new Date().toISOString()
       for (const commit of commits) {

@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createNovelOutline, createNovelProject, listNovelOutlines } from '../../novel'
+import { createNovelOutline, createNovelProject, listNovelChapters, listNovelOutlines } from '../../novel'
 import { commitKernelCandidate } from './commit'
 import { getKernelJobDetail } from './repo'
 import { createAndRunKernelJob } from './run-job'
@@ -59,8 +59,14 @@ describe('expand_outline jobs', () => {
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('awaiting_selection')
     expect(detail.candidates[0].status).toBe('succeeded')
+    const chaptersBefore = await listNovelChapters(ws, project.id)
+    const chapterIdsBefore = chaptersBefore.map((row: any) => row.id)
     const committed = await commitKernelCandidate(ws, created.jobId, detail.candidates[0].id)
     expect(committed.ok).toBe(true)
+    const chaptersAfter = await listNovelChapters(ws, project.id)
+    expect(chaptersAfter.length).toBe(chaptersBefore.length)
+    expect(chaptersAfter.map((row: any) => row.id)).toEqual(chapterIdsBefore)
+    expect(chaptersAfter.some((row: any) => Number(row.chapter_no) === 3)).toBe(false)
     const outlines = await listNovelOutlines(ws, project.id)
     expect(outlines.some((row: any) => String(row.title || '').includes('夜谈') || String(row.summary || '').includes('对质'))).toBe(true)
   })
