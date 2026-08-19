@@ -30,10 +30,13 @@ describe('verb template registry', () => {
     expect(t.template_gates).toEqual(['require_chapter_file', 'require_matching_review', 'paragraph_retention_70'])
     expect(t.mention_policy).toBe('optional')
   })
-  test('implemented verbs are exactly the phase-1 set plus expand_outline', () => {
+  test('implemented verbs are exactly the phase-1 set plus expand_outline and write_chapter', () => {
     expect([...IMPLEMENTED_VERBS].sort()).toEqual([
-      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter',
+      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'write_chapter',
     ])
+  })
+  test('write_chapter template gates include reject_outline_artifact', () => {
+    expect(getVerbTemplate('write_chapter')!.template_gates).toContain('reject_outline_artifact')
   })
   test('unknown verb returns null', () => {
     expect(getVerbTemplate('nope')).toBeNull()

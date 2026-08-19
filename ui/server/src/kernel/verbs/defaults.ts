@@ -8,6 +8,7 @@ const BUILTIN_DEFAULTS: Record<string, string[]> = {
   deslop_chapter: ['oh-story-core.story-deslop.file'],
   open_book: ['oh-story-core.story-long-write.open'],
   expand_outline: ['oh-story-core.story-long-write.expand'],
+  write_chapter: ['oh-story-core.story-long-write.chapter'],
 }
 
 function defaultsPath(ws: string): string {
