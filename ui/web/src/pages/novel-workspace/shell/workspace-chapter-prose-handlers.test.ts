@@ -214,6 +214,8 @@ function proseDeps(overrides: Record<string, any> = {}) {
     showGenerationBlockedModal: () => {},
     startKernelWriteChapter: async () => {},
     cancelKernelWriteChapter: async () => {},
+    startKernelRewriteChapter: async () => {},
+    cancelKernelRewriteChapter: async () => {},
     worldbuilding: [],
     characters: [],
     outlines: [],
@@ -437,15 +439,39 @@ describe('chapter source-aware invocation handlers', () => {
 
   test('generateCurrentChapterProse starts a kernel write_chapter job and does not fetch generate-prose', async () => {
     const started: number[] = []
+    const rewritten: number[] = []
     let fetches = 0
     globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
     const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
       startKernelWriteChapter: async (chapterId: number) => { started.push(chapterId) },
+      startKernelRewriteChapter: async (chapterId: number) => { rewritten.push(chapterId) },
     }))
 
     await handlers.generateCurrentChapterProse()
 
     expect(started).toEqual([11])
+    expect(rewritten).toEqual([])
+    expect(fetches).toBe(0)
+  })
+
+  test('generateCurrentChapterProse routes chapters with prose to rewrite_chapter', async () => {
+    const started: number[] = []
+    const rewritten: number[] = []
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
+    const chapter = { id: 11, chapter_no: 1, title: '开篇', chapter_text: '已有正文' }
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      activeChapter: chapter,
+      chapters: [chapter],
+      sortedChapters: [chapter],
+      startKernelWriteChapter: async (chapterId: number) => { started.push(chapterId) },
+      startKernelRewriteChapter: async (chapterId: number) => { rewritten.push(chapterId) },
+    }))
+
+    await handlers.generateCurrentChapterProse()
+
+    expect(rewritten).toEqual([11])
+    expect(started).toEqual([])
     expect(fetches).toBe(0)
   })
 
@@ -477,6 +503,30 @@ describe('chapter source-aware invocation handlers', () => {
         return hang.promise
       },
       cancelKernelWriteChapter: async () => { cancelled += 1 },
+    }))
+
+    const action = handlers.generateCurrentChapterProse()
+    await started.promise
+    handlers.cancelCurrentChapterProse()
+    expect(cancelled).toBe(1)
+    hang.resolve()
+    await action
+  })
+
+  test('cancelCurrentChapterProse cancels the in-flight kernel rewrite job', async () => {
+    const started = deferred<void>()
+    const hang = deferred<void>()
+    let cancelled = 0
+    const chapter = { id: 11, chapter_no: 1, title: '开篇', chapter_text: '已有正文' }
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      activeChapter: chapter,
+      chapters: [chapter],
+      sortedChapters: [chapter],
+      startKernelRewriteChapter: async () => {
+        started.resolve()
+        return hang.promise
+      },
+      cancelKernelRewriteChapter: async () => { cancelled += 1 },
     }))
 
     const action = handlers.generateCurrentChapterProse()

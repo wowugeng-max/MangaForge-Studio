@@ -207,7 +207,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         : '正文已具备。先同步故事状态，质检修订请用下方 oh-story。',
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
-        { key: 'generate', label: '重写', kind: 'default' },
+        { key: 'generate', label: '回炉', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
       panelToOpen: 'quality',

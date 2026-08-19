@@ -70,6 +70,8 @@ export type ChapterProseHandlerDeps = {
   showGenerationBlockedModal: any
   startKernelWriteChapter: (chapterId: number) => Promise<void>
   cancelKernelWriteChapter: () => void | Promise<void>
+  startKernelRewriteChapter: (chapterId: number) => Promise<void>
+  cancelKernelRewriteChapter: () => void | Promise<void>
 }
 
 export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
@@ -103,6 +105,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const showGenerationBlockedModal = deps.showGenerationBlockedModal
   const startKernelWriteChapter = deps.startKernelWriteChapter
   const cancelKernelWriteChapter = deps.cancelKernelWriteChapter
+  const startKernelRewriteChapter = deps.startKernelRewriteChapter
+  const cancelKernelRewriteChapter = deps.cancelKernelRewriteChapter
   const invocationFenceDependencies = {
     getAuthority: getChapterGenerationSourceAuthority,
     selectedModelId,
@@ -203,7 +207,11 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
       setGeneratingProse(true)
       try {
         assertInvocationCurrent(invocation)
-        await startKernelWriteChapter(Number(targetChapter.id))
+        if (chapterHasProse(targetChapter)) {
+          await startKernelRewriteChapter(Number(targetChapter.id))
+        } else {
+          await startKernelWriteChapter(Number(targetChapter.id))
+        }
         if (!invocationIsCurrent(invocation, true)) return
       } catch (caughtError: any) {
         const error: any = preferStaleInvocationError(invocation, caughtError)
@@ -228,6 +236,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
     proseStreamControl.controller?.abort()
     proseStreamControl.controller = null
     void cancelKernelWriteChapter()
+    void cancelKernelRewriteChapter()
     setStreamingProgress('已取消生成')
     setStreamingPercent(0)
     setGeneratingProse(false)
@@ -236,6 +245,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   // UI unlock path used by the shared cancel control / stop button.
   proseStreamControl.onCancel = () => {
     void cancelKernelWriteChapter()
+    void cancelKernelRewriteChapter()
     setStreamingProgress('已取消生成')
     setStreamingPercent(0)
     setGeneratingProse(false)

@@ -15,6 +15,7 @@ import {
   useChapterAutosave,
 } from '../useChapterAutosave'
 import { useChapterWriteJob } from './use-chapter-write-job'
+import { useChapterRewriteJob } from './use-chapter-rewrite-job'
 import {
   useChapterVersions,
 } from '../useChapterVersions'
@@ -632,6 +633,17 @@ export function useNovelWorkspaceBaseModel() {
     chapterWordTargetPayload,
   })
 
+  const rewriteJob = useChapterRewriteJob({
+    apiClient,
+    projectId: Number(projectId || 0),
+    modelId: Number(selectedModelId || 0),
+    flushPendingSave,
+    loadProjectModules: async () => {
+      await loadProjectModules()
+    },
+    chapterWordTargetPayload,
+  })
+
   const writeJobWasRunningRef = useRef(false)
   useEffect(() => {
     if (writeJob.state.phase === 'running') {
@@ -647,6 +659,32 @@ export function useNovelWorkspaceBaseModel() {
     setStreamingPercent(0)
     setStreamingProgress(writeJob.state.phase === 'failed' ? '生成失败' : '')
   }, [writeJob.state, setGeneratingProse, setStreamingChapterId, setStreamingPercent, setStreamingProgress])
+
+  const rewriteJobWasRunningRef = useRef(false)
+  useEffect(() => {
+    if (rewriteJob.state.phase === 'running') {
+      rewriteJobWasRunningRef.current = true
+      setGeneratingProse(true)
+      setStreamingProgress(rewriteJob.state.hint || '正在写本章…')
+      return
+    }
+    if (!rewriteJobWasRunningRef.current) return
+    rewriteJobWasRunningRef.current = false
+    setGeneratingProse(false)
+    if (rewriteJob.state.phase === 'awaiting_selection') return
+    setStreamingChapterId(null)
+    setStreamingPercent(0)
+    setStreamingProgress(rewriteJob.state.phase === 'failed' ? '生成失败' : '')
+  }, [rewriteJob.state, setGeneratingProse, setStreamingChapterId, setStreamingPercent, setStreamingProgress])
+
+  const rewriteSelection = rewriteJob.state.phase === 'awaiting_selection'
+    ? {
+        preview: rewriteJob.state.preview,
+        truncated: rewriteJob.state.truncated,
+        onCommit: rewriteJob.commit,
+        onCancel: rewriteJob.cancel,
+      }
+    : null
 
   const selectChapterForWriting = async (chapterId: number) => {
     const saved = await selectChapter(chapterId)
@@ -927,6 +965,8 @@ export function useNovelWorkspaceBaseModel() {
     sortedChapters,
     startKernelWriteChapter: writeJob.start,
     cancelKernelWriteChapter: writeJob.cancel,
+    startKernelRewriteChapter: rewriteJob.start,
+    cancelKernelRewriteChapter: rewriteJob.cancel,
     unattendedTargetChapter,
     worldbuilding,
 
@@ -1126,6 +1166,7 @@ export function useNovelWorkspaceBaseModel() {
     generateSceneCardsForChapter,
     generateWritingBibleEditor,
     generatingProse,
+    rewriteSelection,
     generatingSceneCards,
     generationPipeline,
     handleDirectoryCollapsedChange,

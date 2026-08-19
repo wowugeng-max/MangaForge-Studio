@@ -167,6 +167,8 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     worldbuilding,
     startKernelWriteChapter,
     cancelKernelWriteChapter,
+    startKernelRewriteChapter,
+    cancelKernelRewriteChapter,
   } = deps
 
   const {
@@ -721,6 +723,8 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     showGenerationBlockedModal,
     startKernelWriteChapter,
     cancelKernelWriteChapter,
+    startKernelRewriteChapter,
+    cancelKernelRewriteChapter,
     proseBatchCancelRef,
     setProseBatchStatus,
     setProseProgress,

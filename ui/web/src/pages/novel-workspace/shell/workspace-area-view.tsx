@@ -41,6 +41,12 @@ export type NovelWorkspaceAreaViewProps = {
   generateCurrentChapterProse: any
   generateSceneCardsForActiveChapter: any
   generatingProse: any
+  rewriteSelection?: {
+    preview: string
+    truncated: boolean
+    onCommit: () => void | Promise<void>
+    onCancel: () => void | Promise<void>
+  } | null
   generatingSceneCards: any
   generationPipeline: any
   handleAutoCreationDirectorAction: any
@@ -162,6 +168,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     generateCurrentChapterProse,
     generateSceneCardsForActiveChapter,
     generatingProse,
+    rewriteSelection,
     generatingSceneCards,
     generationPipeline,
     handleAutoCreationDirectorAction,
@@ -332,6 +339,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         planning={planning}
         incubatingOriginal={incubatingOriginal}
         generatingProse={generatingProse}
+        rewriteSelection={rewriteSelection}
         generatingSceneCards={generatingSceneCards}
         preDraftBriefLoading={commercialToolLoading === 'preDraftBrief' || commercialToolLoading === 'preDraftBriefConfirm'}
         styleSampleActionLoading={['styleSampleLock', 'styleSampleReplace', 'styleSampleDisable'].includes(commercialToolLoading)}

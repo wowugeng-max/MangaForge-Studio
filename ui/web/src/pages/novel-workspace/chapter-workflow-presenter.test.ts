@@ -29,6 +29,7 @@ describe('chapter workflow presenter', () => {
     expect(model.primaryAction.key).toBe('sync_story_state')
     expect(model.primaryAction.label).toBe('同步故事状态')
     expect(model.secondaryActions.map(item => item.key)).not.toContain('refresh_current_quality')
+    expect(model.secondaryActions.some(a => a.key === 'generate' && a.label === '回炉')).toBe(true)
     expect(model.panelToOpen).toBe('quality')
   })
 

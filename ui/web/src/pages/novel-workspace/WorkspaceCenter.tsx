@@ -94,6 +94,7 @@ export function WorkspaceCenter({
   planning,
   incubatingOriginal,
   generatingProse,
+  rewriteSelection = null,
   generatingSceneCards,
   preDraftBriefLoading,
   styleSampleActionLoading,
@@ -192,6 +193,12 @@ export function WorkspaceCenter({
   planning: boolean
   incubatingOriginal: boolean
   generatingProse: boolean
+  rewriteSelection?: {
+    preview: string
+    truncated: boolean
+    onCommit: () => void | Promise<void>
+    onCancel: () => void | Promise<void>
+  } | null
   generatingSceneCards: boolean
   preDraftBriefLoading?: boolean
   styleSampleActionLoading?: boolean
@@ -905,6 +912,23 @@ export function WorkspaceCenter({
               </Space>
             </div>
           )}
+
+          {rewriteSelection ? (
+            <div className="novel-rewrite-selection" style={{ flexShrink: 0, padding: '10px 16px', background: '#fff7e6', borderBottom: '1px solid #ffe7ba' }}>
+              <Space direction="vertical" style={{ width: '100%' }} size={8}>
+                <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }} wrap>
+                  <Text strong style={{ fontSize: 13 }}>回炉稿待采纳</Text>
+                  <Space>
+                    <Button size="small" type="primary" onClick={() => { void rewriteSelection.onCommit() }}>采纳回炉稿</Button>
+                    <Button size="small" onClick={() => { void rewriteSelection.onCancel() }}>取消</Button>
+                  </Space>
+                </Space>
+                <Paragraph style={{ whiteSpace: 'pre-wrap', maxHeight: 240, overflow: 'auto', margin: 0 }}>
+                  {rewriteSelection.preview}
+                </Paragraph>
+              </Space>
+            </div>
+          ) : null}
 
           <WorkspaceCenterChapterContext
             activeChapter={activeChapter}
