@@ -679,6 +679,7 @@ export function useNovelWorkspaceBaseModel() {
 
   const rewriteSelection = rewriteJob.state.phase === 'awaiting_selection'
     ? {
+        chapterId: rewriteJob.state.chapterId,
         preview: rewriteJob.state.preview,
         truncated: rewriteJob.state.truncated,
         onCommit: rewriteJob.commit,

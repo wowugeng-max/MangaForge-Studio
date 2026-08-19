@@ -61,6 +61,7 @@ import { ProseOutlineRail } from './prose-outline-rail'
 import { BookSearchModal } from './book-search-modal'
 import { reportChapterId } from './workspace-center-quality-revision-panel'
 import { resolveQualityReportView } from './reference-panel-helpers'
+import { shouldShowRewriteSelection, type ChapterRewriteSelection } from './shell/use-chapter-rewrite-job'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -193,12 +194,7 @@ export function WorkspaceCenter({
   planning: boolean
   incubatingOriginal: boolean
   generatingProse: boolean
-  rewriteSelection?: {
-    preview: string
-    truncated: boolean
-    onCommit: () => void | Promise<void>
-    onCancel: () => void | Promise<void>
-  } | null
+  rewriteSelection?: ChapterRewriteSelection | null
   generatingSceneCards: boolean
   preDraftBriefLoading?: boolean
   styleSampleActionLoading?: boolean
@@ -913,7 +909,7 @@ export function WorkspaceCenter({
             </div>
           )}
 
-          {rewriteSelection ? (
+          {shouldShowRewriteSelection(activeChapter?.id, rewriteSelection) && rewriteSelection ? (
             <div className="novel-rewrite-selection" style={{ flexShrink: 0, padding: '10px 16px', background: '#fff7e6', borderBottom: '1px solid #ffe7ba' }}>
               <Space direction="vertical" style={{ width: '100%' }} size={8}>
                 <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }} wrap>

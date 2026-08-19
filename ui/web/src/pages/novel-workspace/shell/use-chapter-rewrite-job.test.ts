@@ -1,10 +1,13 @@
 import { describe, expect, mock, test } from 'bun:test'
 import type { KernelJobDetail } from '../../../kernel/jobs/types'
 import {
+  beginRewriteStart,
   cancelRewriteChapterJob,
   pickRewriteChapterPreview,
   reduceChapterRewriteProgress,
   runRewriteChapterJob,
+  settleRewriteStart,
+  shouldShowRewriteSelection,
 } from './use-chapter-rewrite-job'
 
 function deferred<T>() {
@@ -233,6 +236,7 @@ describe('runRewriteChapterJob', () => {
       candidateId: 'cand-1',
       preview: '回炉预览',
       truncated: false,
+      chapterId: 11,
     })
     expect(commitJob).toHaveBeenCalledTimes(0)
     expect(loadProjectModules).toHaveBeenCalledTimes(0)
@@ -265,5 +269,103 @@ describe('runRewriteChapterJob', () => {
       jobIdRef: { current: '' },
     })
     expect(verbs).toEqual(['rewrite_chapter'])
+  })
+
+  test('cancels the created job when awaiting_selection has no chapter_text artifact', async () => {
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    const jobIdRef = { current: '' }
+    const result = await runRewriteChapterJob({
+      api: {
+        createJobByVerb: async () => ({ ok: true as const, jobId: 'job-missing-art' }),
+        getJob: async () => jobDetail('awaiting_selection', 'job-missing-art', {
+          candidates: [{ id: 'cand-1', contract_id: 'a', status: 'succeeded' }],
+          artifacts: [{
+            id: 'art-2',
+            candidate_id: 'cand-1',
+            rel_path: '追踪/note.md',
+            artifact_kind: 'tracking_doc',
+          }],
+        }),
+        cancelJob,
+        commitJob: async () => ({ ok: true as const, commits: [] }),
+        getArtifactContent: async () => {
+          throw new Error('should not load artifact')
+        },
+      },
+      projectId: 7,
+      chapterId: 11,
+      modelId: 3,
+      flushPendingSave: async () => true,
+      loadProjectModules: async () => {},
+      signal: new AbortController().signal,
+      jobIdRef,
+    })
+    expect(result).toEqual({ kind: 'failed', jobId: 'job-missing-art', errorCode: 'ENGINE_FAILED', toast: true })
+    expect(cancelJob).toHaveBeenCalledWith('job-missing-art')
+  })
+
+  test('cancels the created job when getArtifactContent fails', async () => {
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    const jobIdRef = { current: '' }
+    const result = await runRewriteChapterJob({
+      api: {
+        createJobByVerb: async () => ({ ok: true as const, jobId: 'job-art-fail' }),
+        getJob: async () => jobDetail('awaiting_selection', 'job-art-fail', {
+          candidates: [{ id: 'cand-1', contract_id: 'a', status: 'succeeded' }],
+          artifacts: [{
+            id: 'art-1',
+            candidate_id: 'cand-1',
+            rel_path: '正文/第01章.md',
+            artifact_kind: 'chapter_text',
+          }],
+        }),
+        cancelJob,
+        commitJob: async () => ({ ok: true as const, commits: [] }),
+        getArtifactContent: async () => ({ ok: false as const, status: 404, code: 'ARTIFACT_NOT_FOUND', message: '' }),
+      },
+      projectId: 7,
+      chapterId: 11,
+      modelId: 3,
+      flushPendingSave: async () => true,
+      loadProjectModules: async () => {},
+      signal: new AbortController().signal,
+      jobIdRef,
+    })
+    expect(result.kind).toBe('failed')
+    expect(cancelJob).toHaveBeenCalledWith('job-art-fail')
+  })
+})
+
+describe('rewrite start occupancy', () => {
+  test('blocks a second start while awaiting_selection occupancy is held', () => {
+    const occupancy = { current: false }
+    expect(beginRewriteStart(occupancy)).toBe(true)
+    settleRewriteStart(occupancy, 'awaiting_selection')
+    expect(occupancy.current).toBe(true)
+    expect(beginRewriteStart(occupancy)).toBe(false)
+  })
+
+  test('releases occupancy after failed or committed results', () => {
+    const occupancy = { current: true }
+    settleRewriteStart(occupancy, 'failed')
+    expect(occupancy.current).toBe(false)
+    occupancy.current = true
+    settleRewriteStart(occupancy, 'committed')
+    expect(occupancy.current).toBe(false)
+  })
+})
+
+describe('shouldShowRewriteSelection', () => {
+  test('shows the preview bar only for the job chapter', () => {
+    const selection = {
+      chapterId: 11,
+      preview: '回炉预览',
+      truncated: false,
+      onCommit: () => {},
+      onCancel: () => {},
+    }
+    expect(shouldShowRewriteSelection(11, selection)).toBe(true)
+    expect(shouldShowRewriteSelection(12, selection)).toBe(false)
+    expect(shouldShowRewriteSelection(11, null)).toBe(false)
   })
 })

@@ -9,7 +9,7 @@ import { writeChapterLengthTarget } from '../../../kernel/jobs/write-brief'
 export type ChapterRewriteJobState =
   | { phase: 'idle' }
   | { phase: 'running'; jobId: string; hint: string; elapsedSec: number }
-  | { phase: 'awaiting_selection'; jobId: string; candidateId: string; preview: string; truncated: boolean }
+  | { phase: 'awaiting_selection'; jobId: string; candidateId: string; preview: string; truncated: boolean; chapterId: number }
   | { phase: 'failed'; jobId: string | null; errorCode: string }
 
 export type RewriteChapterJobClient = Pick<
@@ -24,13 +24,33 @@ export type RunRewriteChapterJobResult =
   | { kind: 'committed' }
   | { kind: 'cancelled' }
   | { kind: 'failed'; jobId: string; errorCode: string; toast: boolean }
-  | { kind: 'awaiting_selection'; jobId: string; candidateId: string; preview: string; truncated: boolean }
+  | { kind: 'awaiting_selection'; jobId: string; candidateId: string; preview: string; truncated: boolean; chapterId: number }
 
 export type ChapterRewriteSelection = {
+  chapterId: number
   preview: string
   truncated: boolean
   onCommit: () => void | Promise<void>
   onCancel: () => void | Promise<void>
+}
+
+export function beginRewriteStart(occupancy: { current: boolean }): boolean {
+  if (occupancy.current) return false
+  occupancy.current = true
+  return true
+}
+
+export function settleRewriteStart(occupancy: { current: boolean }, kind: RunRewriteChapterJobResult['kind']): void {
+  occupancy.current = kind === 'awaiting_selection'
+}
+
+export function shouldShowRewriteSelection(
+  activeChapterId: number | string | null | undefined,
+  rewriteSelection: Pick<ChapterRewriteSelection, 'chapterId'> | null | undefined,
+): boolean {
+  if (!rewriteSelection) return false
+  const activeId = Number(activeChapterId || 0)
+  return Boolean(activeId) && activeId === Number(rewriteSelection.chapterId)
 }
 
 async function cancelCreatedRewriteJob(
@@ -131,7 +151,7 @@ export async function runRewriteChapterJob(input: {
     if (terminal.job.status === 'awaiting_selection') {
       const picked = pickRewriteChapterPreview(terminal)
       if (!picked) {
-        input.jobIdRef.current = ''
+        await cancelCreatedRewriteJob(input.api.cancelJob, input.jobIdRef, created.jobId)
         return { kind: 'failed', jobId: created.jobId, errorCode: 'ENGINE_FAILED', toast: true }
       }
       const content = await input.api.getArtifactContent(picked.artifactId)
@@ -140,7 +160,7 @@ export async function runRewriteChapterJob(input: {
         return { kind: 'aborted' }
       }
       if (!content.ok) {
-        input.jobIdRef.current = ''
+        await cancelCreatedRewriteJob(input.api.cancelJob, input.jobIdRef, created.jobId)
         return { kind: 'failed', jobId: created.jobId, errorCode: String(content.code || 'ENGINE_FAILED'), toast: true }
       }
       return {
@@ -149,6 +169,7 @@ export async function runRewriteChapterJob(input: {
         candidateId: picked.candidateId,
         preview: content.content,
         truncated: content.truncated,
+        chapterId: input.chapterId,
       }
     }
     if (terminal.job.status === 'committed') {
@@ -206,27 +227,33 @@ export function useChapterRewriteJob(deps: {
   const runningRef = useRef(false)
 
   useEffect(() => () => {
-    abortRef.current?.abort()
-  }, [])
+    void cancelRewriteChapterJob({
+      abort: () => abortRef.current?.abort(),
+      cancelJob: api.cancelJob,
+      jobIdRef,
+    })
+  }, [api])
 
   const start = useCallback(async (chapterId: number) => {
-    if (runningRef.current) return
+    if (!beginRewriteStart(runningRef)) return
     if (!chapterId) {
+      settleRewriteStart(runningRef, 'aborted')
       message.warning('请先选择章节')
       return
     }
     if (!deps.projectId) {
+      settleRewriteStart(runningRef, 'aborted')
       message.warning('请先选择项目')
       return
     }
     if (!deps.modelId) {
+      settleRewriteStart(runningRef, 'aborted')
       message.warning('请先选择模型')
       return
     }
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    runningRef.current = true
     jobIdRef.current = ''
     const length = writeChapterLengthTarget(deps.chapterWordTargetPayload?.() || {})
     setState({ phase: 'running', jobId: '', hint: 'queued', elapsedSec: 0 })
@@ -252,7 +279,7 @@ export function useChapterRewriteJob(deps: {
         ))
       },
     })
-    runningRef.current = false
+    settleRewriteStart(runningRef, result.kind)
     if (result.kind === 'aborted') return
     if (result.kind === 'save_failed') {
       setState({ phase: 'idle' })
@@ -270,6 +297,7 @@ export function useChapterRewriteJob(deps: {
         candidateId: result.candidateId,
         preview: result.preview,
         truncated: result.truncated,
+        chapterId: result.chapterId,
       })
       return
     }
@@ -288,7 +316,7 @@ export function useChapterRewriteJob(deps: {
   }, [api, deps])
 
   const cancel = useCallback(async () => {
-    runningRef.current = false
+    settleRewriteStart(runningRef, 'cancelled')
     await cancelRewriteChapterJob({
       abort: () => abortRef.current?.abort(),
       cancelJob: api.cancelJob,
@@ -308,6 +336,7 @@ export function useChapterRewriteJob(deps: {
     await deps.loadProjectModules()
     message.success('本章回炉已写入')
     jobIdRef.current = ''
+    settleRewriteStart(runningRef, 'committed')
     setState({ phase: 'idle' })
   }, [api, deps, state])
 

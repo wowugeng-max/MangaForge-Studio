@@ -7,6 +7,7 @@ import { StoryAssetsWorkspace } from '../StoryAssetsWorkspace'
 import type { WorkspaceArea } from './workspace-types'
 import apiClient from '../../../api/client'
 import { useChapterKernelJob } from './use-chapter-kernel-job'
+import type { ChapterRewriteSelection } from './use-chapter-rewrite-job'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -41,12 +42,7 @@ export type NovelWorkspaceAreaViewProps = {
   generateCurrentChapterProse: any
   generateSceneCardsForActiveChapter: any
   generatingProse: any
-  rewriteSelection?: {
-    preview: string
-    truncated: boolean
-    onCommit: () => void | Promise<void>
-    onCancel: () => void | Promise<void>
-  } | null
+  rewriteSelection?: ChapterRewriteSelection | null
   generatingSceneCards: any
   generationPipeline: any
   handleAutoCreationDirectorAction: any
