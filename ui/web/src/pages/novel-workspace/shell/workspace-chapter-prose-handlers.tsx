@@ -48,7 +48,6 @@ export type ChapterProseHandlerDeps = {
   activeChapter: any
   apiClient: any
   assertChapterSourceOperationCurrent: (token: ChapterSourceOperationToken) => void
-  autoCreationDirectorModel: any
   chapterWordTargetPayload: any
   chapters: any
   confirmReferenceReady: any
@@ -60,7 +59,6 @@ export type ChapterProseHandlerDeps = {
   loadProjectModules: any
   projectId: any
   selectedModelId: any
-  setChapters: any
   setGeneratingProse: any
   setGenerationPipeline: any
   setRightPanelOpen: any
@@ -71,9 +69,7 @@ export type ChapterProseHandlerDeps = {
   setStreamingText: any
   showGenerationBlockedModal: any
   startKernelWriteChapter: (chapterId: number) => Promise<void>
-  worldbuilding: any
-  characters: any
-  outlines: any
+  cancelKernelWriteChapter: () => void | Promise<void>
 }
 
 export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
@@ -85,7 +81,6 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const activeChapter = deps.activeChapter
   const apiClient = deps.apiClient
   const assertChapterSourceOperationCurrent = deps.assertChapterSourceOperationCurrent
-  const autoCreationDirectorModel = deps.autoCreationDirectorModel
   const chapterWordTargetPayload = deps.chapterWordTargetPayload
   const chapters = deps.chapters
   const confirmReferenceReady = deps.confirmReferenceReady
@@ -97,7 +92,6 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const loadProjectModules = deps.loadProjectModules
   const projectId = deps.projectId
   const selectedModelId = deps.selectedModelId
-  const setChapters = deps.setChapters
   const setGeneratingProse = deps.setGeneratingProse
   const setGenerationPipeline = deps.setGenerationPipeline
   const setRightPanelOpen = deps.setRightPanelOpen
@@ -108,9 +102,7 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   const setStreamingText = deps.setStreamingText
   const showGenerationBlockedModal = deps.showGenerationBlockedModal
   const startKernelWriteChapter = deps.startKernelWriteChapter
-  const worldbuilding = Array.isArray(deps.worldbuilding) ? deps.worldbuilding : []
-  const characters = Array.isArray(deps.characters) ? deps.characters : []
-  const outlines = Array.isArray(deps.outlines) ? deps.outlines : []
+  const cancelKernelWriteChapter = deps.cancelKernelWriteChapter
   const invocationFenceDependencies = {
     getAuthority: getChapterGenerationSourceAuthority,
     selectedModelId,
@@ -224,6 +216,8 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
         }
       } finally {
         setGeneratingProse(false)
+        setStreamingChapterId(null)
+        setStreamingPercent(0)
       }
     } finally {
       releaseChapterInvocation(invocation.owner)
@@ -231,18 +225,21 @@ export function createChapterProseHandlers(deps: ChapterProseHandlerDeps) {
   }
 
   const cancelCurrentChapterProse = () => {
-    // Abort first (no-op if already aborted by proseStreamControl.cancel).
     proseStreamControl.controller?.abort()
     proseStreamControl.controller = null
+    void cancelKernelWriteChapter()
     setStreamingProgress('已取消生成')
     setStreamingPercent(0)
     setGeneratingProse(false)
+    setStreamingChapterId(null)
   }
   // UI unlock path used by the shared cancel control / stop button.
   proseStreamControl.onCancel = () => {
+    void cancelKernelWriteChapter()
     setStreamingProgress('已取消生成')
     setStreamingPercent(0)
     setGeneratingProse(false)
+    setStreamingChapterId(null)
   }
 
   const repairContextAndGenerateCurrentChapter = async () => {

@@ -632,10 +632,21 @@ export function useNovelWorkspaceBaseModel() {
     chapterWordTargetPayload,
   })
 
+  const writeJobWasRunningRef = useRef(false)
   useEffect(() => {
-    if (writeJob.state.phase !== 'running') return
-    setStreamingProgress(writeJob.state.hint || '正在写本章…')
-  }, [writeJob.state, setStreamingProgress])
+    if (writeJob.state.phase === 'running') {
+      writeJobWasRunningRef.current = true
+      setGeneratingProse(true)
+      setStreamingProgress(writeJob.state.hint || '正在写本章…')
+      return
+    }
+    if (!writeJobWasRunningRef.current) return
+    writeJobWasRunningRef.current = false
+    setGeneratingProse(false)
+    setStreamingChapterId(null)
+    setStreamingPercent(0)
+    setStreamingProgress(writeJob.state.phase === 'failed' ? '生成失败' : '')
+  }, [writeJob.state, setGeneratingProse, setStreamingChapterId, setStreamingPercent, setStreamingProgress])
 
   const selectChapterForWriting = async (chapterId: number) => {
     const saved = await selectChapter(chapterId)
@@ -915,6 +926,7 @@ export function useNovelWorkspaceBaseModel() {
     writingBibleForm,
     sortedChapters,
     startKernelWriteChapter: writeJob.start,
+    cancelKernelWriteChapter: writeJob.cancel,
     unattendedTargetChapter,
     worldbuilding,
 

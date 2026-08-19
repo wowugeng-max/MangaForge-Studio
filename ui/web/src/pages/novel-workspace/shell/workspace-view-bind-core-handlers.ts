@@ -166,6 +166,7 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     unattendedTargetChapter,
     worldbuilding,
     startKernelWriteChapter,
+    cancelKernelWriteChapter,
   } = deps
 
   const {
@@ -697,7 +698,6 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
   } = createChapterProseHandlers({
     activeChapter,
     apiClient,
-    autoCreationDirectorModel,
     getChapterGenerationSourceAuthority,
     claimChapterInvocation,
     chapterInvocationOwnerIsActive,
@@ -705,14 +705,11 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     assertChapterSourceOperationCurrent,
     chapterWordTargetPayload,
     chapters,
-    characters,
     confirmReferenceReady,
     flushPendingSave,
     loadProjectModules,
-    outlines,
     projectId,
     selectedModelId,
-    setChapters,
     setGeneratingProse,
     setGenerationPipeline,
     setRightPanelOpen,
@@ -723,12 +720,12 @@ export function bindNovelWorkspaceCoreHandlers(deps: Record<string, any>) {
     setStreamingText,
     showGenerationBlockedModal,
     startKernelWriteChapter,
+    cancelKernelWriteChapter,
     proseBatchCancelRef,
     setProseBatchStatus,
     setProseProgress,
     setStepProseLoading,
     sortedChapters,
-    worldbuilding,
   })
   generateCurrentChapterProseRef.current = generateCurrentChapterProse
 

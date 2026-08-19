@@ -213,6 +213,7 @@ function proseDeps(overrides: Record<string, any> = {}) {
     setStreamingText: () => {},
     showGenerationBlockedModal: () => {},
     startKernelWriteChapter: async () => {},
+    cancelKernelWriteChapter: async () => {},
     worldbuilding: [],
     characters: [],
     outlines: [],
@@ -446,6 +447,44 @@ describe('chapter source-aware invocation handlers', () => {
 
     expect(started).toEqual([11])
     expect(fetches).toBe(0)
+  })
+
+  test('generateCurrentChapterProse clears the streaming banner after the kernel write returns', async () => {
+    const chapterIds: Array<number | null> = []
+    const generating: boolean[] = []
+    const percents: number[] = []
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      setStreamingChapterId: (value: number | null) => { chapterIds.push(value) },
+      setGeneratingProse: (value: boolean) => { generating.push(value) },
+      setStreamingPercent: (value: number) => { percents.push(value) },
+    }))
+
+    await handlers.generateCurrentChapterProse()
+
+    expect(chapterIds[0]).toBe(11)
+    expect(chapterIds.at(-1)).toBe(null)
+    expect(generating.at(-1)).toBe(false)
+    expect(percents.at(-1)).toBe(0)
+  })
+
+  test('cancelCurrentChapterProse cancels the in-flight kernel write job', async () => {
+    const started = deferred<void>()
+    const hang = deferred<void>()
+    let cancelled = 0
+    const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
+      startKernelWriteChapter: async () => {
+        started.resolve()
+        return hang.promise
+      },
+      cancelKernelWriteChapter: async () => { cancelled += 1 },
+    }))
+
+    const action = handlers.generateCurrentChapterProse()
+    await started.promise
+    handlers.cancelCurrentChapterProse()
+    expect(cancelled).toBe(1)
+    hang.resolve()
+    await action
   })
 
   test('missing repair reload token suppresses success and prose continuation', async () => {
