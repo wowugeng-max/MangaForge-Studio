@@ -73,7 +73,11 @@
 ## 投影与收存
 
 - 空章也挂 `current_chapter`：写出 `正文/第{{chapter_pad}}章_{标题}.md`，内容可以是空字符串。快照含该文件；skill 填入后相对快照有变化，才能过 rewrite「必须变化」。
-- 收获 glob 只覆盖**本章** pad。命中多份时：优先等于投影 `currentRel` 的那份入库；其余当 `attachment`。一份都没有或投影那份空 → `CHAPTER_FILE_MISSING` / `OUTPUT_MISSING`（与去AI 同一套 `require_chapter_file`：rewrite 看收获正文，不看账本旧稿）。
+- 收获 glob 只覆盖**本章** pad。`chapter_text` 多份命中的收敛在 `run-candidate` 收获后、`persistCandidateArtifacts` 之前执行，条件是 `capability === 'rewrite'` 且章主体（`vars.scope_files` 非空）——**不是** write_chapter 专属：deslop / apply 用同样的本章 pad glob，同一处逻辑一并生效，门（`require_chapter_file`、`paragraph_retention_70` 的 `find(chapter_text)`）与 commit 因此永远只见一份 `chapter_text`：
+  1. 恰一份命中 → 直接用它（含 skill 改标题另存新文件名的情形）。
+  2. 多份命中且其中一份 `rel_path === vars.scope_files`（投影的 `currentRel`）→ 该份保持 `chapter_text`，其余降级为 `attachment`（仍进 vault，便于排错）。
+  3. 多份命中且没有一份等于 `currentRel` → 候选 `failed`，`OUTPUT_MISSING`，错误信息列出全部命中路径（拒绝猜哪份是正文）。
+  4. 一份都没有 → 现有 required 缺失路径 `OUTPUT_MISSING`；有份但收获正文为空 → `CHAPTER_FILE_MISSING`（与去AI 同一套 `require_chapter_file`：rewrite 看收获正文，不看账本旧稿）。
 - 改了 `大纲/` 前缀 → `REJECT_OUTLINE` gated，不入库。
 - `tracking_doc` 可选，`kernel_only`，不改正文账本以外的领域表。
 - commit 走现有 `chapters.rewrite`：`updateNovelChapter(..., { versionSource: contract.commit.source })`。`source` 为 `oh_story_write`。与 deslop 一样允许 `as any` 写入版本表，本片不强制扩 `NovelChapterVersionSource` 联合类型。
@@ -128,6 +132,10 @@
 - 假 runner 写空 `正文/第00N章_*.md` → 候选 `CHAPTER_FILE_MISSING`，章节账本不变。
 - 假 runner 改 `大纲/` → `REJECT_OUTLINE`，正文不变。
 - 假 runner 只改本章正文 → job `committed`，该章有正文，版本 `source=oh_story_write`，其它章不变。
+- 假 runner 只写 `正文/第00N章_新标题.md`（改名单份，≠ 投影原名）→ 正常入库为 `chapter_text`。
+- 假 runner 同时写投影原名与 `正文/第00N章_另一标题.md` 两份 → 只有 `currentRel` 那份入库，另一份成 `attachment`；账本正文等于 `currentRel` 内容。
+- 假 runner 写两份且都不等于投影原名 → 候选 `failed`，`OUTPUT_MISSING`，正文不变。
+- deslop 合同走同一收敛：双份命中（含投影原名）时账本正文取 `currentRel` 那份（锁定「非 write_chapter 专属」）。
 - 同章第二个 job → 409 `PROJECT_JOB_RUNNING`；不同 `subject_id` 可并行。
 
 工作台（`cd ui/web && bun test`）：
