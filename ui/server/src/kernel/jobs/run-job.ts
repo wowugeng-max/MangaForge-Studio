@@ -3,6 +3,7 @@ import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { loadOhStoryCoreSuite } from '../../novel-writing/oh-story-core/store'
 import { getNovelChapter, listNovelOutlines } from '../../novel'
+import { chapterHasMatchingOutline, chapterTextHasProse } from './write-chapter-precheck'
 import { readKernelEvents } from '../codex/events'
 import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
@@ -100,6 +101,25 @@ export async function validateCreateKernelJob(
     const outlines = await listNovelOutlines(ws, body.project_id)
     if (!Array.isArray(outlines) || outlines.length === 0) {
       return { ok: false, status: 400, code: 'FOUNDATION_PRECONDITION', message: '扩纲需要账本里已有大纲' }
+    }
+  }
+  if (verb === 'write_chapter') {
+    const chapter = await getNovelChapter(ws, body.subject_id, body.project_id)
+    if (!chapter) {
+      return { ok: false, status: 400, code: 'CHAPTER_NOT_FOUND', message: '找不到该章' }
+    }
+    if (chapterTextHasProse(String(chapter.chapter_text || ''))) {
+      return { ok: false, status: 400, code: 'CHAPTER_HAS_PROSE', message: '本章已有正文，请用回炉或按建议改稿' }
+    }
+    const outlines = await listNovelOutlines(ws, body.project_id)
+    if (!chapterHasMatchingOutline(chapter, outlines)) {
+      return { ok: false, status: 400, code: 'OUTLINE_MISSING', message: '本章还没有细纲' }
+    }
+    if (body.user_brief) {
+      briefJson = JSON.stringify(body.user_brief)
+      if (Buffer.byteLength(briefJson, 'utf8') > 32 * 1024) {
+        return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '创意超过 32KiB 上限' }
+      }
     }
   }
   const dedupe = template.subject_type === 'project'

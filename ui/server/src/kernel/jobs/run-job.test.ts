@@ -217,6 +217,38 @@ describe('verb-based job creation', () => {
       ...body, subject_type: 'chapter', subject_id: 1,
     }, { skipRuntimeCheck: true })) as any).code).toBe('SUBJECT_TYPE_MISMATCH')
   })
+
+  test('write_chapter requires empty chapter with matching outline', async () => {
+    const { ws, project } = await seed()
+    const empty = await createNovelChapter(ws, { project_id: project.id, chapter_no: 1, title: '一', chapter_text: '' })
+    const base = {
+      project_id: project.id, subject_type: 'chapter' as const, subject_id: empty.id, verb: 'write_chapter', model_id: 9,
+    }
+    expect(((await validateCreateKernelJob(ws, { ...base, subject_id: 999999 }, { skipRuntimeCheck: true })) as any).code)
+      .toBe('CHAPTER_NOT_FOUND')
+    expect(((await validateCreateKernelJob(ws, base, { skipRuntimeCheck: true })) as any).code).toBe('OUTLINE_MISSING')
+    await createNovelOutline(ws, {
+      project_id: project.id, outline_type: 'master', title: '第1章 总纲误导', summary: '不是细纲',
+    })
+    expect(((await validateCreateKernelJob(ws, base, { skipRuntimeCheck: true })) as any).code).toBe('OUTLINE_MISSING')
+    const outline = await createNovelOutline(ws, {
+      project_id: project.id, outline_type: 'chapter', title: '细纲1', summary: '细',
+      raw_payload: { chapter_no: 1, kernel_rel_path: '大纲/细纲_第001章.md' },
+    })
+    const ok = await validateCreateKernelJob(ws, { ...base, user_brief: { length_target: '自定义 1800 字' } }, { skipRuntimeCheck: true })
+    expect(ok.ok).toBe(true)
+    if (ok.ok) {
+      expect(ok.contracts.map(c => c.id)).toEqual(['oh-story-core.story-long-write.chapter'])
+      expect(ok.briefJson).toContain('自定义 1800 字')
+    }
+    const filled = await createNovelChapter(ws, { project_id: project.id, chapter_no: 3, title: '三', chapter_text: '已有正文' })
+    expect(((await validateCreateKernelJob(ws, { ...base, subject_id: filled.id }, { skipRuntimeCheck: true })) as any).code)
+      .toBe('CHAPTER_HAS_PROSE')
+    const placeholder = await createNovelChapter(ws, {
+      project_id: project.id, chapter_no: 4, title: '四', chapter_text: '【占位正文】', outline_id: outline.id,
+    })
+    expect((await validateCreateKernelJob(ws, { ...base, subject_id: placeholder.id }, { skipRuntimeCheck: true })).ok).toBe(true)
+  })
 })
 
 describe('candidateStatusAfterGate', () => {
