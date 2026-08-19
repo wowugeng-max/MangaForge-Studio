@@ -97,10 +97,12 @@ describe('rewrite_chapter jobs', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('awaiting_selection')
+    expect(detail.candidates[0].status).toBe('succeeded')
     expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('旧稿正文')
     expect(latestVersionSource(ws, filled.id)).not.toBe('oh_story_rewrite')
     const committed = await commitKernelCandidate(ws, created.jobId, detail.candidates[0].id)
     expect(committed.ok).toBe(true)
+    expect(getKernelJobDetail(ws, created.jobId)!.job.status).toBe('committed')
     expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('回炉新稿')
     expect(latestVersionSource(ws, filled.id)).toBe('oh_story_rewrite')
     expect((await getNovelChapter(ws, other.id, project.id))?.chapter_text).toBe('另一章旧稿')
@@ -119,6 +121,7 @@ describe('rewrite_chapter jobs', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.candidates[0].error_code).toBe('CHAPTER_FILE_MISSING')
+    expect(detail.job.status).toBe('failed')
     expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('旧稿正文')
   })
 
@@ -139,21 +142,23 @@ describe('rewrite_chapter jobs', () => {
   })
 
   test('same subject_id is PROJECT_JOB_RUNNING; different chapter is ok', async () => {
-    const { ws, project, filled, other, body } = await seedRewrite()
-    insertKernelJob(ws, {
-      id: 'job-run', project_id: project.id, workspace_scope: 'novel', title: '', status: 'running',
-      capability: 'rewrite', subject_type: 'chapter', subject_id: filled.id, model_provider_id: '', model_id: null,
-      error_code: '', error_message: '', verb: 'rewrite_chapter', verb_params: '{}', subject_key: '', brief_json: '',
-    })
-    const same = await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })
-    expect(same.ok).toBe(false)
-    if (!same.ok) {
-      expect(same.status).toBe(409)
-      expect(same.code).toBe('PROJECT_JOB_RUNNING')
+    for (const status of ['running', 'awaiting_selection'] as const) {
+      const { ws, project, filled, other, body } = await seedRewrite()
+      insertKernelJob(ws, {
+        id: `job-${status}`, project_id: project.id, workspace_scope: 'novel', title: '', status,
+        capability: 'rewrite', subject_type: 'chapter', subject_id: filled.id, model_provider_id: '', model_id: null,
+        error_code: '', error_message: '', verb: 'rewrite_chapter', verb_params: '{}', subject_key: '', brief_json: '',
+      })
+      const same = await validateCreateKernelJob(ws, body, { skipRuntimeCheck: true })
+      expect(same.ok).toBe(false)
+      if (!same.ok) {
+        expect(same.status).toBe(409)
+        expect(same.code).toBe('PROJECT_JOB_RUNNING')
+      }
+      const different = await validateCreateKernelJob(ws, {
+        ...body, subject_id: other.id,
+      }, { skipRuntimeCheck: true })
+      expect(different.ok).toBe(true)
     }
-    const different = await validateCreateKernelJob(ws, {
-      ...body, subject_id: other.id,
-    }, { skipRuntimeCheck: true })
-    expect(different.ok).toBe(true)
   })
 })
