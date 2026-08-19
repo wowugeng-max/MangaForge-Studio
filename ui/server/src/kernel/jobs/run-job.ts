@@ -2,12 +2,14 @@
 import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { loadOhStoryCoreSuite } from '../../novel-writing/oh-story-core/store'
-import { listNovelOutlines } from '../../novel'
+import { getNovelChapter, listNovelOutlines } from '../../novel'
 import { readKernelEvents } from '../codex/events'
 import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
 import { loadKernelContracts, type KernelContractView } from '../contracts/store'
 import { kernelJobDir } from '../paths'
+import { collapseRewriteChapterArtifacts } from '../projection/collapse-rewrite-chapter'
+import { chapterRelPath } from '../projection/naming'
 import { buildCodexConfigToml } from '../providers/translate'
 import { checkKernelBinary, loadKernelRuntime } from '../runtime'
 import { loadVerbDefaults } from '../verbs/defaults'
@@ -189,7 +191,26 @@ export async function createAndRunKernelJob(
             updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
             return
           }
-          const registered = persistCandidateArtifacts(ws, candidateId, result.artifacts)
+          const chapterRow = await getNovelChapter(ws, body.subject_id, body.project_id)
+          const currentRel = chapterRow
+            ? chapterRelPath(Number(chapterRow.chapter_no), String(chapterRow.title || ''))
+            : ''
+          const collapsed = collapseRewriteChapterArtifacts({
+            capability: contract.capability,
+            subjectType: validated.subjectType,
+            currentRel,
+            artifacts: result.artifacts,
+          })
+          if (!collapsed.ok) {
+            updateKernelCandidate(ws, candidateId, {
+              status: 'failed',
+              error_code: collapsed.code,
+              last_message_excerpt: collapsed.message.slice(0, 500),
+              finished_at: now,
+            })
+            return
+          }
+          const registered = persistCandidateArtifacts(ws, candidateId, collapsed.artifacts)
           live.phases.set(candidateId, 'gating')
           if (live.cancelled) {
             updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
