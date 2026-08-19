@@ -91,6 +91,20 @@ describe('instance vs template validation', () => {
     const legacy = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')!
     expect(resolveContractVerb(legacy)).toBeNull()
   })
+  test('rewrite_chapter instance is manual oh_story_rewrite and stays implemented; outline variant stays unimplemented', () => {
+    const rewrite = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.rewrite')!
+    expect(resolveContractVerb(rewrite)).toBe('rewrite_chapter')
+    expect(validateInstanceAgainstTemplate(rewrite)).toEqual({ ok: true })
+    expect(rewrite.commit.mode).toBe('manual')
+    expect(rewrite.commit.source).toBe('oh_story_rewrite')
+    expect(rewrite.gates).toEqual(['require_chapter_file', 'reject_outline_artifact'])
+    expect(rewrite.gates.includes('paragraph_retention_70')).toBe(false)
+    expect(rewrite.gates.includes('require_matching_review')).toBe(false)
+    expect(rewrite.invoke.prompt).toContain('重写第')
+    expect(rewrite.invoke.prompt).toContain('不要开书')
+    const legacy = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')!
+    expect(resolveContractVerb(legacy)).toBeNull()
+  })
   test('instance commit mode must match the template commit_mode', () => {
     const expand = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')!
     const auto = { ...expand, commit: { ...expand.commit, mode: 'auto_if_single' } }

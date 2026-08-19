@@ -172,7 +172,7 @@ describe('verb-based job creation', () => {
     const { ws, project, chapter } = await seed()
     const base = { project_id: project.id, subject_type: 'chapter', subject_id: chapter.id, model_id: 9 }
     expect(((await validateCreateKernelJob(ws, { ...base, verb: 'nope' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_UNKNOWN')
-    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'rewrite_chapter' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_DEFAULT_MISSING')
+    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'write_continue' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_DEFAULT_MISSING')
     expect(((await validateCreateKernelJob(ws, {
       ...base, verb: 'review_chapter',
       contract_ids: ['oh-story-core.story-review.full', 'oh-story-core.story-deslop.file'],

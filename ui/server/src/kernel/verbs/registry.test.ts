@@ -32,11 +32,15 @@ describe('verb template registry', () => {
   })
   test('implemented verbs are exactly the phase-1 set plus expand_outline and write_chapter', () => {
     expect([...IMPLEMENTED_VERBS].sort()).toEqual([
-      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'write_chapter',
+      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'rewrite_chapter', 'write_chapter',
     ])
   })
   test('write_chapter template gates include reject_outline_artifact', () => {
     expect(getVerbTemplate('write_chapter')!.template_gates).toContain('reject_outline_artifact')
+  })
+  test('rewrite_chapter template gates include reject_outline_artifact and stay manual', () => {
+    expect(getVerbTemplate('rewrite_chapter')!.template_gates).toContain('reject_outline_artifact')
+    expect(getVerbTemplate('rewrite_chapter')!.commit_mode).toBe('manual')
   })
   test('unknown verb returns null', () => {
     expect(getVerbTemplate('nope')).toBeNull()

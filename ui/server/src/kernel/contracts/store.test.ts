@@ -9,7 +9,7 @@ import { deleteUserKernelContract, loadKernelContracts, saveUserKernelContract, 
 function tempWs() { return mkdtempSync(join(tmpdir(), 'kernel-contracts-')) }
 
 describe('builtin contracts', () => {
-  test('all seven builtins pass validation', () => {
+  test('all eight builtins pass validation', () => {
     for (const contract of BUILTIN_KERNEL_CONTRACTS) {
       const result = validateKernelContract(contract)
       expect(result.ok).toBe(true)
@@ -20,6 +20,7 @@ describe('builtin contracts', () => {
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')?.verb).toBeUndefined()
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')?.verb).toBe('expand_outline')
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.chapter')?.verb).toBe('write_chapter')
+    expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.rewrite')?.verb).toBe('rewrite_chapter')
     expect(BUILTIN_KERNEL_CONTRACTS.map(c => c.id)).toEqual([
       'oh-story-core.story-review.full',
       'oh-story-core.story-deslop.file',
@@ -28,6 +29,7 @@ describe('builtin contracts', () => {
       'oh-story-core.story-long-write.open',
       'oh-story-core.story-long-write.expand',
       'oh-story-core.story-long-write.chapter',
+      'oh-story-core.story-long-write.rewrite',
     ])
   })
 })
@@ -43,6 +45,7 @@ describe('contract store', () => {
       'oh-story-core.story-long-write.expand.json',
       'oh-story-core.story-long-write.open.json',
       'oh-story-core.story-long-write.outline.json',
+      'oh-story-core.story-long-write.rewrite.json',
       'oh-story-core.story-review.full.json',
     ])
     const { contracts, errors } = loadKernelContracts(ws)
@@ -63,6 +66,11 @@ describe('contract store', () => {
     const chapter = contracts.find(c => c.id === 'oh-story-core.story-long-write.chapter')!
     expect(chapter.verb).toBe('write_chapter')
     expect(chapter.implemented).toBe(true)
+    const rewrite = contracts.find(c => c.id === 'oh-story-core.story-long-write.rewrite')!
+    expect(rewrite.verb).toBe('rewrite_chapter')
+    expect(rewrite.implemented).toBe(true)
+    expect(outline.implemented).toBe(false)
+    expect(chapter.verb).toBe('write_chapter')
   })
 
   test('user contract with same artifact kind installs without code change (扩展 8.1)', () => {
