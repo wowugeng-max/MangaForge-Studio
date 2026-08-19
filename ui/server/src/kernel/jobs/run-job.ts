@@ -122,6 +122,21 @@ export async function validateCreateKernelJob(
       }
     }
   }
+  if (verb === 'rewrite_chapter') {
+    const chapter = await getNovelChapter(ws, body.subject_id, body.project_id)
+    if (!chapter) {
+      return { ok: false, status: 400, code: 'CHAPTER_NOT_FOUND', message: '找不到该章' }
+    }
+    if (!chapterTextHasProse(String(chapter.chapter_text || ''))) {
+      return { ok: false, status: 400, code: 'CHAPTER_NO_PROSE', message: '本章还没有正文，请先写草稿' }
+    }
+    if (body.user_brief) {
+      briefJson = JSON.stringify(body.user_brief)
+      if (Buffer.byteLength(briefJson, 'utf8') > 32 * 1024) {
+        return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '创意超过 32KiB 上限' }
+      }
+    }
+  }
   const dedupe = template.subject_type === 'project'
     ? { projectId: body.project_id, verb }
     : { projectId: body.project_id, verb, subjectId: body.subject_id }
