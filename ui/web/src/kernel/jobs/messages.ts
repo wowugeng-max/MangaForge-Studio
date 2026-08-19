@@ -21,5 +21,8 @@ export function kernelJobUserMessage(code: string): { kind: 'warning' | 'error' 
   if (value === 'CHAPTER_NOT_FOUND') {
     return { kind: 'error', text: '找不到该章' }
   }
+  if (value === 'CHAPTER_NO_PROSE') {
+    return { kind: 'warning', text: '本章还没有正文，请先写草稿' }
+  }
   return { kind: 'error', text: value }
 }

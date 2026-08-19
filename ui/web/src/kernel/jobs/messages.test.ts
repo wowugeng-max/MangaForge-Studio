@@ -26,5 +26,9 @@ describe('kernelJobUserMessage', () => {
       kind: 'error',
       text: '找不到该章',
     })
+    expect(kernelJobUserMessage('CHAPTER_NO_PROSE')).toEqual({
+      kind: 'warning',
+      text: '本章还没有正文，请先写草稿',
+    })
   })
 })
