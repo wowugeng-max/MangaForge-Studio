@@ -1,12 +1,13 @@
 # 回炉重写运行时（rewrite_chapter）
 
 日期：2026-08-19  
-状态：待用户审阅  
+状态：已落地  
 对照：
 
-- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.3 `rewrite_chapter` 节（本文件是其实现 spec）
-- `2026-08-15-codex-kernel-vault-design.md` v1.4 排期 C（续写/回炉/适配未做）
+- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.4 `rewrite_chapter` 节（本文件是其实现 spec）
+- `2026-08-15-codex-kernel-vault-design.md` v1.5 排期 C（回炉已落地；续写/适配未做）
 - 写章切片：`2026-08-18-write-chapter-runtime-design.md`（空章初稿；本片覆盖已有正文）
+实现计划：`docs/superpowers/plans/2026-08-19-rewrite-chapter-runtime.md`
 
 **Goal：** 作者在工作台对**已有正文**的章点主按钮（由「写草稿」换成「回炉」）时，走内核 `rewrite_chapter`：有正文 → Codex `$story-long-write` 重写本章 → job `awaiting_selection` → 人在写作区预览并采纳后才覆盖账本。空章走写初稿，不走回炉。batch / `generateChapterForGroup` 不动。
 
@@ -115,7 +116,7 @@
 
 `CHAPTER_NOT_FOUND` / `PROJECT_JOB_RUNNING` 沿用。终态仍用现有：`CHAPTER_FILE_MISSING`、`REJECT_OUTLINE`、`OUTPUT_MISSING`、`ENGINE_FAILED`、`CANCELLED`。
 
-实现后把 `CHAPTER_NO_PROSE` 折进动词 spec 错误表；内核 spec 排期 C 把回炉标成已按本文件落地。`CHAPTER_HAS_PROSE` 文案「请用回炉或按建议改稿」保持，本片落地后该提示成真。
+已折入动词 spec 错误表（v1.4）与内核 spec 排期 C（v1.5）。`CHAPTER_HAS_PROSE` 文案「请用回炉或按建议改稿」保持，该提示已成真。
 
 ## 测试
 
@@ -160,4 +161,4 @@
 - **实现** 动词规范 `rewrite_chapter`：补合同实例、无正文预检、作者入口、manual 采纳。
 - **不覆盖** `write_continue`。
 - **不替代** `apply_review`（外科手术 + 70% 仍在质检面板）。
-- 实现后更新内核 spec 排期 C 与动词 spec「与现网合同」回炉行。
+- **已折入** 内核 spec 排期 C 与动词 spec「与现网合同」回炉行（v1.5 / v1.4）。
