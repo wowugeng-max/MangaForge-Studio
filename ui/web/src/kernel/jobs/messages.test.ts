@@ -12,4 +12,19 @@ describe('kernelJobUserMessage', () => {
   test('maps runtime unavailable', () => {
     expect(kernelJobUserMessage('KERNEL_RUNTIME_UNAVAILABLE')?.kind).toBe('error')
   })
+
+  test('maps write_chapter gate codes to toast copy', () => {
+    expect(kernelJobUserMessage('CHAPTER_HAS_PROSE')).toEqual({
+      kind: 'warning',
+      text: '本章已有正文，请用回炉或按建议改稿',
+    })
+    expect(kernelJobUserMessage('OUTLINE_MISSING')).toEqual({
+      kind: 'warning',
+      text: '本章还没有细纲',
+    })
+    expect(kernelJobUserMessage('CHAPTER_NOT_FOUND')).toEqual({
+      kind: 'error',
+      text: '找不到该章',
+    })
+  })
 })

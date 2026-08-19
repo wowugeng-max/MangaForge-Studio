@@ -12,5 +12,14 @@ export function kernelJobUserMessage(code: string): { kind: 'warning' | 'error' 
   }
   if (value === 'CANCELLED') return { kind: 'info', text: '已取消' }
   if (value === 'PROJECT_JOB_RUNNING') return { kind: 'warning', text: '同项目同动词任务未结束' }
+  if (value === 'CHAPTER_HAS_PROSE') {
+    return { kind: 'warning', text: '本章已有正文，请用回炉或按建议改稿' }
+  }
+  if (value === 'OUTLINE_MISSING') {
+    return { kind: 'warning', text: '本章还没有细纲' }
+  }
+  if (value === 'CHAPTER_NOT_FOUND') {
+    return { kind: 'error', text: '找不到该章' }
+  }
   return { kind: 'error', text: value }
 }

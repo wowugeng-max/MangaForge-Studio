@@ -78,4 +78,50 @@ describe('createKernelJobApi', () => {
       'GET /kernel/contracts',
     ])
   })
+
+  test('createJobByVerb posts write_chapter verb and user_brief when length_target is set', async () => {
+    const seen: any[] = []
+    const api = createKernelJobApi(fakeRequest((method, path, body) => {
+      seen.push({ method, path, body })
+      return { status: 202, data: { ok: true, job: { id: 'job-w', status: 'queued' } } }
+    }))
+    const result = await api.createJobByVerb({
+      projectId: 3,
+      chapterId: 11,
+      modelId: 7,
+      verb: 'write_chapter',
+      userBrief: { title: 't', genre: 'g', idea: 'i', length_target: '自定义 1800 字', constraints: 'c' },
+    })
+    expect(result).toEqual({ ok: true, jobId: 'job-w' })
+    expect(seen[0]).toEqual({
+      method: 'POST',
+      path: '/kernel/jobs',
+      body: {
+        project_id: 3,
+        subject_type: 'chapter',
+        subject_id: 11,
+        verb: 'write_chapter',
+        model_id: 7,
+        user_brief: { title: 't', genre: 'g', idea: 'i', length_target: '自定义 1800 字', constraints: 'c' },
+      },
+    })
+  })
+
+  test('createJobByVerb omits user_brief without length_target', async () => {
+    const seen: any[] = []
+    const api = createKernelJobApi(fakeRequest((_m, _p, body) => {
+      seen.push(body)
+      return { status: 202, data: { ok: true, job: { id: 'job-w2', status: 'queued' } } }
+    }))
+    await api.createJobByVerb({
+      projectId: 3,
+      chapterId: 11,
+      modelId: 7,
+      verb: 'write_chapter',
+      userBrief: { title: 't', idea: 'i' },
+    })
+    expect(seen[0].verb).toBe('write_chapter')
+    expect(seen[0].subject_type).toBe('chapter')
+    expect(seen[0].user_brief).toBeUndefined()
+  })
 })
