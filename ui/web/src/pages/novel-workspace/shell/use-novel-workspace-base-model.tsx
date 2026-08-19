@@ -14,6 +14,7 @@ import {
 import {
   useChapterAutosave,
 } from '../useChapterAutosave'
+import { useChapterWriteJob } from './use-chapter-write-job'
 import {
   useChapterVersions,
 } from '../useChapterVersions'
@@ -620,6 +621,22 @@ export function useNovelWorkspaceBaseModel() {
     setChapters,
   })
 
+  const writeJob = useChapterWriteJob({
+    apiClient,
+    projectId: Number(projectId || 0),
+    modelId: Number(selectedModelId || 0),
+    flushPendingSave,
+    loadProjectModules: async () => {
+      await loadProjectModules()
+    },
+    chapterWordTargetPayload,
+  })
+
+  useEffect(() => {
+    if (writeJob.state.phase !== 'running') return
+    setStreamingProgress(writeJob.state.hint || '正在写本章…')
+  }, [writeJob.state, setStreamingProgress])
+
   const selectChapterForWriting = async (chapterId: number) => {
     const saved = await selectChapter(chapterId)
     if (saved) setWorkspaceArea('chapterWriting')
@@ -897,6 +914,7 @@ export function useNovelWorkspaceBaseModel() {
     storyStateForm,
     writingBibleForm,
     sortedChapters,
+    startKernelWriteChapter: writeJob.start,
     unattendedTargetChapter,
     worldbuilding,
 

@@ -212,6 +212,7 @@ function proseDeps(overrides: Record<string, any> = {}) {
     setStreamingProgress: () => {},
     setStreamingText: () => {},
     showGenerationBlockedModal: () => {},
+    startKernelWriteChapter: async () => {},
     worldbuilding: [],
     characters: [],
     outlines: [],
@@ -433,31 +434,25 @@ describe('chapter source-aware invocation handlers', () => {
     }))
   })
 
-  test('missing prose reload token suppresses single-chapter completion UI', async () => {
-    const events: string[] = []
-    const notices = installMessageRecorder(events)
-    globalThis.fetch = (async () => streamResponse()) as any
+  test('generateCurrentChapterProse starts a kernel write_chapter job and does not fetch generate-prose', async () => {
+    const started: number[] = []
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
     const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
-      loadProjectModules: async () => { events.push('load'); return undefined },
-      setRightPanelOpen: () => { events.push('right-panel') },
-      setStreamingPercent: (value: number) => { events.push(`percent:${value}`) },
-      setStreamingProgress: (value: string) => { events.push(`progress:${value}`) },
+      startKernelWriteChapter: async (chapterId: number) => { started.push(chapterId) },
     }))
 
     await handlers.generateCurrentChapterProse()
 
-    expect(events).toContain('load')
-    expect(events).not.toContain('right-panel')
-    expect(events).not.toContain('percent:100')
-    expect(events).not.toContain('progress:生成完成')
-    expect(notices.successes).toHaveLength(0)
-    expect(notices.warnings).not.toContain('章节来源已变化，请重试')
+    expect(started).toEqual([11])
+    expect(fetches).toBe(0)
   })
 
   test('missing repair reload token suppresses success and prose continuation', async () => {
     const events: string[] = []
     const notices = installMessageRecorder(events)
     let fetches = 0
+    let kernelStarts = 0
     globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
     const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
       apiClient: {
@@ -469,12 +464,14 @@ describe('chapter source-aware invocation handlers', () => {
       setStreamingChapterId: (value: number | null) => { events.push(`chapter:${value}`) },
       setStreamingPercent: (value: number) => { events.push(`percent:${value}`) },
       setStreamingProgress: (value: string) => { events.push(`progress:${value}`) },
+      startKernelWriteChapter: async () => { kernelStarts += 1 },
     }))
 
     await handlers.repairContextAndGenerateCurrentChapter()
 
     expect(events).toContain('load')
     expect(fetches).toBe(0)
+    expect(kernelStarts).toBe(0)
     expect(notices.successes).toHaveLength(0)
     expect(notices.warnings).not.toContain('章节来源已变化，请重试')
     expect(events).toContain('generating:false')
@@ -542,18 +539,17 @@ describe('chapter source-aware invocation handlers', () => {
       await handlers.repairGenerationPreflightGaps({ chapter_id: 11 }, { repairKeys: ['characters'] })
     })
     await runScenario(async (source, getPending, request) => {
-      globalThis.fetch = (async () => { request(); return streamResponse() }) as any
       const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
         getChapterGenerationSourceAuthority: source.get,
         getChapterSourceMutationPending: getPending,
         beginChapterSourceOperation: source.begin,
         assertChapterSourceOperationCurrent: source.assert,
+        startKernelWriteChapter: async () => { request() },
         loadProjectModules: async () => source.begin(),
       }))
       await handlers.generateCurrentChapterProse()
     })
     await runScenario(async (source, getPending, request) => {
-      globalThis.fetch = (async () => { request(); return streamResponse() }) as any
       const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
         getChapterGenerationSourceAuthority: source.get,
         getChapterSourceMutationPending: getPending,
@@ -563,6 +559,7 @@ describe('chapter source-aware invocation handlers', () => {
           defaults: { baseURL: 'http://novel.test' },
           post: async () => { request(); return { data: { applied: [], warnings: [] } } },
         },
+        startKernelWriteChapter: async () => { request() },
         loadProjectModules: async () => source.begin(),
       }))
       await handlers.repairContextAndGenerateCurrentChapter()
@@ -603,6 +600,7 @@ describe('chapter source-aware invocation handlers', () => {
     globalThis.fetch = (async () => { requests += 1; return streamResponse() }) as any
     const prose = proseHandlers.createChapterProseHandlers(proseDeps({
       claimChapterInvocation: staleClaim,
+      startKernelWriteChapter: async () => { requests += 1 },
     }))
     const failures: unknown[] = []
 
@@ -731,17 +729,23 @@ describe('chapter source-aware invocation handlers', () => {
     expect(posts.every(args => args[2]?.headers?.['x-chapter-generation-source-fingerprint'] === fingerprint)).toBe(true)
 
     const fetches: Array<{ url: string; init: RequestInit }> = []
+    const kernelStarts: number[] = []
     globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
       fetches.push({ url: String(url), init: init || {} })
       if (String(url).includes('stream=1')) return streamResponse()
       return new Response(JSON.stringify({ chapter: { id: 11, chapter_text: '正文' } }), { status: 200 })
     }) as any
-    const single = proseHandlers.createChapterProseHandlers(proseDeps())
+    const single = proseHandlers.createChapterProseHandlers(proseDeps({
+      startKernelWriteChapter: async (chapterId: number) => { kernelStarts.push(chapterId) },
+    }))
     await single.generateCurrentChapterProse()
     const batch = proseHandlers.createChapterProseHandlers(proseDeps())
     await batch.stepGenerateProse()
 
-    expect(fetches).toHaveLength(2)
+    expect(kernelStarts).toEqual([11])
+    expect(fetches).toHaveLength(1)
+    expect(fetches[0].url).toContain('/novel/chapters/11/generate-prose')
+    expect(fetches[0].url).not.toContain('stream=1')
     expect(fetches.every(item => (item.init.headers as Record<string, string>)?.['x-chapter-generation-source-fingerprint'] === fingerprint)).toBe(true)
   })
 
@@ -785,16 +789,16 @@ describe('chapter source-aware invocation handlers', () => {
   test('source change wins over rejected single and repair prose requests', async () => {
     const generateSource = mutableSourceAuthority('model')
     const generateStarted = deferred<void>()
-    const generateResponse = deferred<Response>()
+    const generateResponse = deferred<void>()
     const generateNotices = installMessageRecorder()
-    globalThis.fetch = (async () => {
-      generateStarted.resolve()
-      return generateResponse.promise
-    }) as any
     const generate = proseHandlers.createChapterProseHandlers(proseDeps({
       getChapterGenerationSourceAuthority: generateSource.get,
       beginChapterSourceOperation: generateSource.begin,
       assertChapterSourceOperationCurrent: generateSource.assert,
+      startKernelWriteChapter: async () => {
+        generateStarted.resolve()
+        return generateResponse.promise
+      },
     }))
 
     const generateAction = generate.generateCurrentChapterProse()
@@ -873,6 +877,7 @@ describe('chapter source-aware invocation handlers', () => {
     installMessageRecorder()
     let fetches = 0
     let posts = 0
+    let kernelStarts = 0
     globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
 
     const generateSource = mutableSourceAuthority('model')
@@ -882,6 +887,7 @@ describe('chapter source-aware invocation handlers', () => {
       beginChapterSourceOperation: generateSource.begin,
       assertChapterSourceOperationCurrent: generateSource.assert,
       flushPendingSave: () => generateFlush.promise,
+      startKernelWriteChapter: async () => { kernelStarts += 1 },
     }))
     const generateAction = generate.generateCurrentChapterProse()
     generateSource.switchTo('mcp')
@@ -926,6 +932,7 @@ describe('chapter source-aware invocation handlers', () => {
 
     expect(fetches).toBe(0)
     expect(posts).toBe(0)
+    expect(kernelStarts).toBe(0)
   })
 
   test('repair response source switch prevents reload, success, and prose continuation', async () => {
@@ -935,6 +942,7 @@ describe('chapter source-aware invocation handlers', () => {
     const events: string[] = []
     const notices = installMessageRecorder(events)
     let fetches = 0
+    let kernelStarts = 0
     globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
     const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
       chapterGenerationSourceAuthority: source.get(),
@@ -950,6 +958,7 @@ describe('chapter source-aware invocation handlers', () => {
         },
       },
       loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
+      startKernelWriteChapter: async () => { kernelStarts += 1 },
     }))
 
     const action = handlers.repairContextAndGenerateCurrentChapter()
@@ -959,6 +968,7 @@ describe('chapter source-aware invocation handlers', () => {
     await action
 
     expect(fetches).toBe(0)
+    expect(kernelStarts).toBe(0)
     expect(events).not.toContain('load')
     expect(events).not.toContain('success')
     expect(notices.warnings).toContain('章节来源已变化，请重试')
@@ -1031,16 +1041,13 @@ describe('chapter source-aware invocation handlers', () => {
     ])
   })
 
-  test('MCP current prose and repair-and-prose omit model id and resume with strict repair flags', async () => {
+  test('MCP current prose and repair-and-prose omit model id and resume with kernel write', async () => {
     const events: string[] = []
     installMessageRecorder(events)
-    const fetchBodies: any[] = []
+    const kernelStarts: number[] = []
     const repairBodies: any[] = []
-    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-      fetchBodies.push(JSON.parse(String(init?.body || '{}')))
-      events.push('fetch')
-      return streamResponse()
-    }) as any
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
     const handlers = proseHandlers.createChapterProseHandlers(proseDeps({
       chapterGenerationSourceAuthority: sourceAuthority('mcp'),
       selectedModelId: undefined,
@@ -1053,20 +1060,21 @@ describe('chapter source-aware invocation handlers', () => {
         },
       },
       loadProjectModules: async () => { events.push('load'); return successfulReloadToken },
+      startKernelWriteChapter: async (chapterId: number) => {
+        kernelStarts.push(chapterId)
+        events.push('kernel')
+      },
     }))
 
     await handlers.generateCurrentChapterProse({ allowIncomplete: true })
     await handlers.repairContextAndGenerateCurrentChapter()
 
-    expect(fetchBodies).toHaveLength(2)
-    expect(fetchBodies[0]).not.toHaveProperty('model_id')
-    expect(fetchBodies[0].allow_incomplete).toBe(true)
+    expect(fetches).toBe(0)
+    expect(kernelStarts).toEqual([11, 11])
     expect(repairBodies).toEqual([{ project_id: 7 }])
     expect(repairBodies[0]).not.toHaveProperty('model_id')
-    expect(fetchBodies[1]).not.toHaveProperty('model_id')
-    expect(fetchBodies[1]).toMatchObject({ allow_incomplete: false, force_scene_cards: true })
-    expect(events.slice(events.indexOf('repair'), events.indexOf('fetch', events.indexOf('repair')) + 1))
-      .toEqual(['repair', 'load', 'success', 'fetch'])
+    expect(events.slice(events.indexOf('repair'), events.indexOf('kernel', events.indexOf('repair')) + 1))
+      .toEqual(['repair', 'load', 'success', 'kernel'])
   })
 
   test('MCP batch prose omits model id from generation and summary payloads', async () => {
@@ -1108,6 +1116,7 @@ describe('chapter source-aware invocation handlers', () => {
       apiClient,
       chapterGenerationSourceAuthority: authority,
       selectedModelId: 73,
+      startKernelWriteChapter: async () => { requests += 1 },
     }))
     const preflight = createPreflightHandlers(preflightDeps({
       apiClient,
@@ -1124,22 +1133,21 @@ describe('chapter source-aware invocation handlers', () => {
     expect(notices.warnings).toEqual(Array(4).fill('章节来源权威状态暂时无法确认'))
   })
 
-  test('model source without an id is blocked while a valid id is preserved in prose', async () => {
+  test('model source without an id is blocked while a valid id still starts kernel write', async () => {
     const notices = installMessageRecorder()
-    const fetchBodies: any[] = []
-    globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-      fetchBodies.push(JSON.parse(String(init?.body || '{}')))
-      return streamResponse()
-    }) as any
-    const blocked = proseHandlers.createChapterProseHandlers(proseDeps({ selectedModelId: undefined }))
-    const allowed = proseHandlers.createChapterProseHandlers(proseDeps({ selectedModelId: 911 }))
+    const kernelStarts: number[] = []
+    let fetches = 0
+    globalThis.fetch = (async () => { fetches += 1; return streamResponse() }) as any
+    const startKernelWriteChapter = async (chapterId: number) => { kernelStarts.push(chapterId) }
+    const blocked = proseHandlers.createChapterProseHandlers(proseDeps({ selectedModelId: undefined, startKernelWriteChapter }))
+    const allowed = proseHandlers.createChapterProseHandlers(proseDeps({ selectedModelId: 911, startKernelWriteChapter }))
 
     await blocked.generateCurrentChapterProse()
     await allowed.generateCurrentChapterProse()
 
     expect(notices.warnings).toContain('请先选择写作模型')
-    expect(fetchBodies).toHaveLength(1)
-    expect(fetchBodies[0].model_id).toBe(911)
+    expect(fetches).toBe(0)
+    expect(kernelStarts).toEqual([11])
   })
 })
 
@@ -1162,10 +1170,15 @@ describe('MCP generation error propagation', () => {
     expect(error.payload).toBe(payload)
   })
 
-  test('uses the payload-preserving error builder in initial HTTP, SSE, and batch HTTP failures', () => {
+  test('uses the payload-preserving error builder in batch HTTP failures', () => {
     const source = readFileSync(join(import.meta.dir, 'workspace-chapter-prose-handlers.tsx'), 'utf8')
+    const generateStart = source.indexOf('const generateCurrentChapterProse')
+    const generateEnd = source.indexOf('const cancelCurrentChapterProse')
+    const generateBody = source.slice(generateStart, generateEnd)
 
-    expect(source.match(/throw buildMcpGenerationFailureError\(/g) || []).toHaveLength(3)
+    expect(generateBody).toContain('startKernelWriteChapter')
+    expect(generateBody).not.toContain('generate-prose')
+    expect(source.match(/throw buildMcpGenerationFailureError\(/g) || []).toHaveLength(1)
     expect(source).not.toContain("throw new Error(payload?.error || raw || `HTTP ${resp.status}`)")
     expect(source).not.toContain("throw new Error(p.error || '正文生成失败')")
     expect(source).not.toContain("throw new Error(data?.error || data?.detail || raw || `HTTP ${resp.status}`)")

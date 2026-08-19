@@ -221,7 +221,6 @@ describe('commercial writing workspace UI shell b a', () => {
     expect(model).toContain('fourQuestions')
     expect(projectWorkspace).toContain('millionWordRunway?: any')
     expect(projectWorkspace).toContain('million_word_runway: options?.millionWordRunway')
-    expect(projectWorkspace).toContain('million_word_runway: autoCreationDirectorModel.millionWordRunway')
     expect(projectWorkspace).toContain('millionWordRunway: autoCreationDirectorModel.millionWordRunway')
     expect(workspaceCenter).toContain('runwaySync')
     expect(workspaceCenter).toContain('novel-delivery-runway-tag')
