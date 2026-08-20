@@ -1,10 +1,10 @@
 import { readFileSync } from 'node:fs'
-import { createNovelReview, getNovelChapter, updateNovelChapter } from '../../novel'
+import { createNovelReview, getNovelChapter, listNovelChapters, updateNovelChapter } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
 import { loadKernelContracts } from '../contracts/store'
 import { openKernelDb } from '../db'
 import {
-  ensureEmptyChapterRow, firstHeadingOf, upsertCharacterSheet, upsertOutlineDoc, upsertWorldDoc,
+  ensureEmptyChapterRow, firstHeadingOf, parseChapterNoFromRelPath, upsertCharacterSheet, upsertOutlineDoc, upsertWorldDoc,
 } from './domain-upsert'
 import { runPostHarvestGates } from './gates'
 import { getKernelJobDetail, insertKernelCommit, updateKernelCandidate, updateKernelJob } from './repo'
@@ -49,6 +49,7 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
   const gate = await runPostHarvestGates({
     workspace: ws, projectId: detail.job.project_id, chapterId, contract,
     artifacts, warnings: [], spawnEvidence, readArtifactText: readVaultText,
+    continueCount: Number(JSON.parse(detail.job.verb_params || '{}').count || 0),
   })
   if (gate.failedCode) return { ok: false, status: 409, code: gate.failedCode, message: 'commit-time gate failed' }
 
@@ -80,10 +81,21 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
         })
         commits.push({ domain_table: 'reviews', domain_row_id: Number(saved.id) })
       } else if (output.binding === 'chapters.rewrite') {
-        await updateNovelChapter(ws, chapterId, { chapter_text: text }, {
-          versionSource: String(contract.commit.source || 'kernel_rewrite') as any,
-        })
-        commits.push({ domain_table: 'chapters', domain_row_id: chapterId })
+        if (detail.job.verb === 'write_continue') {
+          const no = parseChapterNoFromRelPath(String(artifact.rel_path))
+          const chapters = await listNovelChapters(ws, detail.job.project_id)
+          const row = chapters.find((item: any) => Number(item.chapter_no) === no)
+          if (!row) return { ok: false, status: 500, code: 'CHAPTER_NOT_FOUND', message: `找不到第 ${no} 章` }
+          await updateNovelChapter(ws, row.id, { chapter_text: text }, {
+            versionSource: String(contract.commit.source || 'kernel_rewrite') as any,
+          })
+          commits.push({ domain_table: 'chapters', domain_row_id: Number(row.id) })
+        } else {
+          await updateNovelChapter(ws, chapterId, { chapter_text: text }, {
+            versionSource: String(contract.commit.source || 'kernel_rewrite') as any,
+          })
+          commits.push({ domain_table: 'chapters', domain_row_id: chapterId })
+        }
       }
     }
   }

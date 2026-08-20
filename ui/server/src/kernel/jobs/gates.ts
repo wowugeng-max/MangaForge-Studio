@@ -26,6 +26,7 @@ export async function runPostHarvestGates(input: {
   warnings: Array<{ warning: string; rel_path: string }>
   spawnEvidence?: { subagent_threads: Array<{ thread_id: string; parent_thread_id: string; agent: string }>; agent_hints: string[] }
   readArtifactText: (artifact: GateArtifact) => string
+  continueCount?: number
 }): Promise<{ results: GateResult[]; failedCode: string | null; failedStatus: 'gated' | 'failed' | null }> {
   const results: GateResult[] = []
   for (const warning of input.warnings || []) {
@@ -87,6 +88,14 @@ export async function runPostHarvestGates(input: {
       continue
     }
     if (gate === 'require_chapter_file') {
+      if (resolveContractVerb(input.contract as any) === 'write_continue') {
+        const texts = input.artifacts.filter(a => a.artifact_kind === 'chapter_text')
+        const allNonEmpty = texts.every(a => input.readArtifactText(a).replace(/\s/g, ''))
+        if (texts.length !== Number(input.continueCount || 0) || !allNonEmpty) {
+          results.push({ gate, ok: false, code: 'CHAPTER_FILE_MISSING' })
+        } else results.push({ gate, ok: true })
+        continue
+      }
       if (!chapterArtifact && input.contract.capability === 'review') {
         const chapter = await getNovelChapter(input.workspace, input.chapterId, input.projectId)
         if (String(chapter?.chapter_text || '').replace(/\s/g, '')) results.push({ gate, ok: true })

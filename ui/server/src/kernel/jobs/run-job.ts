@@ -10,6 +10,7 @@ import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
 import { loadKernelContracts, type KernelContractView } from '../contracts/store'
 import { kernelJobDir } from '../paths'
+import { collapseContinueChapterArtifacts } from '../projection/collapse-continue-chapter'
 import { collapseRewriteChapterArtifacts } from '../projection/collapse-rewrite-chapter'
 import { chapterRelPath } from '../projection/naming'
 import { buildCodexConfigToml } from '../providers/translate'
@@ -254,16 +255,33 @@ export async function createAndRunKernelJob(
             updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
             return
           }
-          const chapterRow = await getNovelChapter(ws, body.subject_id, body.project_id)
-          const currentRel = chapterRow
-            ? chapterRelPath(Number(chapterRow.chapter_no), String(chapterRow.title || ''))
-            : ''
-          const collapsed = collapseRewriteChapterArtifacts({
-            capability: contract.capability,
-            subjectType: validated.subjectType,
-            currentRel,
-            artifacts: result.artifacts,
-          })
+          let collapsed
+          if (validated.verb === 'write_continue') {
+            const params = JSON.parse(validated.verbParamsJson || '{}')
+            const windowNos = writeContinueWindow(Number(params.from_chapter_no), Number(params.count))
+            const chapters = await listNovelChapters(ws, body.project_id)
+            const projectedRel: Record<number, string> = {}
+            for (const no of windowNos) {
+              const row = chapters.find((item: any) => Number(item.chapter_no) === no)
+              projectedRel[no] = chapterRelPath(no, String(row?.title || ''))
+            }
+            collapsed = collapseContinueChapterArtifacts({
+              windowNos,
+              projectedRel,
+              artifacts: result.artifacts,
+            })
+          } else {
+            const chapterRow = await getNovelChapter(ws, body.subject_id, body.project_id)
+            const currentRel = chapterRow
+              ? chapterRelPath(Number(chapterRow.chapter_no), String(chapterRow.title || ''))
+              : ''
+            collapsed = collapseRewriteChapterArtifacts({
+              capability: contract.capability,
+              subjectType: validated.subjectType,
+              currentRel,
+              artifacts: result.artifacts,
+            })
+          }
           if (!collapsed.ok) {
             updateKernelCandidate(ws, candidateId, {
               status: 'failed',
@@ -284,6 +302,7 @@ export async function createAndRunKernelJob(
             artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
             warnings: result.warnings,
             spawnEvidence: result.spawnEvidence,
+            continueCount: Number(JSON.parse(validated.verbParamsJson || '{}').count || 0),
             readArtifactText: (artifact) => {
               try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
             },
