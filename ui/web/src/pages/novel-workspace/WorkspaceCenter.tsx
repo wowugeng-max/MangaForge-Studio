@@ -61,7 +61,7 @@ import { ProseOutlineRail } from './prose-outline-rail'
 import { BookSearchModal } from './book-search-modal'
 import { reportChapterId } from './workspace-center-quality-revision-panel'
 import { resolveQualityReportView } from './reference-panel-helpers'
-import { shouldShowRewriteSelection, type ChapterRewriteSelection } from './shell/use-chapter-rewrite-job'
+import { rewriteSelectionBarLabel, shouldShowRewriteSelection, type ChapterRewriteSelection } from './shell/use-chapter-rewrite-job'
 import './WorkspaceCenter.css'
 
 const { Title, Text, Paragraph } = Typography
@@ -913,7 +913,7 @@ export function WorkspaceCenter({
             <div className="novel-rewrite-selection" style={{ flexShrink: 0, padding: '10px 16px', background: '#fff7e6', borderBottom: '1px solid #ffe7ba' }}>
               <Space direction="vertical" style={{ width: '100%' }} size={8}>
                 <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }} wrap>
-                  <Text strong style={{ fontSize: 13 }}>回炉稿待采纳</Text>
+                  <Text strong style={{ fontSize: 13 }}>{rewriteSelectionBarLabel(rewriteSelection)}</Text>
                   <Space>
                     <Button size="small" type="primary" onClick={() => { void rewriteSelection.onCommit() }}>采纳回炉稿</Button>
                     <Button size="small" onClick={() => { void rewriteSelection.onCancel() }}>取消</Button>

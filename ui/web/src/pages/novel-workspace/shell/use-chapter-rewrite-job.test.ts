@@ -3,8 +3,10 @@ import type { KernelJobDetail } from '../../../kernel/jobs/types'
 import {
   beginRewriteStart,
   cancelRewriteChapterJob,
+  cancelRewriteOnUnmount,
   pickRewriteChapterPreview,
   reduceChapterRewriteProgress,
+  rewriteSelectionBarLabel,
   runRewriteChapterJob,
   settleRewriteStart,
   shouldShowRewriteSelection,
@@ -345,6 +347,13 @@ describe('rewrite start occupancy', () => {
     expect(beginRewriteStart(occupancy)).toBe(false)
   })
 
+  test('toasts when occupancy blocks a second start', () => {
+    const occupancy = { current: true }
+    const toasts: string[] = []
+    expect(beginRewriteStart(occupancy, (text) => { toasts.push(text) })).toBe(false)
+    expect(toasts).toEqual(['先采纳或取消当前回炉稿'])
+  })
+
   test('releases occupancy after failed or committed results', () => {
     const occupancy = { current: true }
     settleRewriteStart(occupancy, 'failed')
@@ -356,7 +365,7 @@ describe('rewrite start occupancy', () => {
 })
 
 describe('shouldShowRewriteSelection', () => {
-  test('shows the preview bar only for the job chapter', () => {
+  test('keeps the preview bar visible after switching chapters', () => {
     const selection = {
       chapterId: 11,
       preview: '回炉预览',
@@ -365,7 +374,35 @@ describe('shouldShowRewriteSelection', () => {
       onCancel: () => {},
     }
     expect(shouldShowRewriteSelection(11, selection)).toBe(true)
-    expect(shouldShowRewriteSelection(12, selection)).toBe(false)
+    expect(shouldShowRewriteSelection(12, selection)).toBe(true)
     expect(shouldShowRewriteSelection(11, null)).toBe(false)
+    expect(rewriteSelectionBarLabel(selection)).toContain('11')
+  })
+})
+
+describe('rewrite unmount vs explicit cancel', () => {
+  test('unmount aborts poll and does not POST cancelJob', async () => {
+    const abort = mock(() => {})
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    cancelRewriteOnUnmount({
+      abort,
+      cancelJob,
+      jobIdRef: { current: 'job-live' },
+    })
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(cancelJob).not.toHaveBeenCalled()
+  })
+
+  test('explicit cancel still POSTs cancelJob', async () => {
+    const abort = mock(() => {})
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    await cancelRewriteChapterJob({
+      abort,
+      cancelJob,
+      jobIdRef: { current: 'job-live' },
+      stateJobId: '',
+    })
+    expect(abort).toHaveBeenCalledTimes(1)
+    expect(cancelJob).toHaveBeenCalledWith('job-live')
   })
 })

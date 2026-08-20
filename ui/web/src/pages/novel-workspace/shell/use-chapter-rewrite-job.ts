@@ -34,8 +34,14 @@ export type ChapterRewriteSelection = {
   onCancel: () => void | Promise<void>
 }
 
-export function beginRewriteStart(occupancy: { current: boolean }): boolean {
-  if (occupancy.current) return false
+export function beginRewriteStart(
+  occupancy: { current: boolean },
+  onBlocked?: (text: string) => void,
+): boolean {
+  if (occupancy.current) {
+    onBlocked?.('先采纳或取消当前回炉稿')
+    return false
+  }
   occupancy.current = true
   return true
 }
@@ -45,12 +51,14 @@ export function settleRewriteStart(occupancy: { current: boolean }, kind: RunRew
 }
 
 export function shouldShowRewriteSelection(
-  activeChapterId: number | string | null | undefined,
+  _activeChapterId: number | string | null | undefined,
   rewriteSelection: Pick<ChapterRewriteSelection, 'chapterId'> | null | undefined,
 ): boolean {
-  if (!rewriteSelection) return false
-  const activeId = Number(activeChapterId || 0)
-  return Boolean(activeId) && activeId === Number(rewriteSelection.chapterId)
+  return Boolean(rewriteSelection)
+}
+
+export function rewriteSelectionBarLabel(selection: Pick<ChapterRewriteSelection, 'chapterId'>): string {
+  return `回炉稿待采纳（章节 ${selection.chapterId}）`
 }
 
 async function cancelCreatedRewriteJob(
@@ -73,6 +81,16 @@ export async function cancelRewriteChapterJob(input: {
   input.abort()
   if (jobId) await input.cancelJob(jobId)
   input.jobIdRef.current = ''
+}
+
+export const cancelRewriteExplicit = cancelRewriteChapterJob
+
+export function cancelRewriteOnUnmount(input: {
+  abort: () => void
+  cancelJob?: RewriteChapterJobClient['cancelJob']
+  jobIdRef?: { current: string }
+}): void {
+  input.abort()
 }
 
 export function reduceChapterRewriteProgress(prev: ChapterRewriteJobState, detail: KernelJobDetail): ChapterRewriteJobState {
@@ -227,15 +245,13 @@ export function useChapterRewriteJob(deps: {
   const runningRef = useRef(false)
 
   useEffect(() => () => {
-    void cancelRewriteChapterJob({
+    cancelRewriteOnUnmount({
       abort: () => abortRef.current?.abort(),
-      cancelJob: api.cancelJob,
-      jobIdRef,
     })
-  }, [api])
+  }, [])
 
   const start = useCallback(async (chapterId: number) => {
-    if (!beginRewriteStart(runningRef)) return
+    if (!beginRewriteStart(runningRef, (text) => { message.warning(text) })) return
     if (!chapterId) {
       settleRewriteStart(runningRef, 'aborted')
       message.warning('请先选择章节')
@@ -317,7 +333,7 @@ export function useChapterRewriteJob(deps: {
 
   const cancel = useCallback(async () => {
     settleRewriteStart(runningRef, 'cancelled')
-    await cancelRewriteChapterJob({
+    await cancelRewriteExplicit({
       abort: () => abortRef.current?.abort(),
       cancelJob: api.cancelJob,
       jobIdRef,
