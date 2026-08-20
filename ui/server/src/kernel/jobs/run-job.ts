@@ -231,6 +231,7 @@ export async function createAndRunKernelJob(
               workspace: ws, projectId: body.project_id, chapterId: body.subject_id,
               contract, modelId: body.model_id, jobId: candidateJobId,
               subjectType: validated.subjectType, briefJson: validated.briefJson,
+              verbParams: JSON.parse(validated.verbParamsJson || '{}'),
               sessionArgv: opts.engineArgv, sessionExtraEnv: opts.engineEnv,
               onPhase: (phase: string) => { live.phases.set(candidateId, phase) },
               onSession: (session: { close: () => void }) => {

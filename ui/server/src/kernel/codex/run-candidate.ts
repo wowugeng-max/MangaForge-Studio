@@ -25,6 +25,7 @@ export type RunKernelCandidateInput = {
   modelId: number
   subjectType?: 'chapter' | 'project'
   briefJson?: string
+  verbParams?: { from_chapter_no: number; count: number }
   jobId?: string
   idleTimeoutMs?: number
   hardTimeoutMs?: number
@@ -67,7 +68,7 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
   try {
     ;({ vars } = await projectKernelSubject({
       workspace, projectId, chapterId, contract, projectDir,
-      subjectType: input.subjectType, briefJson: input.briefJson,
+      subjectType: input.subjectType, briefJson: input.briefJson, verbParams: input.verbParams,
     }))
   } catch (error: any) {
     return { ok: false, error_code: String(error?.code || 'ENGINE_FAILED'), message: String(error?.message || error), jobDir }

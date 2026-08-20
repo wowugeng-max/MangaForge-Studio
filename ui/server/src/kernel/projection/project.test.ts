@@ -20,6 +20,7 @@ function seedOutlineRow(ws: string, projectId: number, row: { outline_type: stri
 
 const reviewContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
 const applyContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')!
+const continueContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.continue')!
 
 async function seedWorkspace() {
   const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
@@ -187,5 +188,48 @@ describe('projectKernelSubject', () => {
     await projectKernelSubject({ workspace: ws, projectId: project.id, chapterId: 0, contract, projectDir: dir, subjectType: 'project' })
     expect(readFileSync(join(dir, '大纲/细纲_第003章.md'), 'utf8')).toContain('完整细纲全文')
     expect(readFileSync(join(dir, '大纲/总纲.md'), 'utf8')).toContain('旧行摘要')
+  })
+
+  test('continue_window projects empty chapter files, chapter cards, previous as 参考/上一章.md', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '续写投影' })
+    await createNovelChapter(ws, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '上一章稿' })
+    await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '第二章', chapter_text: '' })
+    await createNovelChapter(ws, { project_id: project.id, chapter_no: 3, title: '第三章', chapter_text: '' })
+    const dir = mkdtempSync(join(tmpdir(), 'proj-continue-'))
+    const { vars, files } = await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract: continueContract, projectDir: dir,
+      subjectType: 'project',
+      verbParams: { from_chapter_no: 2, count: 2 },
+    })
+    const ch2 = files.find(f => f.startsWith('正文/第002章_') && f.endsWith('.md'))
+    const ch3 = files.find(f => f.startsWith('正文/第003章_') && f.endsWith('.md'))
+    expect(ch2).toBeTruthy()
+    expect(ch3).toBeTruthy()
+    expect(readFileSync(join(dir, ch2!), 'utf8')).toBe('')
+    expect(readFileSync(join(dir, ch3!), 'utf8')).toBe('')
+    expect(files).toContain('大纲/第002章.md')
+    expect(files).toContain('参考/上一章.md')
+    expect(readFileSync(join(dir, '参考/上一章.md'), 'utf8')).toContain('上一章稿')
+    expect(vars.chapter_no).toBe('2-3')
+    expect(vars.scope_files).toContain('正文/')
+    expect(String(vars.scope_files).split(', ').filter(f => f.startsWith('正文/'))).toHaveLength(2)
+    expect(vars.previous_chapter_file).toBe('参考/上一章.md')
+  })
+
+  test('continue_previous omitted when from_chapter_no is 1 and no earlier chapter exists', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '续写投影' })
+    await createNovelChapter(ws, { project_id: project.id, chapter_no: 1, title: '第一章', chapter_text: '上一章稿' })
+    await createNovelChapter(ws, { project_id: project.id, chapter_no: 2, title: '第二章', chapter_text: '' })
+    const dir = mkdtempSync(join(tmpdir(), 'proj-continue-first-'))
+    const { vars, files } = await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract: continueContract, projectDir: dir,
+      subjectType: 'project',
+      verbParams: { from_chapter_no: 1, count: 1 },
+    })
+    expect(files).not.toContain('参考/上一章.md')
+    expect(existsSync(join(dir, '参考/上一章.md'))).toBe(false)
+    expect(vars.previous_chapter_file).toBe('')
   })
 })

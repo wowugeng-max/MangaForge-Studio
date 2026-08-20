@@ -10,6 +10,8 @@ import {
 import type { KernelContract } from '../contracts/schema'
 import { listCommittedTrackingDocPaths } from '../db'
 import type { KernelPromptVars } from '../template'
+import { chapterTextHasProse } from '../jobs/write-chapter-precheck'
+import { writeContinueWindow } from '../jobs/write-continue-params'
 import { chapterRelPath, padChapterNo, safeChapterTitle } from './naming'
 
 const CHAPTER_LEVEL_MOUNTS = ['current_chapter', 'previous_chapter', 'review_report']
@@ -22,6 +24,7 @@ export type ProjectKernelSubjectInput = {
   projectDir: string
   subjectType?: 'chapter' | 'project'
   briefJson?: string
+  verbParams?: { from_chapter_no: number; count: number }
 }
 
 function writeProjected(projectDir: string, relPath: string, content: string, files: string[]) {
@@ -203,12 +206,57 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
     }
   }
 
+  let continueChapterNo = ''
+  let continueTitle = ''
+  let continueScope = ''
+  let continuePrevious = ''
+  if (mounts.includes('continue_window')) {
+    const from = Number(input.verbParams?.from_chapter_no || 0)
+    const count = Number(input.verbParams?.count || 0)
+    if (from >= 1 && count >= 1) {
+      const chapters = await listNovelChapters(workspace, projectId)
+      const windowRows = writeContinueWindow(from, count)
+        .map(no => chapters.find((row: any) => Number(row.chapter_no) === no))
+        .filter(Boolean)
+      const rels: string[] = []
+      const titles: string[] = []
+      const chapterCard = (row: any) => [
+        `# 第${padChapterNo(Number(row.chapter_no))}章 ${String(row.title || '')}`,
+        `目标：${String(row.chapter_goal || '')}`,
+        `概要：${String(row.chapter_summary || '')}`,
+        `冲突：${String(row.conflict || '')}`,
+        `章末钩子：${String(row.ending_hook || '')}`,
+      ].join('\n')
+      for (const row of windowRows) {
+        const rel = chapterRelPath(Number(row.chapter_no), String(row.title || ''))
+        rels.push(rel)
+        titles.push(String(row.title || ''))
+        writeProjected(projectDir, rel, '', files)
+        writeProjected(projectDir, `大纲/第${padChapterNo(Number(row.chapter_no))}章.md`, chapterCard(row), files)
+      }
+      continueChapterNo = `${from}-${from + count - 1}`
+      continueTitle = titles.join('、')
+      continueScope = rels.join(', ')
+    }
+  }
+  if (mounts.includes('continue_previous')) {
+    const from = Number(input.verbParams?.from_chapter_no || 0)
+    const chapters = await listNovelChapters(workspace, projectId)
+    const previousRow = chapters
+      .filter((row: any) => Number(row.chapter_no) < from && chapterTextHasProse(String(row.chapter_text || '')))
+      .sort((a: any, b: any) => Number(b.chapter_no) - Number(a.chapter_no))[0]
+    if (previousRow) {
+      writeProjected(projectDir, '参考/上一章.md', String(previousRow.chapter_text || ''), files)
+      continuePrevious = '参考/上一章.md'
+    }
+  }
+
   const vars: KernelPromptVars = {
-    scope_files: chapter ? currentRel : '',
-    chapter_no: chapter ? String(chapter.chapter_no) : '',
+    scope_files: continueChapterNo ? continueScope : (chapter ? currentRel : ''),
+    chapter_no: continueChapterNo || (chapter ? String(chapter.chapter_no) : ''),
     chapter_pad: chapter ? pad : '',
-    chapter_title: chapter ? String(chapter.title || '') : '',
-    previous_chapter_file: previousRel,
+    chapter_title: continueChapterNo ? continueTitle : (chapter ? String(chapter.title || '') : ''),
+    previous_chapter_file: continuePrevious || previousRel,
     report_path: chapter ? `审稿/第${pad}章.md` : '',
     review_path: reviewPath,
     skill_name: contract.skill_name,
