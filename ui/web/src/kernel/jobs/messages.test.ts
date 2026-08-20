@@ -30,5 +30,9 @@ describe('kernelJobUserMessage', () => {
       kind: 'warning',
       text: '本章还没有正文，请先写草稿',
     })
+    expect(kernelJobUserMessage('VERB_PARAMS_INVALID')).toEqual({
+      kind: 'warning',
+      text: '续写参数无效',
+    })
   })
 })

@@ -24,5 +24,8 @@ export function kernelJobUserMessage(code: string): { kind: 'warning' | 'error' 
   if (value === 'CHAPTER_NO_PROSE') {
     return { kind: 'warning', text: '本章还没有正文，请先写草稿' }
   }
+  if (value === 'VERB_PARAMS_INVALID') {
+    return { kind: 'warning', text: '续写参数无效' }
+  }
   return { kind: 'error', text: value }
 }
