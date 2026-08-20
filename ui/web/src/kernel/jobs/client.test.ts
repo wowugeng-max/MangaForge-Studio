@@ -124,4 +124,29 @@ describe('createKernelJobApi', () => {
     expect(seen[0].subject_type).toBe('chapter')
     expect(seen[0].user_brief).toBeUndefined()
   })
+
+  test('createJobByVerb posts write_continue as a project subject with verb_params', async () => {
+    const seen: any[] = []
+    const api = createKernelJobApi(fakeRequest((method, path, body) => {
+      seen.push({ method, path, body })
+      return { status: 202, data: { ok: true, job: { id: 'job-c', status: 'queued' } } }
+    }))
+    const result = await api.createJobByVerb({
+      projectId: 3,
+      chapterId: 0,
+      modelId: 7,
+      verb: 'write_continue',
+      subjectType: 'project',
+      subjectId: 3,
+      verbParams: { from_chapter_no: 2, count: 2 },
+    })
+    expect(result).toEqual({ ok: true, jobId: 'job-c' })
+    expect(seen[0].method).toBe('POST')
+    expect(seen[0].path).toBe('/kernel/jobs')
+    expect(seen[0].body.subject_type).toBe('project')
+    expect(seen[0].body.subject_id).toBe(3)
+    expect(seen[0].body.verb).toBe('write_continue')
+    expect(seen[0].body.verb_params.count).toBe(2)
+    expect(seen[0].body.verb_params.from_chapter_no).toBe(2)
+  })
 })

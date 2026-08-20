@@ -50,17 +50,23 @@ export function createKernelJobApi(request: KernelRequest) {
       modelId: number
       verb: string
       userBrief?: { title?: string; genre?: string; idea?: string; length_target?: string; constraints?: string }
+      subjectType?: 'chapter' | 'project'
+      subjectId?: number
+      verbParams?: Record<string, unknown>
     }): Promise<{ ok: true; jobId: string } | KernelApiError> {
       const body: Record<string, unknown> = {
         project_id: input.projectId,
-        subject_type: 'chapter',
-        subject_id: input.chapterId,
+        subject_type: input.subjectType || 'chapter',
+        subject_id: input.subjectType === 'project'
+          ? Number(input.subjectId || input.projectId)
+          : input.chapterId,
         verb: input.verb,
         model_id: input.modelId,
       }
       if (input.userBrief && String(input.userBrief.length_target || '').trim()) {
         body.user_brief = input.userBrief
       }
+      if (input.verbParams) body.verb_params = input.verbParams
       const { status, data } = await request('POST', '/kernel/jobs', body)
       const jobId = String(data?.job?.id || '')
       if (status >= 200 && status < 300 && jobId) return { ok: true, jobId }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildChapterWorkflowPresenter,
   buildWorkflowSteps,
+  firstEmptyChapterNoAfter,
   resolveChapterWorkflowPhase,
 } from './chapter-workflow-presenter'
 
@@ -116,5 +117,65 @@ describe('chapter workflow presenter', () => {
     })
     expect(model.primaryAction.key).toBe('repair_generate')
     expect(model.reasonText).toContain('强交接')
+  })
+
+  test('has-prose phases offer 续写 in secondaryActions', () => {
+    const phases = [
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'needs_quality_check',
+      }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'needs_revision',
+      }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'needs_state_sync',
+        storyStateSynced: false,
+      }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'ready_to_accept',
+        storyStateSynced: true,
+      }),
+    ]
+    for (const model of phases) {
+      expect(model.secondaryActions.some(a => a.key === 'write_continue' && a.label === '续写')).toBe(true)
+    }
+  })
+
+  test('empty chapter does not offer 续写', () => {
+    const model = buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: true })
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('write_continue')
+  })
+
+  test('blocked materials and failed admission do not offer 续写', () => {
+    const blocked = buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: false })
+    const failed = buildChapterWorkflowPresenter({
+      hasChapter: true,
+      hasProse: false,
+      admissionStatus: 'blocked_invalid',
+    })
+    expect(blocked.secondaryActions.map(item => item.key)).not.toContain('write_continue')
+    expect(failed.secondaryActions.map(item => item.key)).not.toContain('write_continue')
+  })
+
+  test('firstEmptyChapterNoAfter returns the next empty chapter after current', () => {
+    expect(firstEmptyChapterNoAfter([
+      { chapter_no: 1, chapter_text: '已写', word_count: 80 },
+      { chapter_no: 2, chapter_text: '', word_count: 0 },
+    ], 1)).toBe(2)
+  })
+
+  test('firstEmptyChapterNoAfter returns null when no later chapter is empty', () => {
+    expect(firstEmptyChapterNoAfter([
+      { chapter_no: 1, chapter_text: '已写', word_count: 80 },
+      { chapter_no: 2, chapter_text: '也写了', word_count: 40 },
+    ], 1)).toBeNull()
   })
 })

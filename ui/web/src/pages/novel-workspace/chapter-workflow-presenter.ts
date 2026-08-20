@@ -1,5 +1,6 @@
 /** Single source of truth for chapter writing closed-loop UI. */
 import type { WritingCockpitActionKey } from './writingCockpitModel'
+import { chapterHasProse } from './utils'
 
 export type ChapterWorkflowPhase =
   | 'empty'
@@ -12,7 +13,7 @@ export type ChapterWorkflowPhase =
   | 'failed_admission'
 
 export type ChapterWorkflowAction = {
-  key: WritingCockpitActionKey | 'generate' | 'repair_generate' | 'open_versions' | 'view_quality' | 'view_brief'
+  key: WritingCockpitActionKey | 'generate' | 'repair_generate' | 'open_versions' | 'view_quality' | 'view_brief' | 'write_continue'
   label: string
   kind?: 'primary' | 'default' | 'ghost' | 'danger'
 }
@@ -207,6 +208,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         : '正文已具备。先同步故事状态，质检修订请用下方 oh-story。',
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
+        { key: 'write_continue', label: '续写', kind: 'default' },
         { key: 'generate', label: '回炉', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -222,6 +224,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
         : '旧质检仍标了待修订。先同步故事状态，改稿请用下方 oh-story。',
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
+        { key: 'write_continue', label: '续写', kind: 'default' },
         { key: 'view_quality', label: '查看问题', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -235,6 +238,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       reasonText: '质检已过，但故事状态机尚未同步。现在写下一章可能继续漂移。',
       primaryAction: { key: 'sync_story_state', label: '同步故事状态', kind: 'primary' },
       secondaryActions: [
+        { key: 'write_continue', label: '续写', kind: 'default' },
         { key: 'view_quality', label: '查看状态差', kind: 'ghost' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -247,9 +251,21 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
     reasonText: '本章闭环完成。可以进入下一章，或回看版本。',
     primaryAction: { key: 'accept_chapter_and_continue', label: '写下一章', kind: 'primary' },
     secondaryActions: [
+      { key: 'write_continue', label: '续写', kind: 'default' },
       { key: 'open_versions', label: '版本', kind: 'ghost' },
       { key: 'view_quality', label: '回看质检', kind: 'ghost' },
     ],
     panelToOpen: 'version',
   }
+}
+
+export function firstEmptyChapterNoAfter(
+  chapters: Array<{ chapter_no?: number; chapter_text?: string; word_count?: number }>,
+  currentNo: number,
+): number | null {
+  const nos = chapters
+    .filter(ch => Number(ch.chapter_no || 0) > currentNo && !chapterHasProse(ch))
+    .map(ch => Number(ch.chapter_no))
+    .sort((a, b) => a - b)
+  return nos[0] ?? null
 }
