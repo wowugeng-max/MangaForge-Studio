@@ -16,6 +16,8 @@ import {
 } from '../useChapterAutosave'
 import { useChapterWriteJob } from './use-chapter-write-job'
 import { useChapterRewriteJob } from './use-chapter-rewrite-job'
+import { useProjectContinueJob } from './use-project-continue-job'
+import { firstEmptyChapterNoAfter } from '../chapter-workflow-presenter'
 import {
   useChapterVersions,
 } from '../useChapterVersions'
@@ -644,6 +646,18 @@ export function useNovelWorkspaceBaseModel() {
     chapterWordTargetPayload,
   })
 
+  const continueJob = useProjectContinueJob({
+    apiClient,
+    projectId: Number(projectId || 0),
+    modelId: Number(selectedModelId || 0),
+    flushPendingSave,
+    loadProjectModules: async () => {
+      await loadProjectModules()
+    },
+    chapterWordTargetPayload,
+    isAuthorWriteBusy: () => writeJob.state.phase === 'running' || rewriteJob.state.phase !== 'idle',
+  })
+
   const writeJobWasRunningRef = useRef(false)
   useEffect(() => {
     if (writeJob.state.phase === 'running') {
@@ -677,6 +691,23 @@ export function useNovelWorkspaceBaseModel() {
     setStreamingProgress(rewriteJob.state.phase === 'failed' ? '生成失败' : '')
   }, [rewriteJob.state, setGeneratingProse, setStreamingChapterId, setStreamingPercent, setStreamingProgress])
 
+  const continueJobWasRunningRef = useRef(false)
+  useEffect(() => {
+    if (continueJob.state.phase === 'running') {
+      continueJobWasRunningRef.current = true
+      setGeneratingProse(true)
+      if (activeChapter?.id) setStreamingChapterId(activeChapter.id)
+      setStreamingProgress(continueJob.state.hint || '正在续写…')
+      return
+    }
+    if (!continueJobWasRunningRef.current) return
+    continueJobWasRunningRef.current = false
+    setGeneratingProse(false)
+    setStreamingChapterId(null)
+    setStreamingPercent(0)
+    setStreamingProgress(continueJob.state.phase === 'failed' ? '生成失败' : '')
+  }, [continueJob.state, activeChapter?.id, setGeneratingProse, setStreamingChapterId, setStreamingPercent, setStreamingProgress])
+
   const rewriteSelection = rewriteJob.state.phase === 'awaiting_selection'
     ? {
         chapterId: rewriteJob.state.chapterId,
@@ -686,6 +717,23 @@ export function useNovelWorkspaceBaseModel() {
         onCancel: rewriteJob.cancel,
       }
     : null
+
+  const onWriteContinue = () => {
+    if (!activeChapter) {
+      message.warning('请先选择章节')
+      return
+    }
+    const from = firstEmptyChapterNoAfter(sortedChapters, Number(activeChapter.chapter_no || 0))
+    if (from == null) {
+      message.warning('后面没有空章')
+      return
+    }
+    void continueJob.start({ fromChapterNo: from, count: 2 })
+  }
+
+  const onCancelContinue = () => {
+    void continueJob.cancel()
+  }
 
   const selectChapterForWriting = async (chapterId: number) => {
     const saved = await selectChapter(chapterId)
@@ -1168,6 +1216,9 @@ export function useNovelWorkspaceBaseModel() {
     generateWritingBibleEditor,
     generatingProse,
     rewriteSelection,
+    onWriteContinue,
+    onCancelContinue,
+    continueJob,
     generatingSceneCards,
     generationPipeline,
     handleDirectoryCollapsedChange,

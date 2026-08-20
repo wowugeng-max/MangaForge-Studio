@@ -109,6 +109,8 @@ export function WorkspaceCenter({
   onOpenReferenceConfig,
   onOpenWritingBibleEditor,
   onGenerateCurrentChapterProse,
+  onWriteContinue = () => {},
+  onCancelContinue,
   onRepairAndGenerateCurrentChapter,
   onGenerateSceneCards,
   onBuildPreDraftBrief,
@@ -208,6 +210,8 @@ export function WorkspaceCenter({
   onOpenReferenceConfig: () => void
   onOpenWritingBibleEditor: () => void
   onGenerateCurrentChapterProse: () => void
+  onWriteContinue?: () => void
+  onCancelContinue?: () => void
   onRepairAndGenerateCurrentChapter: () => void
   onGenerateSceneCards: () => void
   onBuildPreDraftBrief?: () => void
@@ -600,6 +604,10 @@ export function WorkspaceCenter({
     generatingProse || deliveryActionLoading || preDraftBriefLoading || editorReportLoading,
   )
   const runChapterWorkflowAction = (key: string) => {
+    if (key === 'write_continue') {
+      onWriteContinue()
+      return
+    }
     if (key === 'generate') {
       onGenerateCurrentChapterProse()
       return
@@ -849,6 +857,7 @@ export function WorkspaceCenter({
                 onApplyEditorRevision: () => runChapterWorkflowAction('apply_editor_revision'),
                 onSyncStoryState: () => runChapterWorkflowAction('sync_story_state'),
                 onAcceptAndContinue: () => runChapterWorkflowAction('accept_chapter_and_continue'),
+                onWriteContinue: () => runChapterWorkflowAction('write_continue'),
                 onOpenStoryAssets: () => runChapterWorkflowAction('open_story_assets'),
                 onOpenDiagnostics: () => runChapterWorkflowAction('open_generation_diagnostics'),
                 onOpenVersions: () => runChapterWorkflowAction('open_versions'),
@@ -879,6 +888,7 @@ export function WorkspaceCenter({
                       icon={<StopOutlined />}
                       onClick={() => {
                         proseStreamControl.cancel()
+                        onCancelContinue?.()
                         // local UI unlock immediately even if request is mid-flight
                         // handlers also clear state on abort
                       }}

@@ -626,4 +626,52 @@ describe('commercial writing workspace UI shell a a', () => {
     expect(check(1)).toBe(false)
   })
 
+  test('wires 续写 from the chapter more menu without changing 写下一章', () => {
+    const actionBar = source('workspace-center-chapter-action-bar.tsx')
+    const center = source('WorkspaceCenter.tsx')
+    const actionHandlers = source('shell/workspace-action-handlers.tsx')
+    const presenter = source('chapter-workflow-presenter.ts')
+    const baseModel = source('shell/use-novel-workspace-base-model.tsx')
+    const areaView = source('shell/workspace-area-view.tsx')
+    const readyRuntime = source('shell/build-novel-workspace-ready-runtime.tsx')
+    const areaProps = source('shell/workspace-view-props-area.ts')
+
+    expect(actionBar).toContain('write_continue')
+    expect(workspaceCenterSource()).toContain('onWriteContinue')
+    expect(workspaceCenterSource()).toContain('write_continue')
+    expect(center).toContain('onWriteContinue')
+    expect(center).toContain("if (key === 'write_continue')")
+    const continueIdx = center.indexOf("if (key === 'write_continue')")
+    const generateIdx = center.indexOf("if (key === 'generate')")
+    expect(continueIdx).toBeGreaterThan(-1)
+    expect(continueIdx).toBeLessThan(generateIdx)
+    expect(center).toContain("onWriteContinue: () => runChapterWorkflowAction('write_continue')")
+    expect(center).toContain('onCancelContinue')
+
+    expect(actionHandlers).not.toContain('write_continue')
+    const acceptStart = actionHandlers.indexOf('const acceptCockpitChapterAndContinue')
+    const acceptEnd = actionHandlers.indexOf('const handleWritingCockpitAction')
+    const acceptBody = actionHandlers.slice(acceptStart, acceptEnd)
+    expect(acceptStart).toBeGreaterThan(-1)
+    expect(acceptBody).not.toContain('write_continue')
+    expect(acceptBody).not.toContain('/kernel/jobs')
+
+    const emptyBlock = presenter.slice(
+      presenter.indexOf("if (phase === 'empty')"),
+      presenter.indexOf("if (phase === 'written_unchecked'"),
+    )
+    expect(emptyBlock).toContain("phase === 'empty'")
+    expect(emptyBlock).not.toContain("'write_continue'")
+
+    expect(baseModel).toContain('useProjectContinueJob')
+    expect(baseModel).toContain('onWriteContinue')
+    expect(baseModel).toContain('onCancelContinue')
+    expect(areaView).toContain('onWriteContinue={onWriteContinue}')
+    expect(areaView).toContain('onCancelContinue')
+    expect(readyRuntime).toContain('onWriteContinue')
+    expect(readyRuntime).toContain('onCancelContinue')
+    expect(areaProps).toContain('onWriteContinue')
+    expect(areaProps).toContain('onCancelContinue')
+  })
+
 })
