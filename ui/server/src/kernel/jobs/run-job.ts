@@ -2,8 +2,9 @@
 import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { loadOhStoryCoreSuite } from '../../novel-writing/oh-story-core/store'
-import { getNovelChapter, listNovelOutlines } from '../../novel'
+import { getNovelChapter, listNovelChapters, listNovelOutlines } from '../../novel'
 import { chapterHasMatchingOutline, chapterTextHasProse } from './write-chapter-precheck'
+import { parseWriteContinueParams, writeContinueWindow } from './write-continue-params'
 import { readKernelEvents } from '../codex/events'
 import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
@@ -50,7 +51,7 @@ const liveJobs = new Map<string, LiveJobState>()
 
 export async function validateCreateKernelJob(
   ws: string, body: CreateKernelJobBody, opts: { skipRuntimeCheck?: boolean } = {},
-): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project' } | CreateKernelJobError> {
+): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project'; verbParamsJson: string } | CreateKernelJobError> {
   if (!opts.skipRuntimeCheck) {
     const binary = await checkKernelBinary(loadKernelRuntime(ws))
     if (!binary.ok) return { ok: false, status: 503, code: 'KERNEL_RUNTIME_UNAVAILABLE', message: binary.message }
@@ -87,6 +88,7 @@ export async function validateCreateKernelJob(
     return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: 'project 主体要求 subject_id == project_id' }
   }
   let briefJson = ''
+  let verbParamsJson = JSON.stringify(body.verb_params || {})
   if (verb === 'open_book') {
     const brief = body.user_brief
     if (!brief || !String(brief.idea || '').trim()) {
@@ -137,6 +139,31 @@ export async function validateCreateKernelJob(
       }
     }
   }
+  if (verb === 'write_continue') {
+    const parsed = parseWriteContinueParams(body.verb_params)
+    if (!parsed.ok) return { ok: false, status: 400, code: parsed.code, message: parsed.message }
+    const chapters = await listNovelChapters(ws, body.project_id)
+    const outlines = await listNovelOutlines(ws, body.project_id)
+    for (const no of writeContinueWindow(parsed.value.from_chapter_no, parsed.value.count)) {
+      const chapter = chapters.find((row: any) => Number(row.chapter_no) === no)
+      if (!chapter) {
+        return { ok: false, status: 400, code: 'CHAPTER_NOT_FOUND', message: `找不到第 ${no} 章` }
+      }
+      if (chapterTextHasProse(String(chapter.chapter_text || ''))) {
+        return { ok: false, status: 400, code: 'CHAPTER_HAS_PROSE', message: `第 ${no} 章已有正文` }
+      }
+      if (!chapterHasMatchingOutline(chapter, outlines)) {
+        return { ok: false, status: 400, code: 'OUTLINE_MISSING', message: `第 ${no} 章还没有细纲` }
+      }
+    }
+    if (body.user_brief) {
+      briefJson = JSON.stringify(body.user_brief)
+      if (Buffer.byteLength(briefJson, 'utf8') > 32 * 1024) {
+        return { ok: false, status: 400, code: 'BRIEF_REQUIRED', message: '创意超过 32KiB 上限' }
+      }
+    }
+    verbParamsJson = JSON.stringify(parsed.value)
+  }
   const dedupe = template.subject_type === 'project'
     ? { projectId: body.project_id, verb }
     : { projectId: body.project_id, verb, subjectId: body.subject_id }
@@ -152,7 +179,7 @@ export async function validateCreateKernelJob(
     supportsChatWireApi: loadKernelRuntime(ws).supports_chat_wire_api,
   })
   if (!translated.ok) return { ok: false, status: 400, code: 'PROVIDER_TRANSLATE_FAILED', message: translated.message }
-  return { ok: true, contracts: selected, providerId: String(provider.id), verb, briefJson, subjectType: template.subject_type }
+  return { ok: true, contracts: selected, providerId: String(provider.id), verb, briefJson, subjectType: template.subject_type, verbParamsJson }
 }
 
 export async function createAndRunKernelJob(
@@ -172,7 +199,7 @@ export async function createAndRunKernelJob(
     status: 'queued', capability: validated.contracts[0].capability, subject_type: validated.subjectType,
     subject_id: body.subject_id, model_provider_id: validated.providerId, model_id: body.model_id,
     error_code: '', error_message: '',
-    verb: validated.verb, verb_params: JSON.stringify(body.verb_params || {}), subject_key: '', brief_json: validated.briefJson,
+    verb: validated.verb, verb_params: validated.verbParamsJson, subject_key: '', brief_json: validated.briefJson,
   })
   const candidateIds: string[] = []
   for (const contract of validated.contracts) {
