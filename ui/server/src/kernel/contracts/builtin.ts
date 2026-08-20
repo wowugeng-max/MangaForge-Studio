@@ -253,7 +253,42 @@ const longWriteRewrite: KernelContract = {
   approval: 'never',
 }
 
-export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen, longWriteExpand, longWriteChapter, longWriteRewrite]
+const longWriteContinue: KernelContract = {
+  schema_version: 1,
+  id: 'oh-story-core.story-long-write.continue',
+  pack_id: 'oh-story-core',
+  skill_name: 'story-long-write',
+  variant: 'continue',
+  verb: 'write_continue',
+  capability: 'rewrite',
+  label: '续写',
+  invoke: {
+    mention: '$story-long-write',
+    prompt: [
+      '续写第 {{chapter_no}} 章（{{chapter_title}}）。',
+      '从上一章 {{previous_chapter_file}} 接着写；写完后做 Phase 5 检查，然后停止。',
+      '只改 {{scope_files}}（窗口内正文）。可以更新 追踪/ 下与这些章相关的记录。',
+      '不要开书，不要扩纲，不要修改 大纲/，不要写窗口以外的 正文/ 文件，不要改 参考/。',
+      '字数目标见 {{user_brief_file}} 的「体量」一行；体量为（未定）时按 skill 单章字数规范执行。',
+      '不要把正文只写在回复里，必须写回目标文件。',
+    ].join('\n'),
+  },
+  projection: {
+    mounts: ['continue_window', 'continue_previous', 'outline', 'world', 'characters', 'tracking', 'skill_tree', 'agents', 'user_brief'],
+  },
+  outputs: [
+    { artifact_kind: 'chapter_text', glob: '正文/第*.md', binding: 'chapters.rewrite', required: true },
+    { artifact_kind: 'tracking_doc', glob: '追踪/**/*.md', binding: 'kernel_only', required: false },
+  ],
+  write_scope: ['正文/', '追踪/'],
+  ignore: ['.story-review/'],
+  gates: ['require_chapter_file', 'reject_outline_artifact'],
+  commit: { mode: 'auto_if_single', domain_writes: ['chapters', 'chapter_versions'], source: 'oh_story_continue' },
+  sandbox: 'workspace-write',
+  approval: 'never',
+}
+
+export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen, longWriteExpand, longWriteChapter, longWriteRewrite, longWriteContinue]
 
 export function isBuiltinKernelContractId(id: string): boolean {
   return BUILTIN_KERNEL_CONTRACTS.some(contract => contract.id === id)

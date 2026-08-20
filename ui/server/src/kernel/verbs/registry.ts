@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { validateVerbTemplate, type VerbTemplate } from './schema'
 
 export const IMPLEMENTED_VERBS = [
-  'open_book', 'review_chapter', 'apply_review', 'deslop_chapter', 'expand_outline', 'write_chapter', 'rewrite_chapter',
+  'open_book', 'review_chapter', 'apply_review', 'deslop_chapter', 'expand_outline', 'write_chapter', 'rewrite_chapter', 'write_continue',
 ] as const
 
 const TEMPLATES_DIR = join(import.meta.dir, 'templates')

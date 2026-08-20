@@ -105,6 +105,19 @@ describe('instance vs template validation', () => {
     const legacy = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.outline')!
     expect(resolveContractVerb(legacy)).toBeNull()
   })
+  test('write_continue instance is project auto_if_single oh_story_continue without chapter mounts', () => {
+    const cont = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.continue')!
+    expect(resolveContractVerb(cont)).toBe('write_continue')
+    expect(validateInstanceAgainstTemplate(cont)).toEqual({ ok: true })
+    expect(cont.commit.mode).toBe('auto_if_single')
+    expect(cont.commit.source).toBe('oh_story_continue')
+    expect(cont.gates).toEqual(['require_chapter_file', 'reject_outline_artifact'])
+    expect(cont.projection.mounts).toContain('continue_window')
+    expect(cont.projection.mounts.includes('current_chapter')).toBe(false)
+    expect(cont.outputs[0].glob).toBe('正文/第*.md')
+    expect(cont.invoke.prompt).toContain('续写第')
+    expect(cont.invoke.prompt).toContain('不要开书')
+  })
   test('instance commit mode must match the template commit_mode', () => {
     const expand = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')!
     const auto = { ...expand, commit: { ...expand.commit, mode: 'auto_if_single' } }

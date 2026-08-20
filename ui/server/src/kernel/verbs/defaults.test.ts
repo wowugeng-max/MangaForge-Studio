@@ -20,6 +20,7 @@ describe('verb defaults', () => {
     expect(defaults.expand_outline).toEqual(['oh-story-core.story-long-write.expand'])
     expect(defaults.write_chapter).toEqual(['oh-story-core.story-long-write.chapter'])
     expect(defaults.rewrite_chapter).toEqual(['oh-story-core.story-long-write.rewrite'])
+    expect(defaults.write_continue).toEqual(['oh-story-core.story-long-write.continue'])
     const onDisk = JSON.parse(readFileSync(join(ws, '.mangaforge/kernel/verb-defaults.json'), 'utf8'))
     expect(onDisk.open_book).toEqual(['oh-story-core.story-long-write.open'])
     expect(onDisk.expand_outline).toEqual(['oh-story-core.story-long-write.expand'])
@@ -49,6 +50,7 @@ describe('verb defaults', () => {
       expand_outline: ['oh-story-core.story-long-write.expand'],
       write_chapter: ['oh-story-core.story-long-write.chapter'],
       rewrite_chapter: ['oh-story-core.story-long-write.rewrite'],
+      write_continue: ['oh-story-core.story-long-write.continue'],
     })
   })
   test('keeps a valid array of contract ids', () => {
@@ -84,5 +86,14 @@ describe('verb defaults', () => {
     const defaults = loadVerbDefaults(ws)
     expect(defaults.review_chapter).toEqual(['my-pack.my-review.v1'])
     expect(defaults.rewrite_chapter).toEqual(['oh-story-core.story-long-write.rewrite'])
+  })
+  test('fills missing write_continue without overwriting user review_chapter', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'verb-defaults-fill-continue-'))
+    writeDefaults(ws, JSON.stringify({
+      review_chapter: ['my-pack.my-review.v1'],
+    }))
+    const defaults = loadVerbDefaults(ws)
+    expect(defaults.review_chapter).toEqual(['my-pack.my-review.v1'])
+    expect(defaults.write_continue).toEqual(['oh-story-core.story-long-write.continue'])
   })
 })

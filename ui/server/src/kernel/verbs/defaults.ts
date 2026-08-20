@@ -10,6 +10,7 @@ const BUILTIN_DEFAULTS: Record<string, string[]> = {
   expand_outline: ['oh-story-core.story-long-write.expand'],
   write_chapter: ['oh-story-core.story-long-write.chapter'],
   rewrite_chapter: ['oh-story-core.story-long-write.rewrite'],
+  write_continue: ['oh-story-core.story-long-write.continue'],
 }
 
 function defaultsPath(ws: string): string {

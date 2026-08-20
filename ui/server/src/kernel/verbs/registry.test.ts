@@ -30,10 +30,15 @@ describe('verb template registry', () => {
     expect(t.template_gates).toEqual(['require_chapter_file', 'require_matching_review', 'paragraph_retention_70'])
     expect(t.mention_policy).toBe('optional')
   })
-  test('implemented verbs are exactly the phase-1 set plus expand_outline and write_chapter', () => {
+  test('implemented verbs are exactly the phase-1 set plus expand_outline, write_chapter and write_continue', () => {
     expect([...IMPLEMENTED_VERBS].sort()).toEqual([
-      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'rewrite_chapter', 'write_chapter',
+      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'rewrite_chapter', 'write_chapter', 'write_continue',
     ])
+  })
+  test('write_continue template is project auto_if_single with reject_outline_artifact', () => {
+    expect(getVerbTemplate('write_continue')!.template_gates).toContain('reject_outline_artifact')
+    expect(getVerbTemplate('write_continue')!.commit_mode).toBe('auto_if_single')
+    expect(getVerbTemplate('write_continue')!.subject_type).toBe('project')
   })
   test('write_chapter template gates include reject_outline_artifact', () => {
     expect(getVerbTemplate('write_chapter')!.template_gates).toContain('reject_outline_artifact')
