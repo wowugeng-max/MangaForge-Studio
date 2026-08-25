@@ -74,6 +74,27 @@ describe('kernel job routes', () => {
     expect([404, 409]).toContain(commit.statusCode)
   })
 
+  test('GET /jobs lists adapt_pack by verb and subject_key', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'job-routes-'))
+    const project = await createNovelProject(ws, { title: '书' })
+    const { insertKernelJob } = await import('../kernel/jobs/repo')
+    insertKernelJob(ws, {
+      id: 'job-pack', project_id: project.id, workspace_scope: 'novel', title: '',
+      status: 'running', capability: 'attachment', subject_type: 'pack', subject_id: 0,
+      model_provider_id: '', model_id: null, error_code: '', error_message: '',
+      verb: 'adapt_pack', verb_params: '{"skill_id":"my-style"}', subject_key: 'my-style', brief_json: '',
+    })
+    insertKernelJob(ws, {
+      id: 'job-other', project_id: project.id, workspace_scope: 'novel', title: '',
+      status: 'running', capability: 'attachment', subject_type: 'pack', subject_id: 0,
+      model_provider_id: '', model_id: null, error_code: '', error_message: '',
+      verb: 'adapt_pack', verb_params: '{"skill_id":"other-style"}', subject_key: 'other-style', brief_json: '',
+    })
+    const handlers = routeHarness(ws)
+    const list = await callRoute(handlers.get('GET /api/kernel/jobs'), { query: { verb: 'adapt_pack', subject_key: 'my-style' } })
+    expect(list.body.jobs.map((job: any) => job.id)).toEqual(['job-pack'])
+  })
+
   test('artifact content endpoint reads vault file and 404s on unknown id', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'job-routes-'))
     const project = await createNovelProject(ws, { title: '书' })

@@ -39,6 +39,8 @@ export function registerKernelJobRoutes(app: Express, deps: KernelJobRoutesDeps)
         projectId: Number(query.project_id || 0) || undefined,
         subjectType: query.subject_type ? String(query.subject_type) : undefined,
         subjectId: Number(query.subject_id || 0) || undefined,
+        verb: query.verb ? String(query.verb) : undefined,
+        subjectKey: query.subject_key ? String(query.subject_key) : undefined,
       }),
     })
   })

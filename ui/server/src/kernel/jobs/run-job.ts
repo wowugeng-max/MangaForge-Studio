@@ -2,7 +2,10 @@
 import { readModels } from '../../model-store'
 import { readProviders } from '../../provider-store'
 import { loadOhStoryCoreSuite } from '../../novel-writing/oh-story-core/store'
-import { getNovelChapter, listNovelChapters, listNovelOutlines } from '../../novel'
+import { getNovelChapter, getNovelProject, listNovelChapters, listNovelOutlines } from '../../novel'
+import { writingSkillPacksRoot } from '../../novel-writing/writing-skills/installed-store'
+import { WRITING_SKILL_IDS } from '../../novel-writing/writing-skills/types'
+import { parseAdaptPackParams } from './adapt-pack-params'
 import { chapterHasMatchingOutline, chapterTextHasProse } from './write-chapter-precheck'
 import { parseWriteContinueParams, writeContinueWindow } from './write-continue-params'
 import { readKernelEvents } from '../codex/events'
@@ -25,14 +28,15 @@ import {
   listKernelJobsByStatuses, updateKernelCandidate, updateKernelJob,
 } from './repo'
 import { persistCandidateArtifacts } from './vault'
-import { readFileSync, rmSync } from 'node:fs'
-import { join as joinPath } from 'node:path'
+import { lstatSync, readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 
 export type CreateKernelJobBody = {
   project_id: number; subject_type: string; subject_id: number
   contract_ids?: string[]; model_id: number; title?: string
   verb?: string
   verb_params?: Record<string, unknown>
+  subject_key?: string
   user_brief?: { title?: string; genre?: string; idea?: string; length_target?: string; constraints?: string }
 }
 export type CreateKernelJobError = { ok: false; status: 400 | 409 | 503; code: string; message: string }
@@ -52,7 +56,7 @@ const liveJobs = new Map<string, LiveJobState>()
 
 export async function validateCreateKernelJob(
   ws: string, body: CreateKernelJobBody, opts: { skipRuntimeCheck?: boolean } = {},
-): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project'; verbParamsJson: string } | CreateKernelJobError> {
+): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project' | 'pack'; verbParamsJson: string } | CreateKernelJobError> {
   if (!opts.skipRuntimeCheck) {
     const binary = await checkKernelBinary(loadKernelRuntime(ws))
     if (!binary.ok) return { ok: false, status: 503, code: 'KERNEL_RUNTIME_UNAVAILABLE', message: binary.message }
@@ -82,14 +86,38 @@ export async function validateCreateKernelJob(
   if (body.subject_type !== template.subject_type) {
     return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: `动词 ${verb} 主体是 ${template.subject_type}` }
   }
-  if (template.subject_type === 'pack') {
-    return { ok: false, status: 400, code: 'CONTRACT_NOT_IMPLEMENTED', message: 'adapt_pack 第一期不执行' }
+  let briefJson = ''
+  let verbParamsJson = JSON.stringify(body.verb_params || {})
+  if (verb === 'adapt_pack') {
+    if (body.subject_type !== 'pack') {
+      return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: `动词 ${verb} 主体是 pack` }
+    }
+    if (Number(body.subject_id) !== 0) {
+      return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: 'pack 主体要求 subject_id == 0' }
+    }
+    if (!Number.isInteger(Number(body.project_id)) || Number(body.project_id) <= 0) {
+      return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: '适配必须挂当前项目' }
+    }
+    const project = await getNovelProject(ws, Number(body.project_id))
+    if (!project) return { ok: false, status: 400, code: 'CONTRACT_INVALID', message: '适配必须挂当前项目' }
+    const parsed = parseAdaptPackParams(body.verb_params, body.subject_key)
+    if (!parsed.ok) return { ok: false, status: 400, code: parsed.code, message: parsed.message }
+    const skillId = parsed.value.skill_id
+    if ((WRITING_SKILL_IDS as readonly string[]).includes(skillId) || skillId === 'oh-story-core') {
+      return { ok: false, status: 400, code: 'ADAPT_TARGET_INVALID', message: '不能适配内置写作 skill 或 oh-story-core' }
+    }
+    const skillMd = join(writingSkillPacksRoot(ws), skillId, 'SKILL.md')
+    let skillOk = false
+    try {
+      const st = lstatSync(skillMd)
+      skillOk = st.isFile() && !st.isSymbolicLink()
+    } catch { skillOk = false }
+    if (!skillOk) return { ok: false, status: 400, code: 'SKILL_NOT_FOUND', message: `未安装写作 skill ${skillId}` }
+    verbParamsJson = JSON.stringify(parsed.value)
   }
   if (template.subject_type === 'project' && Number(body.subject_id) !== Number(body.project_id)) {
     return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: 'project 主体要求 subject_id == project_id' }
   }
-  let briefJson = ''
-  let verbParamsJson = JSON.stringify(body.verb_params || {})
   if (verb === 'open_book') {
     const brief = body.user_brief
     if (!brief || !String(brief.idea || '').trim()) {
@@ -165,9 +193,11 @@ export async function validateCreateKernelJob(
     }
     verbParamsJson = JSON.stringify(parsed.value)
   }
-  const dedupe = template.subject_type === 'project'
-    ? { projectId: body.project_id, verb }
-    : { projectId: body.project_id, verb, subjectId: body.subject_id }
+  const dedupe = template.subject_type === 'pack'
+    ? { verb, subjectKey: String(body.subject_key || '') }
+    : template.subject_type === 'project'
+      ? { projectId: body.project_id, verb }
+      : { projectId: body.project_id, verb, subjectId: body.subject_id }
   if (hasActiveKernelJob(ws, dedupe)) {
     return { ok: false, status: 409, code: 'PROJECT_JOB_RUNNING', message: '同项目同动词任务未结束' }
   }
@@ -200,7 +230,7 @@ export async function createAndRunKernelJob(
     status: 'queued', capability: validated.contracts[0].capability, subject_type: validated.subjectType,
     subject_id: body.subject_id, model_provider_id: validated.providerId, model_id: body.model_id,
     error_code: '', error_message: '',
-    verb: validated.verb, verb_params: validated.verbParamsJson, subject_key: '', brief_json: validated.briefJson,
+    verb: validated.verb, verb_params: validated.verbParamsJson, subject_key: validated.subjectType === 'pack' ? String(body.subject_key || '') : '', brief_json: validated.briefJson,
   })
   const candidateIds: string[] = []
   for (const contract of validated.contracts) {
@@ -417,7 +447,7 @@ export function cleanupKernelJobDirs(ws: string, jobId: string): void {
     for (const candidate of detail?.candidates || []) {
       const dir = kernelJobDir(ws, `${jobId}/candidates/${candidate.id}`)
       for (const sub of ['project', 'codex-home']) {
-        try { rmSync(joinPath(dir, sub), { recursive: true, force: true }) } catch { /* 清理失败不得改账本状态 */ }
+        try { rmSync(join(dir, sub), { recursive: true, force: true }) } catch { /* 清理失败不得改账本状态 */ }
       }
     }
   } catch { /* 清理失败不得改账本状态 */ }

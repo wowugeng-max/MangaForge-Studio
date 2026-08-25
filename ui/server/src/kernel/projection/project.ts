@@ -24,7 +24,7 @@ export type ProjectKernelSubjectInput = {
   projectDir: string
   subjectType?: 'chapter' | 'project'
   briefJson?: string
-  verbParams?: { from_chapter_no: number; count: number }
+  verbParams?: Record<string, unknown>
 }
 
 function writeProjected(projectDir: string, relPath: string, content: string, files: string[]) {

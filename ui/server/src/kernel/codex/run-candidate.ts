@@ -23,9 +23,9 @@ export type RunKernelCandidateInput = {
   chapterId: number
   contract: KernelContract
   modelId: number
-  subjectType?: 'chapter' | 'project'
+  subjectType?: 'chapter' | 'project' | 'pack'
   briefJson?: string
-  verbParams?: { from_chapter_no: number; count: number }
+  verbParams?: Record<string, unknown>
   jobId?: string
   idleTimeoutMs?: number
   hardTimeoutMs?: number
