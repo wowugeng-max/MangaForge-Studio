@@ -50,8 +50,9 @@ export function createKernelJobApi(request: KernelRequest) {
       modelId: number
       verb: string
       userBrief?: { title?: string; genre?: string; idea?: string; length_target?: string; constraints?: string }
-      subjectType?: 'chapter' | 'project'
+      subjectType?: 'chapter' | 'project' | 'pack'
       subjectId?: number
+      subjectKey?: string
       verbParams?: Record<string, unknown>
     }): Promise<{ ok: true; jobId: string } | KernelApiError> {
       const body: Record<string, unknown> = {
@@ -59,10 +60,13 @@ export function createKernelJobApi(request: KernelRequest) {
         subject_type: input.subjectType || 'chapter',
         subject_id: input.subjectType === 'project'
           ? Number(input.subjectId || input.projectId)
-          : input.chapterId,
+          : input.subjectType === 'pack'
+            ? 0
+            : input.chapterId,
         verb: input.verb,
         model_id: input.modelId,
       }
+      if (input.subjectKey) body.subject_key = input.subjectKey
       if (input.userBrief && String(input.userBrief.length_target || '').trim()) {
         body.user_brief = input.userBrief
       }
@@ -113,6 +117,35 @@ export function createKernelJobApi(request: KernelRequest) {
         return { ok: true, contracts: Array.isArray(data.contracts) ? data.contracts : [] }
       }
       return { ok: false, message: String(data?.error || data?.message || 'CONTRACTS_UNAVAILABLE') }
+    },
+
+    async listJobs(filter: { projectId?: number; verb?: string; subjectKey?: string } = {}) {
+      const query = new URLSearchParams()
+      if (filter.projectId) query.set('project_id', String(filter.projectId))
+      if (filter.verb) query.set('verb', filter.verb)
+      if (filter.subjectKey) query.set('subject_key', filter.subjectKey)
+      const suffix = query.toString() ? `?${query.toString()}` : ''
+      const { status, data } = await request('GET', `/kernel/jobs${suffix}`)
+      if (status >= 200 && status < 300 && data?.ok) {
+        return { ok: true as const, jobs: Array.isArray(data.jobs) ? data.jobs : [] }
+      }
+      return fail(status, data)
+    },
+
+    async getVerbDefaults() {
+      const { status, data } = await request('GET', '/kernel/verb-defaults')
+      if (status >= 200 && status < 300 && data?.ok) {
+        return { ok: true as const, defaults: data.defaults || {} }
+      }
+      return fail(status, data)
+    },
+
+    async putVerbDefaults(defaults: Record<string, string[]>) {
+      const { status, data } = await request('PUT', '/kernel/verb-defaults', { defaults })
+      if (status >= 200 && status < 300 && data?.ok) {
+        return { ok: true as const, defaults: data.defaults || defaults }
+      }
+      return fail(status, data)
     },
   }
 }

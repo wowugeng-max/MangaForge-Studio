@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { CHAPTER_KERNEL_VERBS, createKernelJobApi } from './client'
 
 function fakeRequest(handler: (method: string, path: string, body?: any) => { status: number; data: any }) {
-  return async (method: 'GET' | 'POST', path: string, body?: unknown) => handler(method, path, body)
+  return async (method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown) => handler(method, path, body)
 }
 
 describe('createKernelJobApi', () => {
@@ -148,5 +148,65 @@ describe('createKernelJobApi', () => {
     expect(seen[0].body.verb).toBe('write_continue')
     expect(seen[0].body.verb_params.count).toBe(2)
     expect(seen[0].body.verb_params.from_chapter_no).toBe(2)
+  })
+
+  test('createJobByVerb posts adapt_pack as a pack subject with skill_id', async () => {
+    const seen: any[] = []
+    const api = createKernelJobApi(fakeRequest((method, path, body) => {
+      seen.push({ method, path, body })
+      return { status: 202, data: { ok: true, job: { id: 'job-p', status: 'queued' } } }
+    }))
+    const result = await api.createJobByVerb({
+      projectId: 3,
+      chapterId: 0,
+      modelId: 7,
+      verb: 'adapt_pack',
+      subjectType: 'pack',
+      subjectKey: 'my-style',
+      verbParams: { skill_id: 'user.my-style' },
+    })
+    expect(result).toEqual({ ok: true, jobId: 'job-p' })
+    expect(seen[0].method).toBe('POST')
+    expect(seen[0].path).toBe('/kernel/jobs')
+    expect(seen[0].body.subject_type).toBe('pack')
+    expect(seen[0].body.subject_id).toBe(0)
+    expect(seen[0].body.subject_key).toBe('my-style')
+    expect(seen[0].body.verb).toBe('adapt_pack')
+    expect(seen[0].body.verb_params.skill_id).toBe('user.my-style')
+  })
+
+  test('listJobs GETs jobs filtered by verb and subject_key', async () => {
+    const seen: string[] = []
+    const api = createKernelJobApi(fakeRequest((method, path) => {
+      seen.push(`${method} ${path}`)
+      return { status: 200, data: { ok: true, jobs: [{ id: 'job-p', verb: 'adapt_pack' }] } }
+    }))
+    const result = await api.listJobs({ verb: 'adapt_pack', subjectKey: 'my-style' })
+    expect(result).toEqual({ ok: true, jobs: [{ id: 'job-p', verb: 'adapt_pack' }] })
+    expect(seen[0]).toBe('GET /kernel/jobs?verb=adapt_pack&subject_key=my-style')
+  })
+
+  test('getVerbDefaults GETs /kernel/verb-defaults', async () => {
+    const seen: string[] = []
+    const api = createKernelJobApi(fakeRequest((method, path) => {
+      seen.push(`${method} ${path}`)
+      return { status: 200, data: { ok: true, defaults: { write_chapter: ['user.my-style'] } } }
+    }))
+    const result = await api.getVerbDefaults()
+    expect(result).toEqual({ ok: true, defaults: { write_chapter: ['user.my-style'] } })
+    expect(seen[0]).toBe('GET /kernel/verb-defaults')
+  })
+
+  test('putVerbDefaults PUTs defaults to /kernel/verb-defaults', async () => {
+    const seen: any[] = []
+    const api = createKernelJobApi(fakeRequest((method, path, body) => {
+      seen.push({ method, path, body })
+      return { status: 200, data: { ok: true, defaults: { write_chapter: ['user.my-style'] } } }
+    }))
+    const result = await api.putVerbDefaults({ write_chapter: ['user.my-style'] })
+    expect(result).toEqual({ ok: true, defaults: { write_chapter: ['user.my-style'] } })
+    expect(seen[0].method).toBe('PUT')
+    expect(seen[0].path).toBe('/kernel/verb-defaults')
+    expect(seen[0].body).toEqual({ defaults: { write_chapter: ['user.my-style'] } })
   })
 })

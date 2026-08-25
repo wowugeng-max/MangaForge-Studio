@@ -7,7 +7,7 @@ export const CHAPTER_KERNEL_VERBS: Record<KernelJobAction, string> = {
 }
 
 export type KernelRequest = (
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'PUT',
   path: string,
   body?: unknown,
 ) => Promise<{ status: number; data: any }>
@@ -31,13 +31,14 @@ export type KernelJobProgress = {
 
 export type KernelJobDetail = {
   ok: boolean
-  job: { id: string; status: string; error_code?: string; verb?: string }
+  job: { id: string; status: string; error_code?: string; verb?: string; subject_key?: string }
   candidates: Array<{
     id: string
     contract_id: string
     status: string
     error_code?: string
     last_message_excerpt?: string
+    metadata?: string
   }>
   artifacts: Array<{
     id: string

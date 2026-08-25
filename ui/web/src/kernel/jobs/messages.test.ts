@@ -35,4 +35,23 @@ describe('kernelJobUserMessage', () => {
       text: '续写参数无效',
     })
   })
+
+  test('maps adapt_pack gate codes to toast copy', () => {
+    expect(kernelJobUserMessage('ADAPT_TARGET_INVALID')).toEqual({
+      kind: 'warning',
+      text: '不能适配内置写作 skill 或 oh-story',
+    })
+    expect(kernelJobUserMessage('SKILL_NOT_FOUND')).toEqual({
+      kind: 'warning',
+      text: '还没有安装这份写作 skill',
+    })
+    expect(kernelJobUserMessage('ADAPT_NO_VALID_CONTRACT')).toEqual({
+      kind: 'warning',
+      text: '这份 skill 填不满工作台合同',
+    })
+    expect(kernelJobUserMessage('PROJECT_JOB_RUNNING')).toEqual({
+      kind: 'warning',
+      text: '同项目同动词任务未结束',
+    })
+  })
 })
