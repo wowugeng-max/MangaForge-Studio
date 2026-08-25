@@ -33,10 +33,25 @@ export function insertKernelJob(ws: string, row: Omit<KernelJobRow, 'created_at'
   `).run(row.id, row.project_id, row.workspace_scope, row.title, row.status, row.capability, row.subject_type, row.subject_id, row.model_provider_id, row.model_id, row.error_code, row.error_message, row.verb, row.verb_params, row.subject_key, row.brief_json))
 }
 
-export function hasActiveKernelJob(ws: string, filter: { projectId: number; verb: string; subjectId?: number }): boolean {
-  const where = ['project_id = ?', 'verb = ?', "status IN ('queued','running','awaiting_selection')"]
-  const values: any[] = [filter.projectId, filter.verb]
-  if (filter.subjectId !== undefined) { where.push('subject_id = ?'); values.push(filter.subjectId) }
+export function hasActiveKernelJob(ws: string, filter: {
+  verb: string
+  projectId?: number
+  subjectId?: number
+  subjectKey?: string
+}): boolean {
+  const where = ['verb = ?', "status IN ('queued','running','awaiting_selection')"]
+  const values: any[] = [filter.verb]
+  if (filter.subjectKey !== undefined) {
+    where.push('subject_key = ?')
+    values.push(filter.subjectKey)
+  } else {
+    where.push('project_id = ?')
+    values.push(filter.projectId)
+    if (filter.subjectId !== undefined) {
+      where.push('subject_id = ?')
+      values.push(filter.subjectId)
+    }
+  }
   return withDb(ws, db => !!db.query(`SELECT id FROM kernel_jobs WHERE ${where.join(' AND ')} LIMIT 1`).get(...values))
 }
 
@@ -105,12 +120,20 @@ export function getKernelJobDetail(ws: string, jobId: string) {
   })
 }
 
-export function listKernelJobs(ws: string, filter: { projectId?: number; subjectType?: string; subjectId?: number }): KernelJobRow[] {
+export function listKernelJobs(ws: string, filter: {
+  projectId?: number
+  subjectType?: string
+  subjectId?: number
+  verb?: string
+  subjectKey?: string
+}): KernelJobRow[] {
   const where: string[] = []
   const values: any[] = []
   if (filter.projectId) { where.push('project_id = ?'); values.push(filter.projectId) }
   if (filter.subjectType) { where.push('subject_type = ?'); values.push(filter.subjectType) }
   if (filter.subjectId) { where.push('subject_id = ?'); values.push(filter.subjectId) }
+  if (filter.verb) { where.push('verb = ?'); values.push(filter.verb) }
+  if (filter.subjectKey) { where.push('subject_key = ?'); values.push(filter.subjectKey) }
   const clause = where.length ? `WHERE ${where.join(' AND ')}` : ''
   return withDb(ws, db => db.query(`SELECT * FROM kernel_jobs ${clause} ORDER BY created_at DESC, id DESC LIMIT 50`).all(...values) as KernelJobRow[])
 }

@@ -88,4 +88,21 @@ describe('kernel jobs repo', () => {
     expect(hasActiveKernelJob(ws, { projectId: project.id, verb: 'review_chapter', subjectId: 63 })).toBe(false)
     expect(hasActiveKernelJob(ws, { projectId: project.id, verb: 'open_book' })).toBe(false)
   })
+
+  test('hasActiveKernelJob pack occupancy is workspace-wide by subject_key', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-pack-repo-'))
+    const a = await createNovelProject(ws, { title: 'A' })
+    const b = await createNovelProject(ws, { title: 'B' })
+    insertKernelJob(ws, {
+      id: 'job-pack', project_id: a.id, workspace_scope: 'novel', title: '', status: 'running',
+      capability: 'attachment', subject_type: 'pack', subject_id: 0, model_provider_id: '', model_id: null,
+      error_code: '', error_message: '', verb: 'adapt_pack', verb_params: '{"skill_id":"my-style"}',
+      subject_key: 'my-style', brief_json: '',
+    })
+    expect(hasActiveKernelJob(ws, { verb: 'adapt_pack', subjectKey: 'my-style' })).toBe(true)
+    expect(hasActiveKernelJob(ws, { verb: 'adapt_pack', subjectKey: 'other-style' })).toBe(false)
+    expect(hasActiveKernelJob(ws, { projectId: b.id, verb: 'adapt_pack', subjectKey: 'my-style' })).toBe(true)
+    expect(listKernelJobs(ws, { verb: 'adapt_pack', subjectKey: 'my-style' }).map(j => j.id)).toEqual(['job-pack'])
+    expect(listKernelJobs(ws, { verb: 'adapt_pack', subjectKey: 'other-style' })).toEqual([])
+  })
 })
