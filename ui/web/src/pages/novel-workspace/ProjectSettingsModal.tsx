@@ -448,14 +448,17 @@ export function ProjectSettingsModal({
           value={adaptSkillId || undefined}
           placeholder="选择已安装写作 skill"
           options={installedAdaptTargets(writingSkillCatalog).map(skill => ({ label: skill.label, value: skill.id }))}
-          onChange={setAdaptSkillId}
+          onChange={(id) => {
+            setAdaptSkillId(id)
+            void adapt.resume(id)
+          }}
           style={{ minWidth: 220 }}
           disabled={loading || loadFailed}
         />
         <Space wrap>
           <Button
             type="primary"
-            disabled={!selectedModelId || !adaptSkillId || adapt.state.phase === 'running' || loading || loadFailed}
+            disabled={!selectedModelId || !adaptSkillId || adapt.state.phase === 'running' || adapt.state.phase === 'awaiting_selection' || loading || loadFailed}
             onClick={() => adapt.start(adaptSkillId)}
           >
             适配合同

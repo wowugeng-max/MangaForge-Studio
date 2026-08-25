@@ -549,4 +549,51 @@ describe('useAdaptPackJob skill switch', () => {
     await resumeB
     await flushAdapt()
   })
+
+  test('start during awaiting_selection is a no-op and keeps the preview', async () => {
+    const createJobByVerb = mock(async () => ({
+      ok: false as const,
+      code: 'PROJECT_JOB_RUNNING',
+      message: '同项目同动词任务未结束',
+    }))
+    const listJobs = mock(async () => ({
+      ok: true as const,
+      jobs: [{ id: 'job-a', status: 'awaiting_selection', created_at: '2026-08-25T00:00:00Z' }],
+    }))
+    const getJob = mock(async () => jobDetail('awaiting_selection', {
+      job: { id: 'job-a', status: 'awaiting_selection' },
+      candidates: [{ id: 'cand-a', contract_id: 'mangaforge.adapt-pack.meta', status: 'succeeded' }],
+    }))
+    const api = {
+      createJobByVerb,
+      getJob,
+      cancelJob: async () => ({ ok: true as const }),
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new AdaptHookHarness(() => useAdaptPackJob({
+      api: api as any,
+      projectId: 3,
+      modelId: 7,
+    }))
+    harness.mount()
+    await harness.value.resume('skill-a')
+    await flushAdapt()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-a',
+      candidateId: 'cand-a',
+    })
+
+    await harness.value.start('skill-a')
+    await flushAdapt()
+
+    expect(createJobByVerb).not.toHaveBeenCalled()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-a',
+      candidateId: 'cand-a',
+    })
+    expect(harness.value.state.phase).not.toBe('failed')
+  })
 })

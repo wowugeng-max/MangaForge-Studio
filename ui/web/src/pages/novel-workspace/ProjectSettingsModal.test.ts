@@ -299,6 +299,14 @@ describe('project settings editor revision timeout', () => {
     expect(kernelBlock).not.toContain('writingSkillsModelId')
     expect(kernelBlock).toContain('selectedModelId')
     expect(kernelBlock).toContain('保存默认绑定')
+    expect(kernelBlock).toContain('adapt.resume')
+    expect(kernelBlock).toMatch(/disabled=\{[^}]*awaiting_selection/)
+    const skillSelect = kernelBlock.slice(
+      kernelBlock.indexOf('aria-label="适配写作 skill"'),
+      kernelBlock.indexOf('适配合同'),
+    )
+    expect(skillSelect).toContain('setAdaptSkillId')
+    expect(skillSelect).toContain('adapt.resume')
     expect(modal).toContain('reloadContractsAfterAdaptCommit')
     const adoptFn = modal.slice(modal.indexOf('const adoptAdaptPack'), modal.indexOf('const filteredWritingSkills'))
     expect(adoptFn).toContain('adapt.commit')

@@ -331,6 +331,7 @@ export function useAdaptPackJob(deps: {
 
   const start = useCallback(async (skillId: string) => {
     if (runningRef.current) return
+    if (state.phase === 'awaiting_selection') return
     if (!deps.projectId || !deps.modelId || !skillId) return
     const { controller, session } = beginSession(skillId)
     setState({ phase: 'running', jobId: '', hint: 'queued', elapsedSec: 0 })
@@ -344,7 +345,7 @@ export function useAdaptPackJob(deps: {
       ...bindProgress(session, skillId),
     })
     finishSession(session, skillId, result)
-  }, [api, deps.modelId, deps.projectId])
+  }, [api, deps.modelId, deps.projectId, state.phase])
 
   const resume = useCallback(async (skillId: string) => {
     if (!skillId) return
