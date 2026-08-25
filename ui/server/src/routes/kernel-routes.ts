@@ -2,6 +2,7 @@ import type { Express } from 'express'
 import { deleteUserKernelContract, loadKernelContracts, saveUserKernelContract } from '../kernel/contracts/store'
 import { loadKernelProbe, runKernelProbe } from '../kernel/probe'
 import { checkKernelBinary, loadKernelRuntime } from '../kernel/runtime'
+import { loadVerbDefaults, saveVerbDefaults, validateVerbDefaultsPayload } from '../kernel/verbs/defaults'
 
 export type KernelRoutesDeps = { getWorkspace: () => string }
 
@@ -56,6 +57,16 @@ export function registerKernelRoutes(app: Express, deps: KernelRoutesDeps) {
     } catch (error: any) {
       res.status(500).json({ error: String(error?.message || error) })
     }
+  })
+
+  app.get('/api/kernel/verb-defaults', (_req, res) => {
+    res.json({ ok: true, defaults: loadVerbDefaults(deps.getWorkspace()) })
+  })
+  app.put('/api/kernel/verb-defaults', (req, res) => {
+    const checked = validateVerbDefaultsPayload(deps.getWorkspace(), req.body || {})
+    if (!checked.ok) return res.status(400).json({ error: checked.message, code: checked.code })
+    saveVerbDefaults(deps.getWorkspace(), checked.defaults)
+    res.json({ ok: true, defaults: loadVerbDefaults(deps.getWorkspace()) })
   })
 
   app.get('/api/kernel/runtime', async (_req, res) => {

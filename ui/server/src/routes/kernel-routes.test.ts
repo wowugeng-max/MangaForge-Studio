@@ -2,7 +2,30 @@ import { describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { saveUserKernelContract } from '../kernel/contracts/store'
 import { registerKernelRoutes } from './kernel-routes'
+
+function userWriteChapterContract() {
+  return {
+    schema_version: 1,
+    id: 'my-style.write-chapter.v1',
+    pack_id: 'my-style',
+    skill_name: 'write-chapter',
+    variant: 'v1',
+    verb: 'write_chapter',
+    capability: 'rewrite',
+    label: '风格写章',
+    invoke: { mention: '$write-chapter', prompt: '写第 {{chapter_no}} 章。只改 {{scope_files}}。' },
+    projection: { mounts: ['current_chapter', 'previous_chapter', 'outline', 'world', 'characters', 'tracking', 'user_brief'] },
+    outputs: [{ artifact_kind: 'chapter_text', glob: '正文/第{{chapter_pad}}章_*.md', binding: 'chapters.rewrite', required: true }],
+    write_scope: ['正文/'],
+    ignore: ['.story-review/'],
+    gates: ['require_chapter_file', 'reject_outline_artifact'],
+    commit: { mode: 'auto_if_single', domain_writes: ['chapters', 'chapter_versions'], source: 'user_write' },
+    sandbox: 'workspace-write',
+    approval: 'never',
+  }
+}
 
 function routeHarness(ws: string) {
   const handlers = new Map<string, any>()
@@ -105,5 +128,42 @@ describe('kernel contract routes', () => {
     const review = res.body.contracts.find((c: any) => c.id === 'oh-story-core.story-review.full')
     expect(review.implemented).toBe(false)
     expect(review.implemented_reason).toBe('SKILLS_PROBE_FAILED')
+  })
+
+  test('GET /api/kernel/verb-defaults returns builtin defaults', async () => {
+    const handlers = routeHarness(mkdtempSync(join(tmpdir(), 'kernel-routes-')))
+    const res = await callRoute(handlers.get('GET /api/kernel/verb-defaults'))
+    expect(res.statusCode).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.defaults.write_chapter).toEqual(['oh-story-core.story-long-write.chapter'])
+    expect(res.body.defaults.adapt_pack).toEqual(['mangaforge.adapt-pack.meta'])
+  })
+
+  test('PUT write_chapter to user contract then GET fills omitted verbs', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-routes-'))
+    const handlers = routeHarness(ws)
+    expect(saveUserKernelContract(ws, userWriteChapterContract()).ok).toBe(true)
+    const put = await callRoute(handlers.get('PUT /api/kernel/verb-defaults'), {
+      body: { write_chapter: ['my-style.write-chapter.v1'] },
+    })
+    expect(put.statusCode).toBe(200)
+    expect(put.body.ok).toBe(true)
+    expect(put.body.defaults.write_chapter).toEqual(['my-style.write-chapter.v1'])
+    expect(put.body.defaults.adapt_pack).toEqual(['mangaforge.adapt-pack.meta'])
+    const get = await callRoute(handlers.get('GET /api/kernel/verb-defaults'))
+    expect(get.body.defaults.write_chapter).toEqual(['my-style.write-chapter.v1'])
+    expect(get.body.defaults.review_chapter).toEqual(['oh-story-core.story-review.full'])
+  })
+
+  test('PUT adapt_pack user write-chapter id -> 400 CONTRACT_INVALID', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-routes-'))
+    const handlers = routeHarness(ws)
+    expect(saveUserKernelContract(ws, userWriteChapterContract()).ok).toBe(true)
+    const res = await callRoute(handlers.get('PUT /api/kernel/verb-defaults'), {
+      body: { adapt_pack: ['my-style.write-chapter.v1'] },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.body.code).toBe('CONTRACT_INVALID')
+    expect(res.body.error).toBe('adapt_pack 默认必须是元合同')
   })
 })

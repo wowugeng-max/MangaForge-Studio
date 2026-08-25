@@ -2,12 +2,34 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { createNovelProject } from '../../novel'
+import { createNovelChapter, createNovelOutline, createNovelProject } from '../../novel'
 import { BUILTIN_KERNEL_CONTRACTS } from '../contracts/builtin'
+import { saveUserKernelContract } from '../contracts/store'
+import { registerKernelRoutes } from '../../routes/kernel-routes'
 import { loadVerbDefaults } from '../verbs/defaults'
 import { commitKernelCandidate } from './commit'
 import { getKernelJobDetail, insertKernelJob } from './repo'
 import { createAndRunKernelJob, validateCreateKernelJob } from './run-job'
+
+function routeHarness(ws: string) {
+  const handlers = new Map<string, any>()
+  const app: any = {}
+  for (const method of ['get', 'put', 'post', 'delete']) {
+    app[method] = (path: string, handler: any) => { handlers.set(`${method.toUpperCase()} ${path}`, handler); return app }
+  }
+  registerKernelRoutes(app, { getWorkspace: () => ws })
+  return handlers
+}
+
+async function callRoute(handler: any, req: any = {}) {
+  const res: any = {
+    statusCode: 200, body: null,
+    status(code: number) { this.statusCode = code; return this },
+    json(body: any) { this.body = body; return this },
+  }
+  await handler(req, res)
+  return res
+}
 
 function seedStores(ws: string) {
   writeFileSync(join(ws, 'providers.json'), JSON.stringify([{ id: 'any', api_format: 'codex_responses', default_base_url: 'https://a/v1', custom_headers: {} }]))
@@ -299,5 +321,43 @@ describe('adapt_pack commit', () => {
     expect(existsSync(join(ws, '.mangaforge/kernel/contracts/my-style.write-chapter.v1.json'))).toBe(true)
     const userFiles = readdirSync(join(ws, '.mangaforge/kernel/contracts')).filter(name => name.startsWith('my-style.'))
     expect(userFiles).toEqual(['my-style.write-chapter.v1.json'])
+  })
+})
+
+describe('adapt_pack verb-defaults binding', () => {
+  test('PUT write_chapter default is resolved by validateCreateKernelJob without contract_ids', async () => {
+    const { ws, project } = await seedAdapt()
+    expect(saveUserKernelContract(ws, userWriteChapterContract()).ok).toBe(true)
+    const handlers = routeHarness(ws)
+    const put = await callRoute(handlers.get('PUT /api/kernel/verb-defaults'), {
+      body: { write_chapter: ['my-style.write-chapter.v1'] },
+    })
+    expect(put.statusCode).toBe(200)
+    expect(put.body.defaults.write_chapter).toEqual(['my-style.write-chapter.v1'])
+    const chapter = await createNovelChapter(ws, {
+      project_id: project.id, chapter_no: 1, title: '一', chapter_text: '',
+    })
+    await createNovelOutline(ws, {
+      project_id: project.id, outline_type: 'chapter', title: '细纲1', summary: '细',
+      raw_payload: { chapter_no: 1, kernel_rel_path: '大纲/细纲_第001章.md' },
+    })
+    const ok = await validateCreateKernelJob(ws, {
+      project_id: project.id, subject_type: 'chapter', subject_id: chapter.id,
+      verb: 'write_chapter', model_id: 9,
+    }, { skipRuntimeCheck: true })
+    expect(ok.ok).toBe(true)
+    if (!ok.ok) return
+    expect(ok.contracts[0].id).toBe('my-style.write-chapter.v1')
+  })
+
+  test('PUT adapt_pack user write-chapter id -> 400 CONTRACT_INVALID', async () => {
+    const { ws } = await seedAdapt()
+    expect(saveUserKernelContract(ws, userWriteChapterContract()).ok).toBe(true)
+    const handlers = routeHarness(ws)
+    const res = await callRoute(handlers.get('PUT /api/kernel/verb-defaults'), {
+      body: { adapt_pack: ['my-style.write-chapter.v1'] },
+    })
+    expect(res.statusCode).toBe(400)
+    expect(res.body.code).toBe('CONTRACT_INVALID')
   })
 })
