@@ -349,6 +349,7 @@ export function useAdaptPackJob(deps: {
   const resume = useCallback(async (skillId: string) => {
     if (!skillId) return
     const { controller, session } = beginSession(skillId)
+    setState({ phase: 'running', jobId: '', hint: 'queued', elapsedSec: 0 })
     const result = await resumeAdaptPackJob({
       api,
       skillId,
@@ -359,7 +360,11 @@ export function useAdaptPackJob(deps: {
     finishSession(session, skillId, result)
   }, [api])
 
+  const session = sessionRef.current
+  const skillId = skillIdRef.current
+
   const cancel = useCallback(async () => {
+    if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
     sessionRef.current += 1
     skillIdRef.current = ''
     runningRef.current = false
@@ -370,15 +375,17 @@ export function useAdaptPackJob(deps: {
       stateJobId: state.phase === 'running' || state.phase === 'awaiting_selection' ? state.jobId : '',
     })
     setState({ phase: 'idle' })
-  }, [api, state])
+  }, [api, state, session, skillId])
 
   const commit = useCallback(async () => {
     if (state.phase !== 'awaiting_selection') return
+    if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
     const result = await commitAdaptPackJob({
       api,
       jobId: state.jobId,
       candidateId: state.candidateId,
     })
+    if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
     if (!result.ok) {
       toastMapped(result.code)
       return result
@@ -387,7 +394,7 @@ export function useAdaptPackJob(deps: {
     message.success(adaptPackCommitSuccessText(result.count))
     setState({ phase: 'idle' })
     return result
-  }, [api, state])
+  }, [api, state, session, skillId])
 
   return { state, start, cancel, commit, resume, api }
 }

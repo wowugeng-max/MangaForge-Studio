@@ -486,4 +486,67 @@ describe('useAdaptPackJob skill switch', () => {
     expect(getJob).toHaveBeenCalledWith('job-b')
     expect(harness.value.state).toMatchObject({ phase: 'awaiting_selection', jobId: 'job-b' })
   })
+
+  test('resume(B) in flight clears A selection UI and cancel does not cancelJob A', async () => {
+    const listedB = deferredAdapt<{ ok: true; jobs: Array<{ id: string; status: string; created_at: string }> }>()
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    const commitJob = mock(async () => ({ ok: true as const, commits: [] }))
+    const listJobs = mock(async (query: { verb: string; subjectKey: string }) => {
+      if (query.subjectKey === 'skill-b') return listedB.promise
+      return {
+        ok: true as const,
+        jobs: [{ id: 'job-a', status: 'awaiting_selection', created_at: '2026-08-24T00:00:00Z' }],
+      }
+    })
+    const getJob = mock(async (id: string) => jobDetail('awaiting_selection', {
+      job: { id, status: 'awaiting_selection' },
+      candidates: [{
+        id: id === 'job-a' ? 'cand-a' : 'cand-b',
+        contract_id: 'mangaforge.adapt-pack.meta',
+        status: 'succeeded',
+      }],
+    }))
+    const api = {
+      createJobByVerb: async () => ({ ok: true as const, jobId: 'job-new' }),
+      getJob,
+      cancelJob,
+      commitJob,
+      listJobs,
+    }
+    const harness = new AdaptHookHarness(() => useAdaptPackJob({
+      api: api as any,
+      projectId: 3,
+      modelId: 7,
+    }))
+    harness.mount()
+    await harness.value.resume('skill-a')
+    await flushAdapt()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-a',
+      candidateId: 'cand-a',
+    })
+
+    const staleCommit = harness.value.commit
+    const staleCancel = harness.value.cancel
+    const resumeB = harness.value.resume('skill-b')
+    await flushAdapt()
+
+    expect(harness.value.state.phase).not.toBe('awaiting_selection')
+    expect(harness.value.state).toMatchObject({ phase: 'running', jobId: '' })
+
+    await staleCommit()
+    expect(commitJob).not.toHaveBeenCalled()
+    await staleCancel()
+    expect(cancelJob).not.toHaveBeenCalled()
+    await harness.value.cancel()
+    expect(cancelJob).not.toHaveBeenCalled()
+
+    listedB.resolve({
+      ok: true,
+      jobs: [{ id: 'job-b', status: 'awaiting_selection', created_at: '2026-08-25T00:00:00Z' }],
+    })
+    await resumeB
+    await flushAdapt()
+  })
 })
