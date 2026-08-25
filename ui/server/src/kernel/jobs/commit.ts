@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { createNovelReview, getNovelChapter, listNovelChapters, updateNovelChapter } from '../../novel'
 import { ohStoryChapterTextHash } from '../../novel-writing/oh-story-core/chapter-text-hash'
-import { loadKernelContracts } from '../contracts/store'
+import { loadKernelContracts, saveUserKernelContract } from '../contracts/store'
 import { openKernelDb } from '../db'
 import {
   ensureEmptyChapterRow, firstHeadingOf, parseChapterNoFromRelPath, upsertCharacterSheet, upsertOutlineDoc, upsertWorldDoc,
@@ -20,7 +20,7 @@ function readVaultText(artifact: { vault_path?: string; copied_path?: string }):
 
 export async function commitKernelCandidate(ws: string, jobId: string, candidateId: string): Promise<
   | { ok: true; commits: Array<{ domain_table: string; domain_row_id: number }> }
-  | { ok: false; status: 404 | 409 | 500; code: string; message: string }
+  | { ok: false; status: 400 | 404 | 409 | 500; code: string; message: string }
 > {
   const detail = getKernelJobDetail(ws, jobId)
   if (!detail) return { ok: false, status: 404, code: 'JOB_NOT_FOUND', message: `job ${jobId} not found` }
@@ -52,6 +52,53 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
     continueCount: Number(JSON.parse(detail.job.verb_params || '{}').count || 0),
   })
   if (gate.failedCode) return { ok: false, status: 409, code: gate.failedCode, message: 'commit-time gate failed' }
+
+  if (detail.job.verb === 'adapt_pack') {
+    const commits: Array<{ domain_table: string; domain_row_id: number }> = []
+    const jsonArtifacts = artifacts.filter((a: any) => a.artifact_kind === 'contract_json')
+    for (const artifact of jsonArtifacts) {
+      const text = readVaultText(artifact)
+      let parsed: unknown
+      try { parsed = JSON.parse(text) } catch {
+        return { ok: false, status: 500, code: 'OUTPUT_MISSING', message: 'contract_json vault is not JSON' }
+      }
+      const saved = saveUserKernelContract(ws, parsed)
+      if (!saved.ok) {
+        return {
+          ok: false,
+          status: saved.status,
+          code: saved.code,
+          message: saved.code === 'CONTRACT_BUILTIN' ? 'cannot overwrite builtin contract' : 'contract rejected',
+        }
+      }
+      commits.push({ domain_table: 'kernel_contracts', domain_row_id: 0 })
+    }
+    const db = openKernelDb(ws)
+    try {
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        const now = new Date().toISOString()
+        for (const commit of commits) {
+          insertKernelCommit(ws, {
+            id: `commit-${crypto.randomUUID()}`,
+            job_id: jobId,
+            candidate_id: candidateId,
+            domain_table: commit.domain_table,
+            domain_row_id: commit.domain_row_id,
+          }, db)
+        }
+        updateKernelCandidate(ws, candidateId, { status: 'committed', finished_at: now }, db)
+        updateKernelJob(ws, jobId, { status: 'committed', finished_at: now }, db)
+        db.exec('COMMIT')
+      } catch (error) {
+        try { db.exec('ROLLBACK') } catch { /* ignore */ }
+        throw error
+      }
+    } finally {
+      db.close()
+    }
+    return { ok: true, commits }
+  }
 
   const isProjectSubject = detail.job.subject_type === 'project'
   const chapter = isProjectSubject ? null : await getNovelChapter(ws, chapterId, detail.job.project_id)

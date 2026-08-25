@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createNovelProject } from '../../novel'
 import { BUILTIN_KERNEL_CONTRACTS } from '../contracts/builtin'
+import { loadVerbDefaults } from '../verbs/defaults'
+import { commitKernelCandidate } from './commit'
 import { getKernelJobDetail, insertKernelJob } from './repo'
 import { createAndRunKernelJob, validateCreateKernelJob } from './run-job'
 
@@ -249,5 +251,53 @@ describe('adapt_pack harvest', () => {
     expect(detail.job.status).toBe('failed')
     expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
     expect(candidateMeta(detail).adapt_unsatisfied.some((item: any) => item.errors.includes('CONTRACT_BUILTIN'))).toBe(true)
+  })
+})
+
+describe('adapt_pack commit', () => {
+  test('persists accepted contract_json without changing write_chapter defaults', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'attachment', text: JSON.stringify(userWriteChapterContract()) },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const harvested = getKernelJobDetail(ws, created.jobId)!
+    expect(harvested.job.status).toBe('awaiting_selection')
+    const result = await commitKernelCandidate(ws, created.jobId, harvested.candidates[0].id)
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.commits[0].domain_table).toBe('kernel_contracts')
+    expect(existsSync(join(ws, '.mangaforge/kernel/contracts/my-style.write-chapter.v1.json'))).toBe(true)
+    expect(loadVerbDefaults(ws).write_chapter).toEqual(['oh-story-core.story-long-write.chapter'])
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.commits[0].domain_table).toBe('kernel_contracts')
+    expect(await commitKernelCandidate(ws, created.jobId, harvested.candidates[0].id)).toMatchObject({
+      ok: false, status: 409, code: 'JOB_ALREADY_COMMITTED',
+    })
+  })
+
+  test('mixed harvest commit writes only the valid contract file', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'contract_json', text: JSON.stringify(userWriteChapterContract()) },
+        'contracts/rewrite_chapter.json': { kind: 'contract_json', text: '{not json}' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const harvested = getKernelJobDetail(ws, created.jobId)!
+    const result = await commitKernelCandidate(ws, created.jobId, harvested.candidates[0].id)
+    expect(result.ok).toBe(true)
+    expect(existsSync(join(ws, '.mangaforge/kernel/contracts/my-style.write-chapter.v1.json'))).toBe(true)
+    const userFiles = readdirSync(join(ws, '.mangaforge/kernel/contracts')).filter(name => name.startsWith('my-style.'))
+    expect(userFiles).toEqual(['my-style.write-chapter.v1.json'])
   })
 })
