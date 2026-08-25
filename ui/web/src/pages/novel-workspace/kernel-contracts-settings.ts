@@ -58,6 +58,24 @@ export function previewAdaptContractFields(
   return { id: fallbackId, verb: fallbackVerb, label: '' }
 }
 
+export function adaptPackCancelVisible(state: { phase: string; jobId?: string | null }): boolean {
+  return state.phase === 'running' && Boolean(String(state.jobId || '').trim())
+}
+
+export async function loadAdaptContractPreviews(
+  artifacts: Array<{ id?: string; rel_path?: string }>,
+  getArtifactContent: (id: string) => Promise<{ ok: true; content: string } | { ok: false }>,
+): Promise<AdaptContractPreview[]> {
+  return Promise.all(artifacts.map(async (artifact) => {
+    try {
+      const result = await getArtifactContent(String(artifact.id || ''))
+      return previewAdaptContractFields(result.ok ? result.content : '', artifact)
+    } catch {
+      return previewAdaptContractFields('', artifact)
+    }
+  }))
+}
+
 export function defaultOptionsForVerb(
   verb: string,
   contracts: KernelContractListItem[],

@@ -3,10 +3,12 @@ import type { KernelContractListItem, KernelJobDetail } from '../../kernel/jobs/
 import type { WritingSkillCatalogItem } from './writingSkillsModel'
 import {
   KERNEL_DEFAULT_PICKER_VERBS,
+  adaptPackCancelVisible,
   defaultOptionsForVerb,
   defaultPickerVerbs,
   installedAdaptTargets,
   legalAdaptContracts,
+  loadAdaptContractPreviews,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
   previewAdaptContractFields,
@@ -89,6 +91,39 @@ describe('legalAdaptContracts', () => {
       ],
     })).map(item => item.id)).toEqual(['a1'])
     expect(legalAdaptContracts(null)).toEqual([])
+  })
+})
+
+describe('adaptPackCancelVisible', () => {
+  test('running with empty jobId does not show cancel', () => {
+    expect(adaptPackCancelVisible({ phase: 'running', jobId: '' })).toBe(false)
+  })
+
+  test('running with a jobId shows cancel', () => {
+    expect(adaptPackCancelVisible({ phase: 'running', jobId: 'job-1' })).toBe(true)
+  })
+
+  test('awaiting_selection keeps the 丢弃 path and does not show cancel', () => {
+    expect(adaptPackCancelVisible({ phase: 'awaiting_selection', jobId: 'job-1' })).toBe(false)
+    expect(adaptPackCancelVisible({ phase: 'idle' })).toBe(false)
+    expect(adaptPackCancelVisible({ phase: 'failed', jobId: 'job-1' })).toBe(false)
+  })
+})
+
+describe('loadAdaptContractPreviews', () => {
+  test('thrown getArtifactContent still yields filename-fallback preview', async () => {
+    const artifacts = [
+      { id: 'art-1', rel_path: 'contracts/write_chapter.json' },
+      { id: 'art-2', rel_path: 'contracts/rewrite_chapter.json' },
+    ]
+    const getArtifactContent = mock(async (id: string) => {
+      if (id === 'art-1') throw new Error('network')
+      return { ok: true as const, content: JSON.stringify({ id: 'ok.v1', verb: 'rewrite_chapter', label: '回炉' }) }
+    })
+    await expect(loadAdaptContractPreviews(artifacts, getArtifactContent)).resolves.toEqual([
+      { id: 'art-1', verb: 'write_chapter', label: '' },
+      { id: 'ok.v1', verb: 'rewrite_chapter', label: '回炉' },
+    ])
   })
 })
 

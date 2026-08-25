@@ -10,13 +10,14 @@ import type {
   ChapterSourceOperationToken,
 } from './chapterGenerationSourceModel'
 import {
+  adaptPackCancelVisible,
   defaultOptionsForVerb,
   defaultPickerVerbs,
   installedAdaptTargets,
   legalAdaptContracts,
+  loadAdaptContractPreviews,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
-  previewAdaptContractFields,
   reloadContractsAfterAdaptCommit,
   type AdaptContractPreview,
 } from './kernel-contracts-settings'
@@ -275,10 +276,7 @@ export function ProjectSettingsModal({
     }
     const artifacts = legalAdaptContracts(adapt.state.detail)
     let active = true
-    void Promise.all(artifacts.map(async (artifact) => {
-      const result = await kernelApi.getArtifactContent(artifact.id)
-      return previewAdaptContractFields(result.ok ? result.content : '', artifact)
-    })).then((previews) => {
+    void loadAdaptContractPreviews(artifacts, (id) => kernelApi.getArtifactContent(id)).then((previews) => {
       if (active) setAdaptContractPreviews(previews)
     })
     return () => {
@@ -484,7 +482,7 @@ export function ProjectSettingsModal({
           >
             适配合同
           </Button>
-          {adapt.state.phase === 'running' && (
+          {adaptPackCancelVisible(adapt.state) && (
             <Button onClick={() => void adapt.cancel()}>取消</Button>
           )}
         </Space>
@@ -493,7 +491,9 @@ export function ProjectSettingsModal({
         )}
         {adapt.state.phase === 'running' && (
           <Text type="secondary">
-            {adapt.state.hint || '适配中'} {adapt.state.elapsedSec}s
+            {adaptPackCancelVisible(adapt.state)
+              ? `${adapt.state.hint || '适配中'} ${adapt.state.elapsedSec}s`
+              : '正在查看适配进度'}
           </Text>
         )}
         {adapt.state.phase === 'awaiting_selection' && (
