@@ -13,6 +13,7 @@ import { runKernelCandidate } from '../codex/run-candidate'
 import { extractSpawnEvidence } from '../codex/spawn-evidence'
 import { loadKernelContracts, type KernelContractView } from '../contracts/store'
 import { kernelJobDir } from '../paths'
+import { collapseAdaptPackArtifacts } from '../projection/collapse-adapt-pack'
 import { collapseContinueChapterArtifacts } from '../projection/collapse-continue-chapter'
 import { collapseRewriteChapterArtifacts } from '../projection/collapse-rewrite-chapter'
 import { chapterRelPath } from '../projection/naming'
@@ -285,6 +286,7 @@ export async function createAndRunKernelJob(
             updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
             return
           }
+          let adaptUnsatisfied: Array<{ rel_path: string; verb: string; errors: string[] }> = []
           let collapsed
           if (validated.verb === 'write_continue') {
             const params = JSON.parse(validated.verbParamsJson || '{}')
@@ -300,6 +302,15 @@ export async function createAndRunKernelJob(
               projectedRel,
               artifacts: result.artifacts,
             })
+          } else if (validated.verb === 'adapt_pack') {
+            const collapsedAdapt = collapseAdaptPackArtifacts({
+              artifacts: result.artifacts,
+              readText: (artifact) => {
+                try { return readFileSync(String(artifact.copied_path || ''), 'utf8') } catch { return '' }
+              },
+            })
+            collapsed = { ok: true, artifacts: collapsedAdapt.artifacts }
+            adaptUnsatisfied = collapsedAdapt.unsatisfied
           } else {
             const chapterRow = await getNovelChapter(ws, body.subject_id, body.project_id)
             const currentRel = chapterRow
@@ -341,13 +352,28 @@ export async function createAndRunKernelJob(
             updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: 'CANCELLED', finished_at: new Date().toISOString() })
             return
           }
+          let failedCode = gate.failedCode || ''
+          let failedStatus = gate.failedStatus
+          if (validated.verb === 'adapt_pack') {
+            const jsonCount = registered.filter(r => r.artifact_kind === 'contract_json').length
+            if (jsonCount === 0) {
+              failedCode = 'ADAPT_NO_VALID_CONTRACT'
+              failedStatus = 'failed'
+              if (!adaptUnsatisfied.length) {
+                adaptUnsatisfied = [{ rel_path: 'contracts/', verb: '', errors: ['未写出 contracts/*.json'] }]
+              }
+            }
+          }
           updateKernelCandidate(ws, candidateId, {
-            status: candidateStatusAfterGate(gate.failedCode || '', gate.failedStatus),
-            error_code: gate.failedCode || '',
+            status: candidateStatusAfterGate(failedCode, failedStatus),
+            error_code: failedCode,
             thread_id: result.threadId, turn_id: result.turnId,
             last_message_excerpt: String(result.lastMessage || '').slice(0, 500),
             gate_results: JSON.stringify(gate.results),
-            metadata: JSON.stringify({ spawn_evidence: result.spawnEvidence }),
+            metadata: JSON.stringify({
+              spawn_evidence: result.spawnEvidence,
+              adapt_unsatisfied: adaptUnsatisfied,
+            }),
             finished_at: new Date().toISOString(),
           })
         } catch (error: any) {

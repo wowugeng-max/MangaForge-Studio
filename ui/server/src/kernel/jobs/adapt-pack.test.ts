@@ -1,10 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createNovelProject } from '../../novel'
-import { insertKernelJob } from './repo'
-import { validateCreateKernelJob } from './run-job'
+import { BUILTIN_KERNEL_CONTRACTS } from '../contracts/builtin'
+import { getKernelJobDetail, insertKernelJob } from './repo'
+import { createAndRunKernelJob, validateCreateKernelJob } from './run-job'
 
 function seedStores(ws: string) {
   writeFileSync(join(ws, 'providers.json'), JSON.stringify([{ id: 'any', api_format: 'codex_responses', default_base_url: 'https://a/v1', custom_headers: {} }]))
@@ -102,5 +103,151 @@ describe('adapt_pack precheck', () => {
       ...body, subject_key: 'other-style', verb_params: { skill_id: 'other-style' },
     }, { skipRuntimeCheck: true })
     expect(otherOk.ok).toBe(true)
+  })
+})
+
+function userWriteChapterContract() {
+  return {
+    schema_version: 1,
+    id: 'my-style.write-chapter.v1',
+    pack_id: 'my-style',
+    skill_name: 'write-chapter',
+    variant: 'v1',
+    verb: 'write_chapter',
+    capability: 'rewrite',
+    label: '风格写章',
+    invoke: { mention: '$write-chapter', prompt: '写第 {{chapter_no}} 章。只改 {{scope_files}}。' },
+    projection: { mounts: ['current_chapter', 'previous_chapter', 'outline', 'world', 'characters', 'tracking', 'user_brief'] },
+    outputs: [{ artifact_kind: 'chapter_text', glob: '正文/第{{chapter_pad}}章_*.md', binding: 'chapters.rewrite', required: true }],
+    write_scope: ['正文/'],
+    ignore: ['.story-review/'],
+    gates: ['require_chapter_file', 'reject_outline_artifact'],
+    commit: { mode: 'auto_if_single', domain_writes: ['chapters', 'chapter_versions'], source: 'user_write' },
+    sandbox: 'workspace-write',
+    approval: 'never',
+  }
+}
+
+function stubWrite(files: Record<string, { kind: string; text: string }>, warnings: Array<{ warning: string; rel_path: string }> = []) {
+  return async (input: any) => {
+    const dir = mkdtempSync(join(tmpdir(), 'adapt-pack-art-'))
+    const artifacts = Object.entries(files).map(([rel, spec]) => {
+      const full = join(dir, rel)
+      mkdirSync(dirname(full), { recursive: true })
+      writeFileSync(full, spec.text)
+      return { rel_path: rel, artifact_kind: spec.kind, sha256: 'h', byte_size: spec.text.length, copied_path: full }
+    })
+    input.onPhase?.('harvesting')
+    return {
+      ok: true, jobDir: dir, projectDir: dir, threadId: 't', turnId: 'u',
+      artifacts, warnings, lastMessage: '适配完',
+      spawnEvidence: { subagent_threads: [], agent_hints: [] }, eventsPath: join(dir, 'e.jsonl'),
+    }
+  }
+}
+
+function candidateMeta(detail: NonNullable<ReturnType<typeof getKernelJobDetail>>) {
+  return JSON.parse(detail.candidates[0].metadata || '{}')
+}
+
+describe('adapt_pack harvest', () => {
+  test('one valid json awaits selection as contract_json and leaves write_chapter defaults', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'attachment', text: JSON.stringify(userWriteChapterContract()) },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('awaiting_selection')
+    expect(detail.candidates[0].status).toBe('succeeded')
+    expect(detail.artifacts.some((a: any) => a.artifact_kind === 'contract_json')).toBe(true)
+    expect(detail.commits).toEqual([])
+    const defaults = JSON.parse(readFileSync(join(ws, '.mangaforge/kernel/verb-defaults.json'), 'utf8'))
+    expect(defaults.write_chapter).toEqual(['oh-story-core.story-long-write.chapter'])
+    const meta = candidateMeta(detail)
+    expect(meta.spawn_evidence).toEqual({ subagent_threads: [], agent_hints: [] })
+    expect(Array.isArray(meta.adapt_unsatisfied)).toBe(true)
+    expect(meta.adapt_unsatisfied).toEqual([])
+  })
+
+  test('valid plus invalid json keeps one contract_json and records adapt_unsatisfied', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'contract_json', text: JSON.stringify(userWriteChapterContract()) },
+        'contracts/rewrite_chapter.json': { kind: 'contract_json', text: '{not json}' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('awaiting_selection')
+    expect(detail.artifacts.filter((a: any) => a.artifact_kind === 'contract_json')).toHaveLength(1)
+    const meta = candidateMeta(detail)
+    expect(meta.adapt_unsatisfied.length).toBeGreaterThan(0)
+    expect(meta.adapt_unsatisfied.some((item: any) => item.rel_path === 'contracts/rewrite_chapter.json')).toBe(true)
+  })
+
+  test('only invalid json fails ADAPT_NO_VALID_CONTRACT not KIND_COUNT_BELOW_MIN', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'contract_json', text: '{not json}' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.candidates[0].status).toBe('failed')
+    expect(detail.candidates[0].error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.candidates[0].error_code).not.toBe('KIND_COUNT_BELOW_MIN')
+    expect(candidateMeta(detail).adapt_unsatisfied.length).toBeGreaterThan(0)
+  })
+
+  test('zero files fails ADAPT_NO_VALID_CONTRACT not KIND_COUNT_BELOW_MIN', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({}) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.candidates[0].error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.candidates[0].error_code).not.toBe('KIND_COUNT_BELOW_MIN')
+    expect(candidateMeta(detail).adapt_unsatisfied.length).toBeGreaterThan(0)
+  })
+
+  test('builtin write_chapter id yields no contract_json', async () => {
+    const { ws, body } = await seedAdapt()
+    const builtin = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.chapter')!
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'contract_json', text: JSON.stringify(builtin) },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.artifacts.some((a: any) => a.artifact_kind === 'contract_json')).toBe(false)
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(candidateMeta(detail).adapt_unsatisfied.some((item: any) => item.errors.includes('CONTRACT_BUILTIN'))).toBe(true)
   })
 })
