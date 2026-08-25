@@ -159,10 +159,9 @@ export async function runAdaptPackJob(input: {
     subjectKey: input.skillId,
     verbParams: { skill_id: input.skillId },
   })
-  if (created.ok) input.jobIdRef.current = created.jobId
   if (input.signal.aborted) return { kind: 'aborted' }
   if (!created.ok) return { kind: 'create_failed', code: created.code, message: created.message }
-
+  input.jobIdRef.current = created.jobId
   input.onCreated?.(created.jobId)
   return pollUntilSettled({
     api: input.api,
@@ -286,24 +285,54 @@ export function useAdaptPackJob(deps: {
   const abortRef = useRef<AbortController | null>(null)
   const jobIdRef = useRef('')
   const runningRef = useRef(false)
+  const sessionRef = useRef(0)
+  const skillIdRef = useRef('')
 
   useEffect(() => () => {
     abortRef.current?.abort()
   }, [])
 
-  const beginController = () => {
+  const beginSession = (skillId: string) => {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    return controller
+    const session = ++sessionRef.current
+    skillIdRef.current = skillId
+    runningRef.current = true
+    jobIdRef.current = ''
+    return { controller, session }
+  }
+
+  const isCurrentSession = (session: number) => (
+    sessionRef.current === session && skillIdRef.current !== ''
+  )
+
+  const bindProgress = (session: number, skillId: string) => ({
+    onCreated: (jobId: string) => {
+      if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
+      setState({ phase: 'running' as const, jobId, hint: 'queued', elapsedSec: 0 })
+    },
+    onProgress: (detail: KernelJobDetail) => {
+      if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
+      setState(prev => reduceAdaptPackProgress(
+        prev.phase === 'idle'
+          ? { phase: 'running' as const, jobId: jobIdRef.current, hint: '', elapsedSec: 0 }
+          : prev,
+        detail,
+      ))
+    },
+  })
+
+  const finishSession = (session: number, skillId: string, result: RunAdaptPackJobResult) => {
+    if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
+    runningRef.current = false
+    applyAdaptResult(result, setState)
   }
 
   const start = useCallback(async (skillId: string) => {
     if (runningRef.current) return
     if (!deps.projectId || !deps.modelId || !skillId) return
-    const controller = beginController()
-    runningRef.current = true
-    jobIdRef.current = ''
+    const { controller, session } = beginSession(skillId)
     setState({ phase: 'running', jobId: '', hint: 'queued', elapsedSec: 0 })
     const result = await runAdaptPackJob({
       api,
@@ -312,46 +341,27 @@ export function useAdaptPackJob(deps: {
       skillId,
       signal: controller.signal,
       jobIdRef,
-      onCreated: (jobId) => {
-        setState({ phase: 'running', jobId, hint: 'queued', elapsedSec: 0 })
-      },
-      onProgress: (detail) => {
-        setState(prev => reduceAdaptPackProgress(
-          prev.phase === 'idle'
-            ? { phase: 'running', jobId: jobIdRef.current, hint: '', elapsedSec: 0 }
-            : prev,
-          detail,
-        ))
-      },
+      ...bindProgress(session, skillId),
     })
-    runningRef.current = false
-    applyAdaptResult(result, setState)
+    finishSession(session, skillId, result)
   }, [api, deps.modelId, deps.projectId])
 
   const resume = useCallback(async (skillId: string) => {
-    if (!skillId || runningRef.current) return
-    const controller = beginController()
+    if (!skillId) return
+    const { controller, session } = beginSession(skillId)
     const result = await resumeAdaptPackJob({
       api,
       skillId,
       signal: controller.signal,
       jobIdRef,
-      onCreated: (jobId) => {
-        setState({ phase: 'running', jobId, hint: 'queued', elapsedSec: 0 })
-      },
-      onProgress: (detail) => {
-        setState(prev => reduceAdaptPackProgress(
-          prev.phase === 'idle'
-            ? { phase: 'running', jobId: jobIdRef.current, hint: '', elapsedSec: 0 }
-            : prev,
-          detail,
-        ))
-      },
+      ...bindProgress(session, skillId),
     })
-    applyAdaptResult(result, setState)
+    finishSession(session, skillId, result)
   }, [api])
 
   const cancel = useCallback(async () => {
+    sessionRef.current += 1
+    skillIdRef.current = ''
     runningRef.current = false
     await cancelAdaptPackJob({
       abort: () => abortRef.current?.abort(),
@@ -371,11 +381,12 @@ export function useAdaptPackJob(deps: {
     })
     if (!result.ok) {
       toastMapped(result.code)
-      return
+      return result
     }
     jobIdRef.current = ''
     message.success(adaptPackCommitSuccessText(result.count))
     setState({ phase: 'idle' })
+    return result
   }, [api, state])
 
   return { state, start, cancel, commit, resume, api }

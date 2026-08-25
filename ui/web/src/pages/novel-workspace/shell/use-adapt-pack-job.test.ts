@@ -1,4 +1,5 @@
-import { describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, mock, test } from 'bun:test'
+import * as React from 'react'
 import { kernelJobUserMessage } from '../../../kernel/jobs/messages'
 import type { KernelJobDetail } from '../../../kernel/jobs/types'
 import {
@@ -8,6 +9,7 @@ import {
   reduceAdaptPackProgress,
   resumeAdaptPackJob,
   runAdaptPackJob,
+  useAdaptPackJob,
 } from './use-adapt-pack-job'
 
 function jobDetail(status: string, extra: Partial<KernelJobDetail> = {}): KernelJobDetail {
@@ -231,5 +233,257 @@ describe('resumeAdaptPackJob', () => {
     expect(listJobs).toHaveBeenCalledWith({ verb: 'adapt_pack', subjectKey: 'my-style' })
     expect(getJob).toHaveBeenCalledWith('job-new')
     expect(result.kind).toBe('awaiting_selection')
+  })
+})
+
+type HookDeps = readonly unknown[] | undefined
+type HookCell =
+  | { kind: 'state'; value: unknown; setter: (next: unknown) => void }
+  | { kind: 'ref'; value: { current: unknown } }
+  | { kind: 'memo'; value: unknown; deps: HookDeps }
+  | { kind: 'effect'; deps: HookDeps; cleanup?: () => void }
+
+function hookDepsEqual(left: HookDeps, right: HookDeps) {
+  if (!left || !right || left.length !== right.length) return false
+  return left.every((value, index) => Object.is(value, right[index]))
+}
+
+const hookDispatcherRef = (React as any).__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher
+const mountedAdaptHarnesses = new Set<AdaptHookHarness<unknown>>()
+
+class AdaptHookHarness<T> {
+  value!: T
+  private readonly cells: HookCell[] = []
+  private readonly pendingEffects: Array<{ index: number; effect: () => void | (() => void); deps: HookDeps }> = []
+  private cursor = 0
+  private dirty = false
+  private flushing = false
+  private mounted = false
+  private readonly dispatcher = {
+    useState: (initial: unknown) => this.useState(initial),
+    useRef: (initial: unknown) => this.useRef(initial),
+    useMemo: (factory: () => unknown, deps: HookDeps) => this.useMemo(factory, deps),
+    useCallback: (callback: unknown, deps: HookDeps) => this.useMemo(() => callback, deps),
+    useEffect: (effect: () => void | (() => void), deps: HookDeps) => this.useEffect(effect, deps),
+  }
+
+  constructor(private readonly renderHook: () => T) {}
+
+  mount() {
+    this.mounted = true
+    mountedAdaptHarnesses.add(this)
+    this.requestRender()
+  }
+
+  unmount() {
+    if (!this.mounted) return
+    this.mounted = false
+    mountedAdaptHarnesses.delete(this)
+    for (const cell of this.cells) {
+      if (cell?.kind === 'effect') cell.cleanup?.()
+    }
+  }
+
+  private requestRender() {
+    if (!this.mounted) return
+    this.dirty = true
+    if (!this.flushing) this.flush()
+  }
+
+  private flush() {
+    this.flushing = true
+    try {
+      while (this.dirty) {
+        this.dirty = false
+        this.cursor = 0
+        this.pendingEffects.length = 0
+        const previous = hookDispatcherRef.current
+        hookDispatcherRef.current = this.dispatcher
+        try {
+          this.value = this.renderHook()
+        } finally {
+          hookDispatcherRef.current = previous
+        }
+        for (const pending of this.pendingEffects) {
+          const previousCell = this.cells[pending.index]
+          if (previousCell?.kind === 'effect') previousCell.cleanup?.()
+          const next: HookCell = { kind: 'effect', deps: pending.deps }
+          this.cells[pending.index] = next
+          const cleanup = pending.effect()
+          if (typeof cleanup === 'function') next.cleanup = cleanup
+        }
+      }
+    } finally {
+      this.flushing = false
+    }
+  }
+
+  private useState(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      const stateCell: Extract<HookCell, { kind: 'state' }> = {
+        kind: 'state',
+        value: typeof initial === 'function' ? (initial as () => unknown)() : initial,
+        setter: (next) => {
+          const nextValue = typeof next === 'function'
+            ? (next as (current: unknown) => unknown)(stateCell.value)
+            : next
+          if (Object.is(nextValue, stateCell.value)) return
+          stateCell.value = nextValue
+          this.requestRender()
+        },
+      }
+      cell = stateCell
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'state') throw new Error(`hook ${index} changed type`)
+    return [cell.value, cell.setter]
+  }
+
+  private useRef(initial: unknown) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell) {
+      cell = { kind: 'ref', value: { current: initial } }
+      this.cells[index] = cell
+    }
+    if (cell.kind !== 'ref') throw new Error(`hook ${index} changed type`)
+    return cell.value
+  }
+
+  private useMemo(factory: () => unknown, deps: HookDeps) {
+    const index = this.cursor++
+    let cell = this.cells[index]
+    if (!cell || cell.kind !== 'memo' || !hookDepsEqual(cell.deps, deps)) {
+      cell = { kind: 'memo', value: factory(), deps }
+      this.cells[index] = cell
+    }
+    return cell.value
+  }
+
+  private useEffect(effect: () => void | (() => void), deps: HookDeps) {
+    const index = this.cursor++
+    const cell = this.cells[index]
+    if (cell?.kind === 'effect' && hookDepsEqual(cell.deps, deps)) return
+    this.pendingEffects.push({ index, effect, deps })
+  }
+}
+
+function deferredAdapt<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
+async function flushAdapt() {
+  for (let index = 0; index < 16; index += 1) await Promise.resolve()
+}
+
+afterEach(() => {
+  for (const harness of [...mountedAdaptHarnesses]) harness.unmount()
+})
+
+describe('useAdaptPackJob skill switch', () => {
+  test('start(A) in flight then resume(B) does not no-op and ignores stale A', async () => {
+    const aJob = deferredAdapt<KernelJobDetail>()
+    const createJobByVerb = mock(async (input: { subjectKey: string }) => {
+      expect(input.subjectKey).toBe('skill-a')
+      return { ok: true as const, jobId: 'job-a' }
+    })
+    const listJobs = mock(async (query: { verb: string; subjectKey: string }) => ({
+      ok: true as const,
+      jobs: query.subjectKey === 'skill-b'
+        ? [{ id: 'job-b', status: 'awaiting_selection', created_at: '2026-08-25T00:00:00Z' }]
+        : [],
+    }))
+    const getJob = mock(async (id: string) => {
+      if (id === 'job-a') return aJob.promise
+      return jobDetail('awaiting_selection', {
+        job: { id: 'job-b', status: 'awaiting_selection' },
+        candidates: [{ id: 'cand-b', contract_id: 'mangaforge.adapt-pack.meta', status: 'succeeded' }],
+      })
+    })
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    const api = {
+      createJobByVerb,
+      getJob,
+      cancelJob,
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new AdaptHookHarness(() => useAdaptPackJob({
+      api: api as any,
+      projectId: 3,
+      modelId: 7,
+    }))
+    harness.mount()
+    const startA = harness.value.start('skill-a')
+    await flushAdapt()
+    expect(createJobByVerb).toHaveBeenCalledTimes(1)
+
+    const resumeB = harness.value.resume('skill-b')
+    await flushAdapt()
+    await resumeB
+    await flushAdapt()
+
+    expect(listJobs).toHaveBeenCalledWith({ verb: 'adapt_pack', subjectKey: 'skill-b' })
+    expect(getJob).toHaveBeenCalledWith('job-b')
+    expect(cancelJob).not.toHaveBeenCalled()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-b',
+      candidateId: 'cand-b',
+    })
+
+    aJob.resolve(jobDetail('awaiting_selection', {
+      job: { id: 'job-a', status: 'awaiting_selection' },
+      candidates: [{ id: 'cand-a', contract_id: 'mangaforge.adapt-pack.meta', status: 'succeeded' }],
+    }))
+    await startA
+    await flushAdapt()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-b',
+      candidateId: 'cand-b',
+    })
+    expect(createJobByVerb.mock.calls.every((call: any[]) => call[0].subjectKey === 'skill-a')).toBe(true)
+  })
+
+  test('resume poll marks running so a concurrent start cannot create another job', async () => {
+    const listed = deferredAdapt<{ ok: true; jobs: Array<{ id: string; status: string; created_at: string }> }>()
+    const createJobByVerb = mock(async () => ({ ok: true as const, jobId: 'job-new' }))
+    const listJobs = mock(async () => listed.promise)
+    const getJob = mock(async () => jobDetail('awaiting_selection', {
+      job: { id: 'job-b', status: 'awaiting_selection' },
+      candidates: [{ id: 'cand-b', contract_id: 'mangaforge.adapt-pack.meta', status: 'succeeded' }],
+    }))
+    const api = {
+      createJobByVerb,
+      getJob,
+      cancelJob: async () => ({ ok: true as const }),
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new AdaptHookHarness(() => useAdaptPackJob({
+      api: api as any,
+      projectId: 3,
+      modelId: 7,
+    }))
+    harness.mount()
+    const resumeB = harness.value.resume('skill-b')
+    await flushAdapt()
+    await harness.value.start('skill-b')
+    expect(createJobByVerb).not.toHaveBeenCalled()
+    listed.resolve({
+      ok: true,
+      jobs: [{ id: 'job-b', status: 'awaiting_selection', created_at: '2026-08-25T00:00:00Z' }],
+    })
+    await resumeB
+    await flushAdapt()
+    expect(getJob).toHaveBeenCalledWith('job-b')
+    expect(harness.value.state).toMatchObject({ phase: 'awaiting_selection', jobId: 'job-b' })
   })
 })

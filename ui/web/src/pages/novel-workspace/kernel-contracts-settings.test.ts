@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
 import type { KernelContractListItem, KernelJobDetail } from '../../kernel/jobs/types'
 import type { WritingSkillCatalogItem } from './writingSkillsModel'
 import {
@@ -9,6 +9,7 @@ import {
   legalAdaptContracts,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
+  reloadContractsAfterAdaptCommit,
 } from './kernel-contracts-settings'
 
 function catalogItem(partial: Partial<WritingSkillCatalogItem> & Pick<WritingSkillCatalogItem, 'id'>): WritingSkillCatalogItem {
@@ -98,6 +99,32 @@ describe('defaultOptionsForVerb', () => {
       { id: 'user.rewrite.v1', label: '用户回炉', verb: 'rewrite_chapter', implemented: true },
     ]
     expect(defaultOptionsForVerb('write_chapter', contracts).map(item => item.id)).toEqual(['user.write.v1'])
+  })
+})
+
+describe('reloadContractsAfterAdaptCommit', () => {
+  test('after successful commit, listContracts is called for picker refresh', async () => {
+    const listContracts = mock(async () => ({
+      ok: true as const,
+      contracts: [
+        { id: 'user.write.v1', label: '用户写章', verb: 'write_chapter', implemented: true },
+      ],
+    }))
+    const next = await reloadContractsAfterAdaptCommit({
+      committed: true,
+      listContracts,
+    })
+    expect(listContracts).toHaveBeenCalledTimes(1)
+    expect(next?.map(item => item.id)).toEqual(['user.write.v1'])
+  })
+
+  test('does not listContracts when adopt did not succeed', async () => {
+    const listContracts = mock(async () => ({
+      ok: true as const,
+      contracts: [{ id: 'user.write.v1', label: '用户写章', verb: 'write_chapter', implemented: true }],
+    }))
+    expect(await reloadContractsAfterAdaptCommit({ committed: false, listContracts })).toBe(null)
+    expect(listContracts).not.toHaveBeenCalled()
   })
 })
 

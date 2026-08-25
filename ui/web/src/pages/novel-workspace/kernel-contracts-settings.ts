@@ -49,3 +49,12 @@ export function overlayPickerOntoDefaults(
   }
   return next
 }
+
+export async function reloadContractsAfterAdaptCommit(input: {
+  committed: boolean
+  listContracts: () => Promise<{ ok: true; contracts: KernelContractListItem[] } | { ok: false; message: string }>
+}): Promise<KernelContractListItem[] | null> {
+  if (!input.committed) return null
+  const listed = await input.listContracts()
+  return listed.ok ? listed.contracts : null
+}

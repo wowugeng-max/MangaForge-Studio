@@ -16,6 +16,7 @@ import {
   legalAdaptContracts,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
+  reloadContractsAfterAdaptCommit,
 } from './kernel-contracts-settings'
 import { useAdaptPackJob } from './shell/use-adapt-pack-job'
 import {
@@ -304,6 +305,15 @@ export function ProjectSettingsModal({
     }
   }
 
+  const adoptAdaptPack = async () => {
+    const result = await adapt.commit()
+    const next = await reloadContractsAfterAdaptCommit({
+      committed: Boolean(result?.ok),
+      listContracts: () => kernelApi.listContracts(),
+    })
+    if (next) setContractList(next)
+  }
+
   const filteredWritingSkills = filterWritingSkillCatalog(writingSkillCatalog, skillFilter)
 
   const save = async () => {
@@ -473,7 +483,7 @@ export function ProjectSettingsModal({
               </Text>
             ))}
             <Space>
-              <Button type="primary" onClick={() => void adapt.commit()}>采纳</Button>
+              <Button type="primary" onClick={() => void adoptAdaptPack()}>采纳</Button>
               <Button onClick={() => void adapt.cancel()}>丢弃</Button>
             </Space>
           </>
