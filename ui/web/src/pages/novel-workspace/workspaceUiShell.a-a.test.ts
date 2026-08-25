@@ -666,6 +666,8 @@ describe('commercial writing workspace UI shell a a', () => {
     expect(baseModel).toContain('useProjectContinueJob')
     expect(baseModel).toContain('onWriteContinue')
     expect(baseModel).toContain('onCancelContinue')
+    expect(baseModel).not.toContain('rewriteJob.state.phase !== \'idle\'')
+    expect(baseModel).toContain("rewriteJob.state.phase === 'awaiting_selection'")
     expect(areaView).toContain('onWriteContinue={onWriteContinue}')
     expect(areaView).toContain('onCancelContinue')
     expect(readyRuntime).toContain('onWriteContinue')

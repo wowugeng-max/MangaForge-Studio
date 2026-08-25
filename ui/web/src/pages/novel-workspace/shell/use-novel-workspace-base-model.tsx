@@ -655,7 +655,9 @@ export function useNovelWorkspaceBaseModel() {
       await loadProjectModules()
     },
     chapterWordTargetPayload,
-    isAuthorWriteBusy: () => writeJob.state.phase === 'running' || rewriteJob.state.phase !== 'idle',
+    isAuthorWriteBusy: () => writeJob.state.phase === 'running'
+      || rewriteJob.state.phase === 'running'
+      || rewriteJob.state.phase === 'awaiting_selection',
   })
 
   const writeJobWasRunningRef = useRef(false)
