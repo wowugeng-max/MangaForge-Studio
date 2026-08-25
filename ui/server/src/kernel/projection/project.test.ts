@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -21,6 +21,13 @@ function seedOutlineRow(ws: string, projectId: number, row: { outline_type: stri
 const reviewContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
 const applyContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-apply.surgical')!
 const continueContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.continue')!
+const adaptPackContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'mangaforge.adapt-pack.meta')!
+
+function writeSkillMd(ws: string, id: string) {
+  const dir = join(ws, '.mangaforge', 'writing-skill-packs', id)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, 'SKILL.md'), '---\nname: my-style\n---\n只改语气。\n')
+}
 
 async function seedWorkspace() {
   const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
@@ -231,5 +238,32 @@ describe('projectKernelSubject', () => {
     expect(files).not.toContain('参考/上一章.md')
     expect(existsSync(join(dir, '参考/上一章.md'))).toBe(false)
     expect(vars.previous_chapter_file).toBe('')
+  })
+
+  test('pack subject projects writing skill and verb templates without chapter files', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    writeSkillMd(ws, 'my-style')
+    const projectDir = mkdtempSync(join(tmpdir(), 'proj-adapt-'))
+    const { vars, files } = await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract: adaptPackContract, projectDir,
+      subjectType: 'pack',
+      verbParams: { skill_id: 'my-style' },
+    })
+    expect(existsSync(join(projectDir, 'skill/SKILL.md'))).toBe(true)
+    expect(existsSync(join(projectDir, 'templates/write_chapter.json'))).toBe(true)
+    expect(existsSync(join(projectDir, 'templates/adapt_pack.json'))).toBe(true)
+    expect(files.some(f => f.startsWith('正文/'))).toBe(false)
+    expect(existsSync(join(projectDir, '正文'))).toBe(false)
+    expect(vars.chapter_no).toBe('')
+  })
+
+  test('omitted subjectType with chapterId 0 throws CHAPTER_NOT_FOUND', async () => {
+    const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
+    const project = await createNovelProject(ws, { title: '试作' })
+    const projectDir = mkdtempSync(join(tmpdir(), 'proj-adapt-default-'))
+    await expect(projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: 0, contract: adaptPackContract, projectDir,
+    })).rejects.toMatchObject({ code: 'CHAPTER_NOT_FOUND' })
   })
 })

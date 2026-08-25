@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import {
   getNovelChapter, listNovelChapters, listNovelCharacters, listNovelOutlines,
@@ -22,7 +22,7 @@ export type ProjectKernelSubjectInput = {
   chapterId: number
   contract: KernelContract
   projectDir: string
-  subjectType?: 'chapter' | 'project'
+  subjectType?: 'chapter' | 'project' | 'pack'
   briefJson?: string
   verbParams?: Record<string, unknown>
 }
@@ -79,6 +79,12 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
   const subjectType = input.subjectType || 'chapter'
   if (subjectType === 'project' && mounts.some(m => CHAPTER_LEVEL_MOUNTS.includes(m))) {
     throw Object.assign(new Error('project subject cannot mount chapter-level projections'), { code: 'CONTRACT_INVALID' })
+  }
+  if (subjectType === 'pack' && mounts.some(m => CHAPTER_LEVEL_MOUNTS.includes(m))) {
+    throw Object.assign(new Error('pack subject cannot mount chapter-level projections'), { code: 'CONTRACT_INVALID' })
+  }
+  if (subjectType === 'pack' && mounts.includes('continue_window')) {
+    throw Object.assign(new Error('pack subject cannot mount continue_window'), { code: 'CONTRACT_INVALID' })
   }
   const chapter = subjectType === 'chapter' ? await getNovelChapter(workspace, chapterId, projectId) : null
   if (subjectType === 'chapter' && !chapter) throw Object.assign(new Error('chapter not found'), { code: 'CHAPTER_NOT_FOUND' })
@@ -248,6 +254,31 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
     if (previousRow) {
       writeProjected(projectDir, '参考/上一章.md', String(previousRow.chapter_text || ''), files)
       continuePrevious = '参考/上一章.md'
+    }
+  }
+
+  if (mounts.includes('adapt_skill')) {
+    const skillId = String(input.verbParams?.skill_id || '')
+    const source = join(workspace, '.mangaforge', 'writing-skill-packs', skillId)
+    const skillMd = join(source, 'SKILL.md')
+    if (!existsSync(skillMd)) {
+      throw Object.assign(new Error(`SKILL.md missing for ${skillId}`), { code: 'SKILL_NOT_FOUND' })
+    }
+    mkdirSync(join(projectDir, 'skill'), { recursive: true })
+    copyFileSync(skillMd, join(projectDir, 'skill', 'SKILL.md'))
+    files.push('skill/SKILL.md')
+    const references = join(source, 'references')
+    if (existsSync(references)) {
+      cpSync(references, join(projectDir, 'skill', 'references'), { recursive: true })
+      files.push('skill/references')
+    }
+  }
+  if (mounts.includes('verb_templates')) {
+    const templatesDir = join(import.meta.dir, '..', 'verbs', 'templates')
+    mkdirSync(join(projectDir, 'templates'), { recursive: true })
+    for (const name of readdirSync(templatesDir).filter(n => n.endsWith('.json'))) {
+      copyFileSync(join(templatesDir, name), join(projectDir, 'templates', name))
+      files.push(`templates/${name}`)
     }
   }
 
