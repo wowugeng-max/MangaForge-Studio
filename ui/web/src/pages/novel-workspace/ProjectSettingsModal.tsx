@@ -1,12 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Divider, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Typography, message } from 'antd'
 import apiClient from '../../api/client'
+import { axiosKernelRequest, createKernelJobApi } from '../../kernel/jobs/client'
+import type { KernelContractListItem } from '../../kernel/jobs/types'
 import { McpGenerationSourcePanel } from './McpGenerationSourcePanel'
 import { ChapterGenerationSourceControl } from './ChapterGenerationSourceControl'
 import type {
   ChapterSourceAuthorityState,
   ChapterSourceOperationToken,
 } from './chapterGenerationSourceModel'
+import {
+  defaultOptionsForVerb,
+  defaultPickerVerbs,
+  installedAdaptTargets,
+  legalAdaptContracts,
+  overlayPickerOntoDefaults,
+  parseAdaptUnsatisfied,
+} from './kernel-contracts-settings'
+import { useAdaptPackJob } from './shell/use-adapt-pack-job'
 import {
   BUILTIN_WRITING_SKILL_CATALOG,
   DEFAULT_FICTION_HUMANIZER_MODE,
@@ -128,6 +139,16 @@ export function ProjectSettingsModal({
   const [loading, setLoading] = useState(false)
   const [loadFailed, setLoadFailed] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [adaptSkillId, setAdaptSkillId] = useState('')
+  const [contractList, setContractList] = useState<KernelContractListItem[]>([])
+  const [pickerSelection, setPickerSelection] = useState<Record<string, string | undefined>>({})
+  const [savingDefaults, setSavingDefaults] = useState(false)
+  const kernelApi = useMemo(() => createKernelJobApi(axiosKernelRequest(apiClient)), [])
+  const adapt = useAdaptPackJob({
+    api: kernelApi,
+    projectId,
+    modelId: selectedModelId,
+  })
 
   useEffect(() => {
     if (!open || !projectId) return
@@ -227,6 +248,59 @@ export function ProjectSettingsModal({
       message.error(error?.response?.data?.error_code || '写作 skill 卸载失败')
     } finally {
       setUninstallingId('')
+    }
+  }
+
+  useEffect(() => {
+    const targets = installedAdaptTargets(writingSkillCatalog)
+    setAdaptSkillId(current => {
+      if (targets.some(item => item.id === current)) return current
+      return targets[0]?.id || ''
+    })
+  }, [writingSkillCatalog])
+
+  useEffect(() => {
+    if (!open || !adaptSkillId) return
+    void adapt.resume(adaptSkillId)
+  }, [open, adaptSkillId, adapt.resume])
+
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    Promise.all([kernelApi.listContracts(), kernelApi.getVerbDefaults()]).then(([contracts, defaults]) => {
+      if (!active) return
+      if (contracts.ok) setContractList(contracts.contracts)
+      if (defaults.ok) {
+        const picker: Record<string, string | undefined> = {}
+        for (const verb of defaultPickerVerbs()) {
+          const ids = defaults.defaults?.[verb]
+          picker[verb] = Array.isArray(ids) && ids[0] ? String(ids[0]) : undefined
+        }
+        setPickerSelection(picker)
+      }
+    }).catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [open, kernelApi])
+
+  const saveDefaultBindings = async () => {
+    setSavingDefaults(true)
+    try {
+      const current = await kernelApi.getVerbDefaults()
+      if (!current.ok) {
+        message.error(current.message || '默认绑定加载失败')
+        return
+      }
+      const next = overlayPickerOntoDefaults(current.defaults, pickerSelection)
+      const saved = await kernelApi.putVerbDefaults(next)
+      if (!saved.ok) {
+        message.error(saved.message || '默认绑定保存失败')
+        return
+      }
+      message.success('默认绑定已保存')
+    } finally {
+      setSavingDefaults(false)
     }
   }
 
@@ -355,6 +429,85 @@ export function ProjectSettingsModal({
         <Text type="secondary">
           只控制修订后当前章故事状态同步的单次模型输出预算，不控制正文长度，也不会扩展到全部章节。
         </Text>
+      </Space>
+      <Divider />
+      <Space direction="vertical" size={8} style={{ width: '100%' }}>
+        <Text strong>内核合同</Text>
+        <Select
+          aria-label="适配写作 skill"
+          value={adaptSkillId || undefined}
+          placeholder="选择已安装写作 skill"
+          options={installedAdaptTargets(writingSkillCatalog).map(skill => ({ label: skill.label, value: skill.id }))}
+          onChange={setAdaptSkillId}
+          style={{ minWidth: 220 }}
+          disabled={loading || loadFailed}
+        />
+        <Space wrap>
+          <Button
+            type="primary"
+            disabled={!selectedModelId || !adaptSkillId || adapt.state.phase === 'running' || loading || loadFailed}
+            onClick={() => adapt.start(adaptSkillId)}
+          >
+            适配合同
+          </Button>
+          {adapt.state.phase === 'running' && (
+            <Button onClick={() => void adapt.cancel()}>取消</Button>
+          )}
+        </Space>
+        {installedAdaptTargets(writingSkillCatalog).length === 0 && (
+          <Text type="secondary">先安装非内置写作 skill</Text>
+        )}
+        {adapt.state.phase === 'running' && (
+          <Text type="secondary">
+            {adapt.state.hint || '适配中'} {adapt.state.elapsedSec}s
+          </Text>
+        )}
+        {adapt.state.phase === 'awaiting_selection' && (
+          <>
+            {legalAdaptContracts(adapt.state.detail).map(item => (
+              <Text key={item.id}>{item.rel_path || item.id}</Text>
+            ))}
+            {parseAdaptUnsatisfied(adapt.state.detail).map(item => (
+              <Text type="danger" key={item.rel_path}>
+                {item.rel_path}{item.verb ? `（${item.verb}）` : ''}: {item.errors.join('；')}
+              </Text>
+            ))}
+            <Space>
+              <Button type="primary" onClick={() => void adapt.commit()}>采纳</Button>
+              <Button onClick={() => void adapt.cancel()}>丢弃</Button>
+            </Space>
+          </>
+        )}
+        {adapt.state.phase === 'failed' && adapt.state.errorCode === 'ADAPT_NO_VALID_CONTRACT' && (
+          parseAdaptUnsatisfied(adapt.state.detail).map(item => (
+            <Text type="danger" key={item.rel_path}>
+              {item.rel_path}{item.verb ? `（${item.verb}）` : ''}: {item.errors.join('；')}
+            </Text>
+          ))
+        )}
+        {defaultPickerVerbs().map(verb => (
+          <Space key={verb} align="center" wrap>
+            <Text>{verb}</Text>
+            <Select
+              aria-label={verb}
+              value={pickerSelection[verb]}
+              options={defaultOptionsForVerb(verb, contractList).map(contract => ({
+                value: contract.id,
+                label: contract.label || contract.id,
+              }))}
+              onChange={value => setPickerSelection(current => ({ ...current, [verb]: value }))}
+              style={{ minWidth: 280 }}
+              disabled={loading || loadFailed}
+            />
+          </Space>
+        ))}
+        <Button
+          loading={savingDefaults}
+          disabled={loading || loadFailed}
+          onClick={() => void saveDefaultBindings()}
+        >
+          保存默认绑定
+        </Button>
       </Space>
       <Divider />
       <Space direction="vertical" size={8} style={{ width: '100%' }}>

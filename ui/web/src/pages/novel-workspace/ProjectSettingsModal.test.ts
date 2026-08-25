@@ -285,6 +285,26 @@ describe('project settings editor revision timeout', () => {
     expect(modal).toContain('...modelOptions')
   })
 
+  test('settings source has 内核合同 and GitHub install does not start adapt_pack', () => {
+    const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
+    expect(modal).toContain('内核合同')
+    expect(modal).toContain('适配合同')
+    const installFn = modal.slice(modal.indexOf('const installWritingSkill'), modal.indexOf('const uninstallWritingSkill'))
+    expect(installFn).not.toContain('adapt_pack')
+    expect(installFn).not.toContain('/kernel/jobs')
+    expect(installFn).toContain('/novel/writing-skills/install')
+    expect(modal).not.toContain("KERNEL_DEFAULT_PICKER_VERBS") // 选择器数组在 helper 文件
+    const kernelBlock = modal.slice(modal.indexOf('内核合同'), modal.indexOf('去 AI 味写作 skill'))
+    expect(kernelBlock).toContain('installedAdaptTargets')
+    expect(kernelBlock).not.toContain('writingSkillsModelId')
+    expect(kernelBlock).toContain('selectedModelId')
+    expect(kernelBlock).toContain('保存默认绑定')
+    const saveFn = modal.slice(modal.indexOf('const save = async'), modal.indexOf('return ('))
+    expect(saveFn).not.toContain('putVerbDefaults')
+    expect(modal.indexOf('内核合同')).toBeGreaterThan(modal.indexOf('质检与修订'))
+    expect(modal.indexOf('内核合同')).toBeLessThan(modal.indexOf('去 AI 味写作 skill'))
+  })
+
   test('keeps save disabled when the current project setting fails to load', () => {
     const modal = readFileSync(join(import.meta.dir, 'ProjectSettingsModal.tsx'), 'utf8')
     expect(modal).toContain('const [loadFailed, setLoadFailed]')
