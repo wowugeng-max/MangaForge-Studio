@@ -172,7 +172,30 @@ describe('verb-based job creation', () => {
     const { ws, project, chapter } = await seed()
     const base = { project_id: project.id, subject_type: 'chapter', subject_id: chapter.id, model_id: 9 }
     expect(((await validateCreateKernelJob(ws, { ...base, verb: 'nope' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_UNKNOWN')
-    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'adapt_pack' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_DEFAULT_MISSING')
+    mkdirSync(join(ws, '.mangaforge/kernel'), { recursive: true })
+    writeFileSync(join(ws, '.mangaforge/kernel/verb-defaults.json'), JSON.stringify({
+      review_chapter: [],
+      apply_review: ['oh-story-core.story-apply.surgical'],
+      deslop_chapter: ['oh-story-core.story-deslop.file'],
+      open_book: ['oh-story-core.story-long-write.open'],
+      expand_outline: ['oh-story-core.story-long-write.expand'],
+      write_chapter: ['oh-story-core.story-long-write.chapter'],
+      rewrite_chapter: ['oh-story-core.story-long-write.rewrite'],
+      write_continue: ['oh-story-core.story-long-write.continue'],
+      adapt_pack: ['mangaforge.adapt-pack.meta'],
+    }))
+    expect(((await validateCreateKernelJob(ws, { ...base, verb: 'review_chapter' }, { skipRuntimeCheck: true })) as any).code).toBe('VERB_DEFAULT_MISSING')
+    writeFileSync(join(ws, '.mangaforge/kernel/verb-defaults.json'), JSON.stringify({
+      review_chapter: ['oh-story-core.story-review.full'],
+      apply_review: ['oh-story-core.story-apply.surgical'],
+      deslop_chapter: ['oh-story-core.story-deslop.file'],
+      open_book: ['oh-story-core.story-long-write.open'],
+      expand_outline: ['oh-story-core.story-long-write.expand'],
+      write_chapter: ['oh-story-core.story-long-write.chapter'],
+      rewrite_chapter: ['oh-story-core.story-long-write.rewrite'],
+      write_continue: ['oh-story-core.story-long-write.continue'],
+      adapt_pack: ['mangaforge.adapt-pack.meta'],
+    }))
     expect(((await validateCreateKernelJob(ws, {
       ...base, verb: 'review_chapter',
       contract_ids: ['oh-story-core.story-review.full', 'oh-story-core.story-deslop.file'],

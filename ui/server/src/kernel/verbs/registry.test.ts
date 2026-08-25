@@ -32,7 +32,7 @@ describe('verb template registry', () => {
   })
   test('implemented verbs are exactly the phase-1 set plus expand_outline, write_chapter and write_continue', () => {
     expect([...IMPLEMENTED_VERBS].sort()).toEqual([
-      'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'rewrite_chapter', 'write_chapter', 'write_continue',
+      'adapt_pack', 'apply_review', 'deslop_chapter', 'expand_outline', 'open_book', 'review_chapter', 'rewrite_chapter', 'write_chapter', 'write_continue',
     ])
   })
   test('write_continue template is project auto_if_single with reject_outline_artifact', () => {

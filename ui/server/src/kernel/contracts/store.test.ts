@@ -9,7 +9,7 @@ import { deleteUserKernelContract, loadKernelContracts, saveUserKernelContract, 
 function tempWs() { return mkdtempSync(join(tmpdir(), 'kernel-contracts-')) }
 
 describe('builtin contracts', () => {
-  test('all nine builtins pass validation', () => {
+  test('all ten builtins pass validation', () => {
     for (const contract of BUILTIN_KERNEL_CONTRACTS) {
       const result = validateKernelContract(contract)
       expect(result.ok).toBe(true)
@@ -22,6 +22,10 @@ describe('builtin contracts', () => {
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.chapter')?.verb).toBe('write_chapter')
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.rewrite')?.verb).toBe('rewrite_chapter')
     expect(BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.continue')?.verb).toBe('write_continue')
+    const adaptPackMeta = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'mangaforge.adapt-pack.meta')
+    expect(adaptPackMeta?.verb).toBe('adapt_pack')
+    expect(adaptPackMeta?.invoke.mention).toBe('')
+    expect(adaptPackMeta?.commit.mode).toBe('manual')
     expect(BUILTIN_KERNEL_CONTRACTS.map(c => c.id)).toEqual([
       'oh-story-core.story-review.full',
       'oh-story-core.story-deslop.file',
@@ -32,6 +36,7 @@ describe('builtin contracts', () => {
       'oh-story-core.story-long-write.chapter',
       'oh-story-core.story-long-write.rewrite',
       'oh-story-core.story-long-write.continue',
+      'mangaforge.adapt-pack.meta',
     ])
   })
 })
@@ -41,6 +46,7 @@ describe('contract store', () => {
     const ws = tempWs()
     seedBuiltinKernelContracts(ws)
     expect(readdirSync(join(ws, '.mangaforge', 'kernel', 'contracts')).sort()).toEqual([
+      'mangaforge.adapt-pack.meta.json',
       'oh-story-core.story-apply.surgical.json',
       'oh-story-core.story-deslop.file.json',
       'oh-story-core.story-long-write.chapter.json',
@@ -75,6 +81,9 @@ describe('contract store', () => {
     const cont = contracts.find(c => c.id === 'oh-story-core.story-long-write.continue')!
     expect(cont.verb).toBe('write_continue')
     expect(cont.implemented).toBe(true)
+    const adapt = contracts.find(c => c.id === 'mangaforge.adapt-pack.meta')!
+    expect(adapt.verb).toBe('adapt_pack')
+    expect(adapt.implemented).toBe(true)
     expect(outline.implemented).toBe(false)
     expect(chapter.verb).toBe('write_chapter')
     expect(rewrite.verb).toBe('rewrite_chapter')

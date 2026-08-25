@@ -118,6 +118,11 @@ describe('instance vs template validation', () => {
     expect(cont.invoke.prompt).toContain('续写第')
     expect(cont.invoke.prompt).toContain('不要开书')
   })
+  test('adapt_pack meta satisfies template and has no chapter mounts', () => {
+    const adaptPackMeta = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'mangaforge.adapt-pack.meta')!
+    expect(validateInstanceAgainstTemplate(adaptPackMeta)).toEqual({ ok: true })
+    expect(adaptPackMeta.projection.mounts.includes('current_chapter')).toBe(false)
+  })
   test('instance commit mode must match the template commit_mode', () => {
     const expand = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.expand')!
     const auto = { ...expand, commit: { ...expand.commit, mode: 'auto_if_single' } }

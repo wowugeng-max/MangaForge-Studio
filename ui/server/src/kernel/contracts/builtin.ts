@@ -288,7 +288,42 @@ const longWriteContinue: KernelContract = {
   approval: 'never',
 }
 
-export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen, longWriteExpand, longWriteChapter, longWriteRewrite, longWriteContinue]
+const adaptPackMeta: KernelContract = {
+  schema_version: 1,
+  id: 'mangaforge.adapt-pack.meta',
+  pack_id: 'mangaforge',
+  skill_name: 'adapt-pack',
+  variant: 'meta',
+  verb: 'adapt_pack',
+  capability: 'attachment',
+  label: '适配合同',
+  invoke: {
+    mention: '',
+    prompt: [
+      '根据 skill/SKILL.md 与 skill/references/（若有）为工作台动词生成合同实例。',
+      '动词模板在 templates/ 下，每个文件是一条动词的最低交付，不要改模板本身。',
+      '对每一条模板：若该 skill 能填满，写出 contracts/{verb}.json（须符合模板与合同 schema）。',
+      '若填不满：不要编造假合同；可以写 contracts/_notes/{verb}.md 说明缺什么，但仍以网关校验为准。',
+      '不要写 正文/、大纲/、设定/、审稿/。不要覆盖 templates/。',
+      '不要把合同只写在回复里，必须写回 contracts/ 文件。',
+    ].join('\n'),
+  },
+  projection: {
+    mounts: ['adapt_skill', 'verb_templates'],
+  },
+  outputs: [
+    { artifact_kind: 'contract_json', glob: 'contracts/*.json', binding: 'kernel_only', required: true },
+    { artifact_kind: 'attachment', glob: 'contracts/_notes/**/*.md', binding: 'kernel_only', required: false },
+  ],
+  write_scope: ['contracts/'],
+  ignore: ['templates/', 'skill/'],
+  gates: ['write_outside_scope'],
+  commit: { mode: 'manual', domain_writes: [], source: 'adapt_pack' },
+  sandbox: 'workspace-write',
+  approval: 'never',
+}
+
+export const BUILTIN_KERNEL_CONTRACTS: KernelContract[] = [reviewFull, deslopFile, applySurgical, longWriteOutline, longWriteOpen, longWriteExpand, longWriteChapter, longWriteRewrite, longWriteContinue, adaptPackMeta]
 
 export function isBuiltinKernelContractId(id: string): boolean {
   return BUILTIN_KERNEL_CONTRACTS.some(contract => contract.id === id)
