@@ -98,6 +98,8 @@ describe('rewrite_chapter jobs', () => {
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('awaiting_selection')
     expect(detail.candidates[0].status).toBe('succeeded')
+    const meta = JSON.parse(detail.candidates[0].metadata || '{}')
+    expect(Object.prototype.hasOwnProperty.call(meta, 'adapt_unsatisfied')).toBe(false)
     expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('旧稿正文')
     expect(latestVersionSource(ws, filled.id)).not.toBe('oh_story_rewrite')
     const committed = await commitKernelCandidate(ws, created.jobId, detail.candidates[0].id)

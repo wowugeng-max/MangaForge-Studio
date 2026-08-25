@@ -372,7 +372,7 @@ export async function createAndRunKernelJob(
             gate_results: JSON.stringify(gate.results),
             metadata: JSON.stringify({
               spawn_evidence: result.spawnEvidence,
-              adapt_unsatisfied: adaptUnsatisfied,
+              ...(validated.verb === 'adapt_pack' ? { adapt_unsatisfied: adaptUnsatisfied } : {}),
             }),
             finished_at: new Date().toISOString(),
           })

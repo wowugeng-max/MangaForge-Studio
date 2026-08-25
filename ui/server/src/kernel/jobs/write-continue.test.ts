@@ -146,6 +146,8 @@ describe('write_continue jobs', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.job.status).toBe('committed')
+    const meta = JSON.parse(detail.candidates[0].metadata || '{}')
+    expect(Object.prototype.hasOwnProperty.call(meta, 'adapt_unsatisfied')).toBe(false)
     expect((await getNovelChapter(ws, ch2.id, project.id))?.chapter_text).toBe('续写章2')
     expect((await getNovelChapter(ws, ch3.id, project.id))?.chapter_text).toBe('续写章3')
     expect(latestVersionSource(ws, ch2.id)).toBe('oh_story_continue')
