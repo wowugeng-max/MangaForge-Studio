@@ -16,7 +16,9 @@ import {
   legalAdaptContracts,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
+  previewAdaptContractFields,
   reloadContractsAfterAdaptCommit,
+  type AdaptContractPreview,
 } from './kernel-contracts-settings'
 import { useAdaptPackJob } from './shell/use-adapt-pack-job'
 import {
@@ -144,6 +146,7 @@ export function ProjectSettingsModal({
   const [contractList, setContractList] = useState<KernelContractListItem[]>([])
   const [pickerSelection, setPickerSelection] = useState<Record<string, string | undefined>>({})
   const [savingDefaults, setSavingDefaults] = useState(false)
+  const [adaptContractPreviews, setAdaptContractPreviews] = useState<AdaptContractPreview[]>([])
   const kernelApi = useMemo(() => createKernelJobApi(axiosKernelRequest(apiClient)), [])
   const adapt = useAdaptPackJob({
     api: kernelApi,
@@ -264,6 +267,24 @@ export function ProjectSettingsModal({
     if (!open || !adaptSkillId) return
     void adapt.resume(adaptSkillId)
   }, [open, adaptSkillId, adapt.resume])
+
+  useEffect(() => {
+    if (adapt.state.phase !== 'awaiting_selection') {
+      setAdaptContractPreviews([])
+      return
+    }
+    const artifacts = legalAdaptContracts(adapt.state.detail)
+    let active = true
+    void Promise.all(artifacts.map(async (artifact) => {
+      const result = await kernelApi.getArtifactContent(artifact.id)
+      return previewAdaptContractFields(result.ok ? result.content : '', artifact)
+    })).then((previews) => {
+      if (active) setAdaptContractPreviews(previews)
+    })
+    return () => {
+      active = false
+    }
+  }, [adapt.state, kernelApi])
 
   useEffect(() => {
     if (!open) return
@@ -477,8 +498,8 @@ export function ProjectSettingsModal({
         )}
         {adapt.state.phase === 'awaiting_selection' && (
           <>
-            {legalAdaptContracts(adapt.state.detail).map(item => (
-              <Text key={item.id}>{item.rel_path || item.id}</Text>
+            {adaptContractPreviews.map(item => (
+              <Text key={item.id}>{item.id} / {item.verb} / {item.label}</Text>
             ))}
             {parseAdaptUnsatisfied(adapt.state.detail).map(item => (
               <Text type="danger" key={item.rel_path}>

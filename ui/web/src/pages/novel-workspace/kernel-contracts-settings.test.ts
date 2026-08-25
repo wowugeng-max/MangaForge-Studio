@@ -9,6 +9,7 @@ import {
   legalAdaptContracts,
   overlayPickerOntoDefaults,
   parseAdaptUnsatisfied,
+  previewAdaptContractFields,
   reloadContractsAfterAdaptCommit,
 } from './kernel-contracts-settings'
 
@@ -88,6 +89,56 @@ describe('legalAdaptContracts', () => {
       ],
     })).map(item => item.id)).toEqual(['a1'])
     expect(legalAdaptContracts(null)).toEqual([])
+  })
+})
+
+describe('previewAdaptContractFields', () => {
+  test('reads id, verb, and label from a write_chapter user contract JSON', () => {
+    const content = JSON.stringify({
+      schema_version: 1,
+      id: 'my-style.write-chapter.v1',
+      pack_id: 'my-style',
+      skill_name: 'write-chapter',
+      variant: 'v1',
+      verb: 'write_chapter',
+      capability: 'rewrite',
+      label: '风格写章',
+      invoke: { mention: '$write-chapter', prompt: '写第 {{chapter_no}} 章。只改 {{scope_files}}。' },
+      projection: { mounts: ['current_chapter'] },
+      outputs: [],
+      write_scope: ['正文/'],
+      ignore: [],
+      gates: [],
+      commit: { mode: 'auto_if_single', domain_writes: ['chapters'], source: 'user_write' },
+      sandbox: 'workspace-write',
+      approval: 'never',
+    })
+    const artifacts = legalAdaptContracts(detail({
+      artifacts: [
+        { id: 'art-1', candidate_id: 'c1', rel_path: 'contracts/write_chapter.json', artifact_kind: 'contract_json' },
+      ],
+    }))
+    expect(previewAdaptContractFields(content, artifacts[0])).toEqual({
+      id: 'my-style.write-chapter.v1',
+      verb: 'write_chapter',
+      label: '风格写章',
+    })
+    expect(previewAdaptContractFields(content, artifacts[0])).not.toEqual({
+      id: artifacts[0].rel_path || artifacts[0].id,
+      verb: '',
+      label: '',
+    })
+  })
+
+  test('falls back to verb from rel_path when JSON parse fails', () => {
+    expect(previewAdaptContractFields('{not json}', {
+      id: 'art-1',
+      rel_path: 'contracts/write_chapter.json',
+    })).toEqual({
+      id: 'art-1',
+      verb: 'write_chapter',
+      label: '',
+    })
   })
 })
 

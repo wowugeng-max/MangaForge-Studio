@@ -31,6 +31,33 @@ export function legalAdaptContracts(detail: KernelJobDetail | null | undefined) 
   return (detail?.artifacts || []).filter(a => a.artifact_kind === 'contract_json')
 }
 
+export type AdaptContractPreview = { id: string; verb: string; label: string }
+
+function verbFromRelPath(relPath?: string) {
+  const name = String(relPath || '').split(/[/\\]/).pop() || ''
+  return name.replace(/\.json$/i, '')
+}
+
+export function previewAdaptContractFields(
+  content: string | null | undefined,
+  artifact?: { id?: string; rel_path?: string },
+): AdaptContractPreview {
+  const fallbackId = String(artifact?.id || artifact?.rel_path || '')
+  const fallbackVerb = verbFromRelPath(artifact?.rel_path)
+  try {
+    const parsed = JSON.parse(String(content || '')) as { id?: unknown; verb?: unknown; label?: unknown }
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const id = String(parsed.id || '').trim()
+      const verb = String(parsed.verb || '').trim() || fallbackVerb
+      const label = String(parsed.label || '').trim()
+      return { id: id || fallbackId, verb, label }
+    }
+  } catch {
+    // fall through to filename / artifact id
+  }
+  return { id: fallbackId, verb: fallbackVerb, label: '' }
+}
+
 export function defaultOptionsForVerb(
   verb: string,
   contracts: KernelContractListItem[],

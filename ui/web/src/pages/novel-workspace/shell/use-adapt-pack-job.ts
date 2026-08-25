@@ -219,13 +219,14 @@ export async function resumeAdaptPackJob(input: {
 export async function cancelAdaptPackJob(input: {
   abort: () => void
   cancelJob: AdaptPackJobClient['cancelJob']
+  jobId?: string
   jobIdRef: { current: string }
   stateJobId?: string
 }): Promise<void> {
-  const jobId = String(input.jobIdRef.current || input.stateJobId || '')
+  const jobId = String(input.jobId || input.jobIdRef.current || input.stateJobId || '')
   input.abort()
   if (jobId) await input.cancelJob(jobId)
-  input.jobIdRef.current = ''
+  if (input.jobIdRef.current === jobId) input.jobIdRef.current = ''
 }
 
 export async function commitAdaptPackJob(input: {
@@ -366,15 +367,19 @@ export function useAdaptPackJob(deps: {
 
   const cancel = useCallback(async () => {
     if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
-    sessionRef.current += 1
-    skillIdRef.current = ''
-    runningRef.current = false
+    const jobId = String(
+      jobIdRef.current
+      || (state.phase === 'running' || state.phase === 'awaiting_selection' ? state.jobId : ''),
+    )
+    const controller = abortRef.current
     await cancelAdaptPackJob({
-      abort: () => abortRef.current?.abort(),
+      abort: () => controller?.abort(),
       cancelJob: api.cancelJob,
+      jobId,
       jobIdRef,
-      stateJobId: state.phase === 'running' || state.phase === 'awaiting_selection' ? state.jobId : '',
     })
+    if (!isCurrentSession(session) || skillIdRef.current !== skillId) return
+    runningRef.current = false
     setState({ phase: 'idle' })
   }, [api, state, session, skillId])
 

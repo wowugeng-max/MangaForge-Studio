@@ -596,4 +596,72 @@ describe('useAdaptPackJob skill switch', () => {
     })
     expect(harness.value.state.phase).not.toBe('failed')
   })
+
+  test('cancel in flight then resume(B) keeps B after cancel settles', async () => {
+    const cancelled = deferredAdapt<{ ok: true }>()
+    const cancelJob = mock(async (id: string) => {
+      if (id === 'job-a') return cancelled.promise
+      return { ok: true as const }
+    })
+    const listJobs = mock(async (query: { verb: string; subjectKey: string }) => ({
+      ok: true as const,
+      jobs: query.subjectKey === 'skill-b'
+        ? [{ id: 'job-b', status: 'awaiting_selection', created_at: '2026-08-25T00:00:00Z' }]
+        : [{ id: 'job-a', status: 'awaiting_selection', created_at: '2026-08-24T00:00:00Z' }],
+    }))
+    const getJob = mock(async (id: string) => jobDetail('awaiting_selection', {
+      job: { id, status: 'awaiting_selection' },
+      candidates: [{
+        id: id === 'job-a' ? 'cand-a' : 'cand-b',
+        contract_id: 'mangaforge.adapt-pack.meta',
+        status: 'succeeded',
+      }],
+    }))
+    const api = {
+      createJobByVerb: async () => ({ ok: true as const, jobId: 'job-new' }),
+      getJob,
+      cancelJob,
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new AdaptHookHarness(() => useAdaptPackJob({
+      api: api as any,
+      projectId: 3,
+      modelId: 7,
+    }))
+    harness.mount()
+    await harness.value.resume('skill-a')
+    await flushAdapt()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-a',
+      candidateId: 'cand-a',
+    })
+
+    const cancelA = harness.value.cancel()
+    await flushAdapt()
+    expect(cancelJob).toHaveBeenCalledWith('job-a')
+
+    const resumeB = harness.value.resume('skill-b')
+    await flushAdapt()
+    await resumeB
+    await flushAdapt()
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-b',
+      candidateId: 'cand-b',
+    })
+
+    cancelled.resolve({ ok: true })
+    await cancelA
+    await flushAdapt()
+
+    expect(harness.value.state).toMatchObject({
+      phase: 'awaiting_selection',
+      jobId: 'job-b',
+      candidateId: 'cand-b',
+    })
+    expect(harness.value.state.phase).not.toBe('idle')
+    expect(cancelJob.mock.calls.map((call: any[]) => call[0])).toEqual(['job-a'])
+  })
 })
