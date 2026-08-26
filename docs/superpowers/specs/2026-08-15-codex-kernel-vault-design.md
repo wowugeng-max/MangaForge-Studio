@@ -415,7 +415,7 @@ candidate:  queued → running → succeeded → committed
 - 提交后其余 `succeeded` 候选保持 `succeeded`（不改状态），账本可追溯谁没被选。
 
 `workspace_scope`：`novel` | `canvas`。第一期只创建 `novel`。  
-`subject_type`：`chapter` | `project` | `outline` | `canvas_node` | `pack`。已实现：`chapter`（审稿/去AI/改稿/写本章/回炉）、`project`（开书/扩纲/续写）。`pack` / 画布仍拒绝执行。
+`subject_type`：`chapter` | `project` | `outline` | `canvas_node` | `pack`。已实现：`chapter`（审稿/去AI/改稿/写本章/回炉）、`project`（开书/扩纲/续写）、`pack`（适配 `adapt_pack`）。`outline` / 画布仍拒绝执行。
 
 ### 领域表怎么接
 
@@ -754,7 +754,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | `SUBJECT_TYPE_MISMATCH` | 400 | 主体与动词模板不符 |
 | `BRIEF_REQUIRED` | 400 | 开书缺创意或超 32KiB |
 | `PROVIDER_TRANSLATE_FAILED` | 400 | 供应商无法翻译，或 key 缺失无法构造环境 |
-| `PROJECT_JOB_RUNNING` | 409 | 同项目同动词未结束 |
+| `PROJECT_JOB_RUNNING` | 409 | 同项目同动词未结束（章级动词再按 `subject_id` 细分；`adapt_pack` 按全工作区 `subject_key`） |
 | `JOB_NOT_FOUND` | 404 | 无此 job |
 | `JOB_ALREADY_COMMITTED` | 409 | 不能取消/重复提交 |
 | `CANDIDATE_NOT_FOUND` | 404 | 无此候选 |
@@ -917,4 +917,4 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 - **废止** 分期 3 计划中的 idle 120s / hard 30min、sandbox 驼峰发送、`app-server` 带 `--ignore-user-config`、按 capability 并跑 / `CAPABILITY_MIXED`。
 - **扩展** 由 `2026-08-16-novel-workbench-verb-contracts-design.md`：开书、verb 主键、投影/门补丁。本 v1.2 把已落地内核语义收回本文。
 - **不替代** 画布 skill 编译器，直到另开 prompt 合同实现计划。
-- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；**D 后置补丁已按** `2026-08-18-kernel-d-patches` **落地**；**C 扩纲运行时已按** `2026-08-18-expand-outline-runtime` **落地**；**C 写章运行时已按** `2026-08-19-write-chapter-runtime` **落地**；**C 回炉运行时已按** `2026-08-19-rewrite-chapter-runtime` **落地**；**C 续写运行时已按** `2026-08-20-write-continue-runtime` **落地**。B（画布 `prompt`）仍须另开 brainstorm。适配仍须另开。
+- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；**D 后置补丁已按** `2026-08-18-kernel-d-patches` **落地**；**C 扩纲运行时已按** `2026-08-18-expand-outline-runtime` **落地**；**C 写章运行时已按** `2026-08-19-write-chapter-runtime` **落地**；**C 回炉运行时已按** `2026-08-19-rewrite-chapter-runtime` **落地**；**C 续写运行时已按** `2026-08-20-write-continue-runtime` **落地**；**C 适配运行时已按** `2026-08-25-adapt-pack-runtime` **落地**（项目设置「内核合同」）。扩纲工作台按钮、`generateChapterForGroup` / batch、B（画布 `prompt`）仍须另开。

@@ -84,7 +84,7 @@
 
 1. `subject_type` 必须是 `pack`，否则 400 `SUBJECT_TYPE_MISMATCH`。
 2. `subject_id` 必须是 `0`，否则 400 `SUBJECT_TYPE_MISMATCH`（pack 身份在 `subject_key`）。
-3. `project_id` 必须是当前打开的项目（整数 >0，且账本里有该项目）。相对动词规范「pack 允许 project_id=0」：**本片收窄为必须 >0**，因为入口在项目设置。`project_id<=0` 或项目不存在 → 400 `CONTRACT_INVALID`。job 行挂这个项目；合同目录仍是工作区级。
+3. `project_id` 必须是当前打开的项目（整数 >0，且账本里有该项目）。动词 spec v1.6 起必须 >0（旧稿曾允许 0）。`project_id<=0` 或项目不存在 → 400 `CONTRACT_INVALID`。job 行挂这个项目；合同目录仍是工作区级。
 4. `verb_params.skill_id` 与 `subject_key` 都必须是非空字符串、彼此相同，且匹配 `^[a-z0-9][a-z0-9-]{0,63}$`，否则 400 `VERB_PARAMS_INVALID`。
 5. 目标 skill（查 `listInstalledWritingSkillPacks` / 盘上 `.mangaforge/writing-skill-packs/{id}/`）：
    - id 属于内置写作 skill 三件套，或 id 为 `oh-story-core` → 400 `ADAPT_TARGET_INVALID`。
