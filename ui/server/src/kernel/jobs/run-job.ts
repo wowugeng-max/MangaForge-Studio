@@ -283,9 +283,18 @@ export async function createAndRunKernelJob(
             return
           }
           if (!result.ok) {
-            updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
-            return
+            const packMissingOutputs = validated.verb === 'adapt_pack' && result.error_code === 'OUTPUT_MISSING'
+            if (!packMissingOutputs) {
+              updateKernelCandidate(ws, candidateId, { status: 'failed', error_code: result.error_code, finished_at: now })
+              return
+            }
           }
+          const harvestedArtifacts = result.artifacts ?? []
+          const harvestedWarnings = result.warnings ?? []
+          const harvestedSpawn = result.spawnEvidence ?? { subagent_threads: [], agent_hints: [] }
+          const harvestedThread = result.threadId ?? ''
+          const harvestedTurn = result.turnId ?? ''
+          const harvestedLast = result.lastMessage ?? ''
           let adaptUnsatisfied: Array<{ rel_path: string; verb: string; errors: string[] }> = []
           let collapsed
           if (validated.verb === 'write_continue') {
@@ -300,11 +309,11 @@ export async function createAndRunKernelJob(
             collapsed = collapseContinueChapterArtifacts({
               windowNos,
               projectedRel,
-              artifacts: result.artifacts,
+              artifacts: harvestedArtifacts,
             })
           } else if (validated.verb === 'adapt_pack') {
             const collapsedAdapt = collapseAdaptPackArtifacts({
-              artifacts: result.artifacts,
+              artifacts: harvestedArtifacts,
               readText: (artifact) => {
                 try { return readFileSync(String(artifact.copied_path || ''), 'utf8') } catch { return '' }
               },
@@ -320,7 +329,7 @@ export async function createAndRunKernelJob(
               capability: contract.capability,
               subjectType: validated.subjectType,
               currentRel,
-              artifacts: result.artifacts,
+              artifacts: harvestedArtifacts,
             })
           }
           if (!collapsed.ok) {
@@ -341,8 +350,8 @@ export async function createAndRunKernelJob(
           const gate = await runPostHarvestGates({
             workspace: ws, projectId: body.project_id, chapterId: body.subject_id, contract,
             artifacts: registered.map(r => ({ rel_path: r.rel_path, artifact_kind: r.artifact_kind, vault_path: r.vault_path })),
-            warnings: result.warnings,
-            spawnEvidence: result.spawnEvidence,
+            warnings: harvestedWarnings,
+            spawnEvidence: harvestedSpawn,
             continueCount: Number(JSON.parse(validated.verbParamsJson || '{}').count || 0),
             readArtifactText: (artifact) => {
               try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
@@ -367,11 +376,11 @@ export async function createAndRunKernelJob(
           updateKernelCandidate(ws, candidateId, {
             status: candidateStatusAfterGate(failedCode, failedStatus),
             error_code: failedCode,
-            thread_id: result.threadId, turn_id: result.turnId,
-            last_message_excerpt: String(result.lastMessage || '').slice(0, 500),
+            thread_id: harvestedThread, turn_id: harvestedTurn,
+            last_message_excerpt: String(harvestedLast || '').slice(0, 500),
             gate_results: JSON.stringify(gate.results),
             metadata: JSON.stringify({
-              spawn_evidence: result.spawnEvidence,
+              spawn_evidence: harvestedSpawn,
               ...(validated.verb === 'adapt_pack' ? { adapt_unsatisfied: adaptUnsatisfied } : {}),
             }),
             finished_at: new Date().toISOString(),

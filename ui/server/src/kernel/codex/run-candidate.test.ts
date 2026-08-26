@@ -133,4 +133,26 @@ describe('runKernelCandidate', () => {
     expect(source).toContain('isolatedHome: jobDir')
     expect(source).toContain("codexHome: join(jobDir, 'codex-home')")
   })
+
+  test('adapt_pack missing contracts/*.json returns OUTPUT_MISSING with harvested _notes', async () => {
+    const { ws, project } = await seedWorkspace()
+    const skillDir = join(ws, '.mangaforge', 'writing-skill-packs', 'my-style')
+    mkdirSync(skillDir, { recursive: true })
+    writeFileSync(join(skillDir, 'SKILL.md'), '---\nname: my-style\n---\n只改语气。\n')
+    const adaptContract = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'mangaforge.adapt-pack.meta')!
+    const result = await runKernelCandidate({
+      workspace: ws, projectId: project.id, chapterId: 0, contract: adaptContract, modelId: 9,
+      subjectType: 'pack', verbParams: { skill_id: 'my-style' },
+      sessionArgv: [process.execPath, FIXTURE],
+      sessionExtraEnv: {
+        FAKE_WRITE_FILE: 'contracts/_notes/write_chapter.md',
+        FAKE_WRITE_CONTENT: '缺合同',
+        FAKE_AGENT_MESSAGE: '只写了 notes',
+      },
+    })
+    expect(result.ok).toBe(false)
+    if (result.ok) return
+    expect(result.error_code).toBe('OUTPUT_MISSING')
+    expect(result.artifacts?.some(a => a.rel_path === 'contracts/_notes/write_chapter.md')).toBe(true)
+  })
 })

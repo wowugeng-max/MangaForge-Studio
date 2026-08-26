@@ -48,7 +48,18 @@ export type RunKernelCandidateResult =
       spawnEvidence: SpawnEvidence
       eventsPath: string
     }
-  | { ok: false; error_code: string; message: string; jobDir?: string }
+  | {
+      ok: false
+      error_code: string
+      message: string
+      jobDir?: string
+      artifacts?: HarvestedArtifact[]
+      warnings?: Array<{ warning: string; rel_path: string }>
+      lastMessage?: string
+      threadId?: string
+      turnId?: string
+      spawnEvidence?: SpawnEvidence
+    }
 
 function sha256Hex(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex')
@@ -172,7 +183,18 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
       missingRequired = missingRequired.filter(glob => glob !== rendered)
     }
     if (missingRequired.length > 0) {
-      return { ok: false, error_code: 'OUTPUT_MISSING', message: `缺少约定产物：${missingRequired.join(', ')}`, jobDir }
+      return {
+        ok: false,
+        error_code: 'OUTPUT_MISSING',
+        message: `缺少约定产物：${missingRequired.join(', ')}`,
+        jobDir,
+        artifacts,
+        warnings: harvest.warnings,
+        lastMessage: turn.lastAgentMessage,
+        threadId: session.threadId,
+        turnId: turn.turnId,
+        spawnEvidence: extractSpawnEvidence(readKernelEvents(jobDir)),
+      }
     }
 
     return {

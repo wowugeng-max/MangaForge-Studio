@@ -152,20 +152,36 @@ function userWriteChapterContract() {
   }
 }
 
+function harvestStubArtifacts(files: Record<string, { kind: string; text: string }>) {
+  const dir = mkdtempSync(join(tmpdir(), 'adapt-pack-art-'))
+  const artifacts = Object.entries(files).map(([rel, spec]) => {
+    const full = join(dir, rel)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, spec.text)
+    return { rel_path: rel, artifact_kind: spec.kind, sha256: 'h', byte_size: spec.text.length, copied_path: full }
+  })
+  return { dir, artifacts }
+}
+
 function stubWrite(files: Record<string, { kind: string; text: string }>, warnings: Array<{ warning: string; rel_path: string }> = []) {
   return async (input: any) => {
-    const dir = mkdtempSync(join(tmpdir(), 'adapt-pack-art-'))
-    const artifacts = Object.entries(files).map(([rel, spec]) => {
-      const full = join(dir, rel)
-      mkdirSync(dirname(full), { recursive: true })
-      writeFileSync(full, spec.text)
-      return { rel_path: rel, artifact_kind: spec.kind, sha256: 'h', byte_size: spec.text.length, copied_path: full }
-    })
+    const { dir, artifacts } = harvestStubArtifacts(files)
     input.onPhase?.('harvesting')
     return {
       ok: true, jobDir: dir, projectDir: dir, threadId: 't', turnId: 'u',
       artifacts, warnings, lastMessage: '适配完',
       spawnEvidence: { subagent_threads: [], agent_hints: [] }, eventsPath: join(dir, 'e.jsonl'),
+    }
+  }
+}
+
+function stubOutputMissing(files: Record<string, { kind: string; text: string }>) {
+  return async (input: any) => {
+    const { dir, artifacts } = harvestStubArtifacts(files)
+    input.onPhase?.('harvesting')
+    return {
+      ok: false, error_code: 'OUTPUT_MISSING', message: '缺少约定产物：contracts/*.json',
+      jobDir: dir, artifacts,
     }
   }
 }
@@ -254,6 +270,49 @@ describe('adapt_pack harvest', () => {
     expect(detail.candidates[0].error_code).toBe('ADAPT_NO_VALID_CONTRACT')
     expect(detail.candidates[0].error_code).not.toBe('KIND_COUNT_BELOW_MIN')
     expect(candidateMeta(detail).adapt_unsatisfied.length).toBeGreaterThan(0)
+  })
+
+  test('runner OUTPUT_MISSING with only _notes remaps to ADAPT_NO_VALID_CONTRACT and keeps notes', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubOutputMissing({
+        'contracts/_notes/write_chapter.md': { kind: 'attachment', text: '缺合同' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.job.error_code).not.toBe('OUTPUT_MISSING')
+    expect(detail.candidates[0].status).toBe('failed')
+    expect(detail.candidates[0].error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.candidates[0].error_code).not.toBe('KIND_COUNT_BELOW_MIN')
+    expect(detail.artifacts.some((a: any) => a.rel_path === 'contracts/_notes/write_chapter.md')).toBe(true)
+    expect(candidateMeta(detail).adapt_unsatisfied).toEqual([
+      { rel_path: 'contracts/', verb: '', errors: ['未写出 contracts/*.json'] },
+    ])
+  })
+
+  test('runner OUTPUT_MISSING with no artifacts remaps to ADAPT_NO_VALID_CONTRACT', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubOutputMissing({}) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.status).toBe('failed')
+    expect(detail.job.error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(detail.job.error_code).not.toBe('OUTPUT_MISSING')
+    expect(detail.candidates[0].error_code).toBe('ADAPT_NO_VALID_CONTRACT')
+    expect(candidateMeta(detail).adapt_unsatisfied).toEqual([
+      { rel_path: 'contracts/', verb: '', errors: ['未写出 contracts/*.json'] },
+    ])
   })
 
   test('builtin write_chapter id yields no contract_json', async () => {
