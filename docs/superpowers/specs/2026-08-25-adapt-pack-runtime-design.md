@@ -1,11 +1,11 @@
 # 适配运行时（adapt_pack）
 
 日期：2026-08-25  
-状态：已确认，待实现  
+状态：已落地  
 对照：
 
-- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.5 `adapt_pack` 节（本文件是其实现 spec）
-- `2026-08-15-codex-kernel-vault-design.md` v1.6 排期 C（续写已落地；适配仍未做）
+- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.6 `adapt_pack` 节（本文件是其实现 spec）
+- `2026-08-15-codex-kernel-vault-design.md` v1.7 排期 C（续写、适配已落地；扩纲按钮 / batch 仍未做）
 - 写作 skill 市场：`2026-08-14-writing-skill-marketplace-design.md`（提示词编译器；本片只把它当适配**输入**，不改安装器）
 
 **Goal：** 作者在项目设置里选定一份**已安装的写作 skill** 和内核模型 → 一次 pack 级 Codex 任务按现有动词模板生成合同 → 填得满的入库，填不满的给出网关校验说明 → 人预览后采纳。采纳**不**改 `verb_defaults`。作者另用选择器指定「这个动词现在跑哪份合同」，以便对比 skill 真实效果。扩纲按钮、batch、画布不在本片。
@@ -91,7 +91,7 @@
    - 未安装、目录无效、或没有常规文件 `SKILL.md` → 400 `SKILL_NOT_FOUND`。
    - 用安装器已落盘的 `pack.json.revision` 与目录内容，**不再次 clone**。没有 revision 字段但 `SKILL.md` 存在仍可适配（夹具）；不另做「锁定 revision」步骤。
 6. 不要求 `user_brief`。创建时不传 `contract_ids`。
-7. 占用：全工作区 `verb=adapt_pack` + `subject_key=skill_id` 只能有一个非终态 job（`queued` / `running` / `awaiting_selection`），**不**按 `project_id` 分、**不**按 `subject_id` 分。违反 → 409 `PROJECT_JOB_RUNNING`。不和写章/续写/回炉交叉锁。相对动词规范「pack 按 project_id+verb」：**本片改为 verb+subject_key**，否则同一 skill 可从两个项目各开一条，合同目录会打架。
+7. 占用：全工作区 `verb=adapt_pack` + `subject_key=skill_id` 只能有一个非终态 job（`queued` / `running` / `awaiting_selection`），**不**按 `project_id` 分、**不**按 `subject_id` 分。违反 → 409 `PROJECT_JOB_RUNNING`。不和写章/续写/回炉交叉锁。动词 spec v1.6 已改为同一粒度（旧稿曾写 pack 按 `project_id+verb`）。
 8. 去掉现行「`subject_type=pack` → `CONTRACT_NOT_IMPLEMENTED` / 适配第一期不执行」。
 
 `hasActiveKernelJob` 对 pack 增加按 `verb + subject_key`、**不带** `projectId` 的查询。章/项目占用逻辑不变。创建 job 时必须写入 `subject_key`（今天这列总是 `''`，本片补上）。
@@ -209,8 +209,8 @@ Commit（`POST .../commit`，manual）：
 
 - **实现** 动词规范 `adapt_pack`：元合同、pack 主体、`subject_key`、收获校验、manual 采纳、设置入口、人工 `verb_defaults`。
 - **收窄触发点**：「只在装包/换包时跑」→ 本片是设置里人点「适配合同」，不是安装器副作用。输入是已装写作 skill，不是另开 `kernel/packs/` 目录。
-- **收窄 project_id**：规范允许 0；本片必须 >0。
-- **改占用粒度**：规范写 pack 按 `project_id+verb`；本片按全工作区 `verb+subject_key`。
+- **收窄 project_id**：动词 spec v1.6 起必须 >0（旧稿曾允许 0）。
+- **占用粒度**：动词 spec v1.6 起 pack 按全工作区 `verb+subject_key`（旧稿曾写 `project_id+verb`）。
 - **不覆盖** oh-story 手写内置合同。
 - **不替代** 写作 skill 市场的提示词编译路径；适配成功只多一条内核合同，去AI味开关仍走市场。
-- 实现后更新动词 spec 分期 4+、内核 spec 排期 C：适配已落地；扩纲按钮仍未做。
+- 动词 spec 分期 4+、内核 spec 排期 C：适配已落地；扩纲按钮仍未做。
