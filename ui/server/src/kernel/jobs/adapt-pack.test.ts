@@ -128,6 +128,33 @@ describe('adapt_pack precheck', () => {
     }, { skipRuntimeCheck: true })
     expect(otherOk.ok).toBe(true)
   })
+
+  test('padded skill_id and subject_key occupy and store the trimmed id', async () => {
+    const { ws, body } = await seedAdapt()
+    const created = await createAndRunKernelJob(ws, {
+      ...body,
+      subject_key: ' my-style ',
+      verb_params: { skill_id: ' my-style ' },
+    }, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        'contracts/write_chapter.json': { kind: 'attachment', text: JSON.stringify(userWriteChapterContract()) },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.job.subject_key).toBe('my-style')
+    expect(detail.job.status).toBe('awaiting_selection')
+    const second = await validateCreateKernelJob(ws, {
+      ...body, subject_key: 'my-style', verb_params: { skill_id: 'my-style' },
+    }, { skipRuntimeCheck: true })
+    expect(second.ok).toBe(false)
+    if (second.ok) return
+    expect(second.status).toBe(409)
+    expect(second.code).toBe('PROJECT_JOB_RUNNING')
+  })
 })
 
 function userWriteChapterContract() {

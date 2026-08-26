@@ -23,4 +23,11 @@ describe('parseAdaptPackParams', () => {
       value: { skill_id: 'my-style' },
     })
   })
+
+  test('trims matching skill_id and subject_key to the canonical id', () => {
+    expect(parseAdaptPackParams({ skill_id: ' my-style ' }, ' my-style ')).toEqual({
+      ok: true,
+      value: { skill_id: 'my-style' },
+    })
+  })
 })

@@ -57,7 +57,7 @@ const liveJobs = new Map<string, LiveJobState>()
 
 export async function validateCreateKernelJob(
   ws: string, body: CreateKernelJobBody, opts: { skipRuntimeCheck?: boolean } = {},
-): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project' | 'pack'; verbParamsJson: string } | CreateKernelJobError> {
+): Promise<{ ok: true; contracts: KernelContractView[]; providerId: string; verb: string; briefJson: string; subjectType: 'chapter' | 'project' | 'pack'; verbParamsJson: string; subjectKey: string } | CreateKernelJobError> {
   if (!opts.skipRuntimeCheck) {
     const binary = await checkKernelBinary(loadKernelRuntime(ws))
     if (!binary.ok) return { ok: false, status: 503, code: 'KERNEL_RUNTIME_UNAVAILABLE', message: binary.message }
@@ -89,6 +89,7 @@ export async function validateCreateKernelJob(
   }
   let briefJson = ''
   let verbParamsJson = JSON.stringify(body.verb_params || {})
+  let subjectKey = ''
   if (verb === 'adapt_pack') {
     if (body.subject_type !== 'pack') {
       return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: `动词 ${verb} 主体是 pack` }
@@ -115,6 +116,7 @@ export async function validateCreateKernelJob(
     } catch { skillOk = false }
     if (!skillOk) return { ok: false, status: 400, code: 'SKILL_NOT_FOUND', message: `未安装写作 skill ${skillId}` }
     verbParamsJson = JSON.stringify(parsed.value)
+    subjectKey = skillId
   }
   if (template.subject_type === 'project' && Number(body.subject_id) !== Number(body.project_id)) {
     return { ok: false, status: 400, code: 'SUBJECT_TYPE_MISMATCH', message: 'project 主体要求 subject_id == project_id' }
@@ -195,7 +197,7 @@ export async function validateCreateKernelJob(
     verbParamsJson = JSON.stringify(parsed.value)
   }
   const dedupe = template.subject_type === 'pack'
-    ? { verb, subjectKey: String(body.subject_key || '') }
+    ? { verb, subjectKey }
     : template.subject_type === 'project'
       ? { projectId: body.project_id, verb }
       : { projectId: body.project_id, verb, subjectId: body.subject_id }
@@ -211,7 +213,7 @@ export async function validateCreateKernelJob(
     supportsChatWireApi: loadKernelRuntime(ws).supports_chat_wire_api,
   })
   if (!translated.ok) return { ok: false, status: 400, code: 'PROVIDER_TRANSLATE_FAILED', message: translated.message }
-  return { ok: true, contracts: selected, providerId: String(provider.id), verb, briefJson, subjectType: template.subject_type, verbParamsJson }
+  return { ok: true, contracts: selected, providerId: String(provider.id), verb, briefJson, subjectType: template.subject_type, verbParamsJson, subjectKey }
 }
 
 export async function createAndRunKernelJob(
@@ -231,7 +233,7 @@ export async function createAndRunKernelJob(
     status: 'queued', capability: validated.contracts[0].capability, subject_type: validated.subjectType,
     subject_id: body.subject_id, model_provider_id: validated.providerId, model_id: body.model_id,
     error_code: '', error_message: '',
-    verb: validated.verb, verb_params: validated.verbParamsJson, subject_key: validated.subjectType === 'pack' ? String(body.subject_key || '') : '', brief_json: validated.briefJson,
+    verb: validated.verb, verb_params: validated.verbParamsJson, subject_key: validated.subjectType === 'pack' ? validated.subjectKey : '', brief_json: validated.briefJson,
   })
   const candidateIds: string[] = []
   for (const contract of validated.contracts) {
