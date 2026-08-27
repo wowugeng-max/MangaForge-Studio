@@ -1,4 +1,5 @@
 import type { PlanningActionKey, PlanningWorkspaceModel } from '../planningWorkspaceModel'
+import type { ExpandOutlineCardProps } from '../expand-outline-card'
 
 export type StoryPlanningBoardLoadingKey = 'rollingPlan' | 'future100Audit' | 'future100Generate' | 'future100Apply'
 
@@ -11,4 +12,5 @@ export type StoryPlanningBoardPanelsProps = {
   compact: boolean
   healthBoardsOpen?: boolean
   onToggleHealthBoards?: () => void
+  expandOutline?: ExpandOutlineCardProps
 }

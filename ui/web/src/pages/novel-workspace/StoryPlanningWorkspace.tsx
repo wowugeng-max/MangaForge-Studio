@@ -14,6 +14,7 @@ import {
   formatWords,
 } from './planning/story-planning-chrome'
 import { StoryPlanningBoardPanels } from './planning/story-planning-board-panels'
+import type { ExpandOutlineCardProps } from './expand-outline-card'
 
 const { Text } = Typography
 const { useBreakpoint } = Grid
@@ -26,6 +27,7 @@ export type StoryPlanningWorkspaceProps = {
   loadingKey?: PlanningLoadingKey
   onAction: (key: PlanningActionKey, options?: { intent?: any }) => void
   onSelectChapter: (chapterNo: number) => void
+  expandOutline?: ExpandOutlineCardProps
 }
 
 export function StoryPlanningWorkspace({
@@ -34,6 +36,7 @@ export function StoryPlanningWorkspace({
   loadingKey,
   onAction,
   onSelectChapter,
+  expandOutline,
 }: StoryPlanningWorkspaceProps) {
   const screens = useBreakpoint()
   const compact = !screens.xl
@@ -136,6 +139,7 @@ export function StoryPlanningWorkspace({
           onAction={onAction}
           onSelectChapter={onSelectChapter}
           compact={compact}
+          expandOutline={expandOutline}
         />
       </div>
     </div>

@@ -17,6 +17,7 @@ import {
 import { useChapterWriteJob } from './use-chapter-write-job'
 import { useChapterRewriteJob } from './use-chapter-rewrite-job'
 import { useProjectContinueJob } from './use-project-continue-job'
+import { useExpandOutlineJob } from './use-expand-outline-job'
 import { firstEmptyChapterNoAfter } from '../chapter-workflow-presenter'
 import {
   useChapterVersions,
@@ -660,6 +661,15 @@ export function useNovelWorkspaceBaseModel() {
       || rewriteJob.state.phase === 'awaiting_selection',
   })
 
+  const expandOutlineJob = useExpandOutlineJob({
+    apiClient,
+    projectId: Number(projectId || 0),
+    modelId: Number(selectedModelId || 0),
+    loadProjectModules: async () => {
+      await loadProjectModules()
+    },
+  })
+
   const writeJobWasRunningRef = useRef(false)
   useEffect(() => {
     if (writeJob.state.phase === 'running') {
@@ -1220,6 +1230,7 @@ export function useNovelWorkspaceBaseModel() {
     rewriteSelection,
     onWriteContinue,
     onCancelContinue,
+    expandOutlineJob,
     continueJob,
     generatingSceneCards,
     generationPipeline,

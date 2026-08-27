@@ -3,6 +3,7 @@ import { Button, Card, Space, Typography } from 'antd'
 import { DownOutlined, UpOutlined } from '@ant-design/icons'
 import type { StoryPlanningBoardPanelsProps } from './story-planning-board-types'
 import { StoryPlanningExpandFlowCard } from './story-planning-board-panels-expand'
+import { ExpandOutlineCard } from '../expand-outline-card'
 import { StoryPlanningCreationPipelineCard } from './story-planning-board-panels-pipeline'
 import { StoryPlanningOpsPanels } from './story-planning-board-panels-ops'
 import { StoryPlanningAudiencePanels } from './story-planning-board-panels-audience'
@@ -20,6 +21,7 @@ export function StoryPlanningBoardPanels(props: StoryPlanningBoardPanelsProps) {
     <>
       {/* 主路径：扩写流程 + 六段流水线 */}
       <StoryPlanningExpandFlowCard {...props} />
+      {props.expandOutline ? <ExpandOutlineCard {...props.expandOutline} /> : null}
       <StoryPlanningCreationPipelineCard {...props} />
 
       {/* 卷结构与剧情体检 */}

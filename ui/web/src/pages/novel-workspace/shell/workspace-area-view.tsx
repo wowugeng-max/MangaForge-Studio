@@ -45,6 +45,7 @@ export type NovelWorkspaceAreaViewProps = {
   rewriteSelection?: ChapterRewriteSelection | null
   onWriteContinue?: () => void
   onCancelContinue?: () => void
+  expandOutlineJob: any
   generatingSceneCards: any
   generationPipeline: any
   handleAutoCreationDirectorAction: any
@@ -169,6 +170,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     rewriteSelection,
     onWriteContinue,
     onCancelContinue,
+    expandOutlineJob,
     generatingSceneCards,
     generationPipeline,
     handleAutoCreationDirectorAction,
@@ -313,6 +315,17 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
           const chapter = sortedChapters.find(item => Number(item.chapter_no) === Number(chapterNo))
           if (!chapter) return
           void selectChapterForWriting(chapter.id)
+        }}
+        expandOutline={{
+          outlines,
+          selectedModelId,
+          state: expandOutlineJob.state,
+          getArtifactContent: expandOutlineJob.api.getArtifactContent,
+          onStart: () => { void expandOutlineJob.start() },
+          onResume: () => { void expandOutlineJob.resume() },
+          onCancel: () => { void expandOutlineJob.cancel() },
+          onCommit: () => { void expandOutlineJob.commit() },
+          onDiscard: () => { void expandOutlineJob.cancel() },
         }}
       />
     )
