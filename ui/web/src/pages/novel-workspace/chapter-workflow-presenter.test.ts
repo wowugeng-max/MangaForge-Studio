@@ -154,6 +154,51 @@ describe('chapter workflow presenter', () => {
     expect(model.secondaryActions.map(item => item.key)).not.toContain('write_continue')
   })
 
+  test('every phase with 更多 offers 扩纲', () => {
+    const models = [
+      buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: true }),
+      buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: false }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: false,
+        admissionStatus: 'blocked_invalid',
+      }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'needs_quality_check',
+      }),
+      buildChapterWorkflowPresenter({
+        hasChapter: true,
+        hasProse: true,
+        acceptanceStatus: 'ready_to_accept',
+        storyStateSynced: true,
+      }),
+    ]
+    for (const model of models) {
+      expect(model.secondaryActions.some(a => a.key === 'expand_outline' && a.label === '扩纲')).toBe(true)
+    }
+  })
+
+  test('empty chapter primary stays 生成正文 and 扩纲 is not primary', () => {
+    const model = buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: true })
+    expect(model.primaryAction).toEqual({ key: 'generate', label: '生成正文', kind: 'primary' })
+    expect(model.secondaryActions[0]).toEqual({ key: 'expand_outline', label: '扩纲', kind: 'default' })
+  })
+
+  test('扩纲 sits next to 续写 in has-prose phases', () => {
+    const model = buildChapterWorkflowPresenter({
+      hasChapter: true,
+      hasProse: true,
+      acceptanceStatus: 'ready_to_accept',
+      storyStateSynced: true,
+    })
+    const keys = model.secondaryActions.map(item => item.key)
+    expect(keys.indexOf('write_continue')).toBeGreaterThanOrEqual(0)
+    expect(keys[keys.indexOf('write_continue') + 1]).toBe('expand_outline')
+    expect(model.primaryAction.key).toBe('accept_chapter_and_continue')
+  })
+
   test('blocked materials and failed admission do not offer 续写', () => {
     const blocked = buildChapterWorkflowPresenter({ hasChapter: true, hasProse: false, materialReady: false })
     const failed = buildChapterWorkflowPresenter({

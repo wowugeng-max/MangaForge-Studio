@@ -110,6 +110,7 @@ export function WorkspaceCenter({
   onOpenWritingBibleEditor,
   onGenerateCurrentChapterProse,
   onWriteContinue = () => {},
+  onExpandOutline = () => {},
   onCancelContinue,
   onRepairAndGenerateCurrentChapter,
   onGenerateSceneCards,
@@ -211,6 +212,7 @@ export function WorkspaceCenter({
   onOpenWritingBibleEditor: () => void
   onGenerateCurrentChapterProse: () => void
   onWriteContinue?: () => void
+  onExpandOutline?: () => void
   onCancelContinue?: () => void
   onRepairAndGenerateCurrentChapter: () => void
   onGenerateSceneCards: () => void
@@ -608,6 +610,10 @@ export function WorkspaceCenter({
       onWriteContinue()
       return
     }
+    if (key === 'expand_outline') {
+      onExpandOutline()
+      return
+    }
     if (key === 'generate') {
       onGenerateCurrentChapterProse()
       return
@@ -858,6 +864,7 @@ export function WorkspaceCenter({
                 onSyncStoryState: () => runChapterWorkflowAction('sync_story_state'),
                 onAcceptAndContinue: () => runChapterWorkflowAction('accept_chapter_and_continue'),
                 onWriteContinue: () => runChapterWorkflowAction('write_continue'),
+                onExpandOutline: () => runChapterWorkflowAction('expand_outline'),
                 onOpenStoryAssets: () => runChapterWorkflowAction('open_story_assets'),
                 onOpenDiagnostics: () => runChapterWorkflowAction('open_generation_diagnostics'),
                 onOpenVersions: () => runChapterWorkflowAction('open_versions'),

@@ -18,6 +18,7 @@ import { useChapterWriteJob } from './use-chapter-write-job'
 import { useChapterRewriteJob } from './use-chapter-rewrite-job'
 import { useProjectContinueJob } from './use-project-continue-job'
 import { useExpandOutlineJob } from './use-expand-outline-job'
+import { openExpandOutlineFromWriting } from '../expand-outline-ui'
 import { firstEmptyChapterNoAfter } from '../chapter-workflow-presenter'
 import {
   useChapterVersions,
@@ -747,6 +748,14 @@ export function useNovelWorkspaceBaseModel() {
     void continueJob.cancel()
   }
 
+  const onExpandOutline = () => {
+    openExpandOutlineFromWriting({
+      phase: expandOutlineJob.state.phase,
+      setWorkspaceArea: () => setWorkspaceArea('storyPlanning'),
+      start: () => { void expandOutlineJob.start() },
+    })
+  }
+
   const selectChapterForWriting = async (chapterId: number) => {
     const saved = await selectChapter(chapterId)
     if (saved) setWorkspaceArea('chapterWriting')
@@ -1231,6 +1240,7 @@ export function useNovelWorkspaceBaseModel() {
     onWriteContinue,
     onCancelContinue,
     expandOutlineJob,
+    onExpandOutline,
     continueJob,
     generatingSceneCards,
     generationPipeline,

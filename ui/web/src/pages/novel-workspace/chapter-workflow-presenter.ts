@@ -13,7 +13,7 @@ export type ChapterWorkflowPhase =
   | 'failed_admission'
 
 export type ChapterWorkflowAction = {
-  key: WritingCockpitActionKey | 'generate' | 'repair_generate' | 'open_versions' | 'view_quality' | 'view_brief' | 'write_continue'
+  key: WritingCockpitActionKey | 'generate' | 'repair_generate' | 'open_versions' | 'view_quality' | 'view_brief' | 'write_continue' | 'expand_outline'
   label: string
   kind?: 'primary' | 'default' | 'ghost' | 'danger'
 }
@@ -166,6 +166,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       reasonText: input.admissionMessage || '正文生成被准入拦截，当前版本未被污染。请按原因修复后再生成。',
       primaryAction: { key: 'repair_generate', label: '按原因修复后再生成', kind: 'danger' },
       secondaryActions: [
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'view_brief', label: '查看交接要点', kind: 'ghost' },
         { key: 'open_generation_diagnostics', label: '查看拦截详情', kind: 'ghost' },
       ],
@@ -179,6 +180,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       reasonText: input.materialBlockReason || '材料不足，直接生成容易断章。先补齐材料。',
       primaryAction: { key: 'repair_materials', label: '补齐材料', kind: 'primary' },
       secondaryActions: [
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'view_brief', label: '查看缺口', kind: 'ghost' },
         { key: 'open_story_assets', label: '打开资产', kind: 'ghost' },
       ],
@@ -192,6 +194,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       reasonText: '本章还没有正文。确认任务要点后生成初稿。',
       primaryAction: { key: 'generate', label: '生成正文', kind: 'primary' },
       secondaryActions: [
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'repair_materials', label: '补齐材料', kind: 'default' },
         { key: 'view_brief', label: '看任务', kind: 'ghost' },
       ],
@@ -209,6 +212,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'generate', label: '回炉', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -225,6 +229,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'view_quality', label: '查看问题', kind: 'default' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -239,6 +244,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       primaryAction: { key: 'sync_story_state', label: '同步故事状态', kind: 'primary' },
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
+        { key: 'expand_outline', label: '扩纲', kind: 'default' },
         { key: 'view_quality', label: '查看状态差', kind: 'ghost' },
         { key: 'open_versions', label: '版本', kind: 'ghost' },
       ],
@@ -252,6 +258,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
     primaryAction: { key: 'accept_chapter_and_continue', label: '写下一章', kind: 'primary' },
     secondaryActions: [
       { key: 'write_continue', label: '续写', kind: 'default' },
+      { key: 'expand_outline', label: '扩纲', kind: 'default' },
       { key: 'open_versions', label: '版本', kind: 'ghost' },
       { key: 'view_quality', label: '回看质检', kind: 'ghost' },
     ],

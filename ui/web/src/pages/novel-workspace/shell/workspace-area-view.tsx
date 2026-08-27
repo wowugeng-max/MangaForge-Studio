@@ -44,6 +44,7 @@ export type NovelWorkspaceAreaViewProps = {
   generatingProse: any
   rewriteSelection?: ChapterRewriteSelection | null
   onWriteContinue?: () => void
+  onExpandOutline?: () => void
   onCancelContinue?: () => void
   expandOutlineJob: any
   generatingSceneCards: any
@@ -169,6 +170,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
     generatingProse,
     rewriteSelection,
     onWriteContinue,
+    onExpandOutline,
     onCancelContinue,
     expandOutlineJob,
     generatingSceneCards,
@@ -354,6 +356,7 @@ export function NovelWorkspaceAreaView(props: NovelWorkspaceAreaViewProps) {
         generatingProse={generatingProse}
         rewriteSelection={rewriteSelection}
         onWriteContinue={onWriteContinue}
+        onExpandOutline={onExpandOutline}
         onCancelContinue={onCancelContinue}
         generatingSceneCards={generatingSceneCards}
         preDraftBriefLoading={commercialToolLoading === 'preDraftBrief' || commercialToolLoading === 'preDraftBriefConfirm'}

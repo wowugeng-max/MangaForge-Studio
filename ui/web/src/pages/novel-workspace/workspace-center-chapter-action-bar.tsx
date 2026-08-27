@@ -21,6 +21,7 @@ const MODEL_ACTION_KEYS = new Set([
   'create_editor_report',
   'accept_chapter_and_continue',
   'write_continue',
+  'expand_outline',
 ])
 
 const LOCAL_ACTION_KEYS = new Set([
@@ -63,6 +64,7 @@ export type ChapterActionBarHandlers = {
   onSyncStoryState: () => void
   onAcceptAndContinue: () => void
   onWriteContinue: () => void
+  onExpandOutline: () => void
   onOpenStoryAssets: () => void
   onOpenDiagnostics: () => void
   onOpenVersions: () => void
@@ -128,6 +130,9 @@ export function ChapterActionBar({
         break
       case 'write_continue':
         handlers.onWriteContinue()
+        break
+      case 'expand_outline':
+        handlers.onExpandOutline()
         break
       case 'open_story_assets':
         handlers.onOpenStoryAssets()
