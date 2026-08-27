@@ -54,4 +54,19 @@ describe('kernelJobUserMessage', () => {
       text: '同项目同动词任务未结束',
     })
   })
+
+  test('maps FOUNDATION_PRECONDITION to expand ledger copy', () => {
+    expect(kernelJobUserMessage('FOUNDATION_PRECONDITION')).toEqual({
+      kind: 'warning',
+      text: '扩纲需要账本里已有大纲',
+    })
+    expect(kernelJobUserMessage('PROJECT_JOB_RUNNING')).toEqual({
+      kind: 'warning',
+      text: '同项目同动词任务未结束',
+    })
+    expect(kernelJobUserMessage('VERB_PARAMS_INVALID')).toEqual({
+      kind: 'warning',
+      text: '续写参数无效',
+    })
+  })
 })
