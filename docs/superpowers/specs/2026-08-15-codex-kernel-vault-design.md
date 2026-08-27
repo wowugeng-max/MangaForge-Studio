@@ -1,7 +1,7 @@
 # Codex 内核 + 资产账本（可扩展接口）
 
-日期：2026-08-15（v1.7 修订 2026-08-25）  
-状态：待用户审阅（v1.7，2026-08-25：adapt_pack 运行时已落地）  
+日期：2026-08-15（v1.8 修订 2026-08-27）  
+状态：待用户审阅（v1.8，2026-08-27：扩纲工作台按钮已落地）  
 前置：
 
 - `2026-08-14-oh-story-core-skill-shell-design.md`（方案 B：oh-story 出能力，工作台出账本；当时用 solo 一次补全，本 spec 废止该运行时）
@@ -13,13 +13,21 @@
 - `2026-08-16-novel-workbench-verb-contracts-design.md`（工作台动词层；开书 `open_book`、并跑主键改为 verb、投影/门补丁。v1.2 把其中已落地的内核语义收回本文件）
 - 分期计划：`2026-08-15-codex-kernel-app-server-client.md`、`2026-08-15-codex-kernel-jobs-and-bridge.md`、`2026-08-15-codex-kernel-compete.md`（头部「本分期新增决定」表已折入本文；后续代码覆盖计划处，以本文为准）
 
+### v1.8 修订要点（2026-08-27，扩纲工作台按钮落地）
+
+v1.7 写「无扩纲工作台按钮」。下列以工作台规划区 / 「更多 · 扩纲」现状为准。
+
+1. **扩纲工作台按钮已接规划区 / 「更多 · 扩纲」。** 预览在规划区。旧未来100章链路并存。`expand_outline` 运行时语义不变（`outlines.upsert`，禁写 `chapters`）。
+2. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。无 batch cutover。
+3. **batch 仍未做。** `generateChapterForGroup` / batch 仍走旧 API，未 cutover。画布 `prompt` 仍否（B）。
+
 ### v1.7 修订要点（2026-08-25，纸面对齐 C 适配运行时）
 
 v1.6 写「适配仍未做」。下列以 `ui/server/src/kernel/` 在 `ddd1787c` 的现状为准。
 
 1. **`adapt_pack` 已落地。** 内置 `mangaforge.adapt-pack.meta`（`subject_type=pack`，`commit.mode=manual`）。`IMPLEMENTED_VERBS` 含 `adapt_pack`。作者入口项目设置「内核合同」走 `POST /api/kernel/jobs`。安装器不自动适配。采纳不改 `verb_defaults`。
-2. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。无扩纲工作台按钮、无 batch cutover。
-3. **扩纲按钮 / batch 仍未做。** `generateChapterForGroup` / batch 仍走旧 API，未 cutover。画布 `prompt` 仍否（B）。
+2. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。无扩纲工作台按钮、无 batch cutover。（**已被 v1.8 覆盖：扩纲工作台按钮已接规划区/更多**；`.outline` 仍 `implemented=false`；无 batch cutover。）
+3. **扩纲按钮 / batch 仍未做。** `generateChapterForGroup` / batch 仍走旧 API，未 cutover。画布 `prompt` 仍否（B）。（**已被 v1.8 覆盖：扩纲按钮已接**；batch / 画布 `prompt` 仍未做。）
 
 ### v1.6 修订要点（2026-08-20，纸面对齐 C 续写运行时）
 
@@ -27,8 +35,8 @@ v1.5 写「续写 / 适配仍未做」。下列以 `ui/server/src/kernel/` 在 `
 
 1. **`write_continue` 已落地。** 内置 `oh-story-core.story-long-write.continue`（`capability=rewrite`，`subject_type=project`，`commit.mode=auto_if_single`）。`IMPLEMENTED_VERBS` 含 `write_continue`。作者入口工作台「更多 · 续写」走 `POST /api/kernel/jobs`。
 2. **预检 / 收获 / commit：** `VERB_PARAMS_INVALID`；窗口缺行 `CHAPTER_NOT_FOUND`；窗口已有正文 `CHAPTER_HAS_PROSE`；无匹配细纲 `OUTLINE_MISSING`。收获后必须刚好 `count` 份窗口内非空 `chapter_text`。commit 按路径解析章号，禁止 `job.subject_id` 当 chapter id。超时仍默认 idle 10min / hard 45min。
-3. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。无扩纲工作台按钮、无 batch cutover。
-4. **适配仍未做。** `adapt_pack` 仍未落地。`generateChapterForGroup` / batch 仍走旧 API，未 cutover。画布 `prompt` 仍否（B）。（**已被 v1.7 覆盖：`adapt_pack` 已落地**；扩纲按钮与 `generateChapterForGroup` cutover 仍未做。画布 `prompt` 仍否（B）。）
+3. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。无扩纲工作台按钮、无 batch cutover。（**已被 v1.8 覆盖：扩纲工作台按钮已接规划区/更多**；无 batch cutover。）
+4. **适配仍未做。** `adapt_pack` 仍未落地。`generateChapterForGroup` / batch 仍走旧 API，未 cutover。画布 `prompt` 仍否（B）。（**已被 v1.7 覆盖：`adapt_pack` 已落地**；**已被 v1.8 覆盖：扩纲按钮已接**；`generateChapterForGroup` cutover 仍未做。画布 `prompt` 仍否（B）。）
 
 ### v1.5 修订要点（2026-08-19，纸面对齐 C 回炉运行时）
 
@@ -52,7 +60,7 @@ v1.3 写「写章仍未做」。下列以 `ui/server/src/kernel/` 在 `3b0a76c5`
 
 v1.2 写「扩纲计划已写、代码未做」。下列以 `ui/server/src/kernel/` 在 `7cdf4099` 的现状为准。
 
-1. **`expand_outline` 已落地。** 内置 `oh-story-core.story-long-write.expand`（`outlines.upsert`，`commit.mode=manual`）。`IMPLEMENTED_VERBS` 含 `expand_outline`。无工作台按钮；入口仍是 `POST /api/kernel/jobs`。
+1. **`expand_outline` 已落地。** 内置 `oh-story-core.story-long-write.expand`（`outlines.upsert`，`commit.mode=manual`）。`IMPLEMENTED_VERBS` 含 `expand_outline`。无工作台按钮；入口仍是 `POST /api/kernel/jobs`。（**已被 v1.8 覆盖：扩纲工作台按钮已接规划区 / 「更多 · 扩纲」**。）
 2. **预检 / 门 / 投影：** 无大纲 → 400 `FOUNDATION_PRECONDITION`。`reject_chapter_text_artifact` 禁 `正文/`。commit **不**写 `chapters`（空章行只属于 `open_book` 采纳）。project 主体按 `kernel_rel_path` 回放大纲文件；不再合成无 rel_path 的 `大纲/总纲.md` / `大纲/细纲.md`。
 3. **不要**把 `oh-story-core.story-long-write.outline` 标成可执行（仍 `implemented=false`）。
 4. **写章仍未做。** `write_chapter` / `write_continue` / `rewrite_chapter` / `adapt_pack` 仍 `CONTRACT_NOT_IMPLEMENTED`。替换 `generateChapterForGroup` 必须另开 spec。画布 `prompt` 仍否（B）。（**已被 v1.4 覆盖：`write_chapter` 已落地**；**已被 v1.5 覆盖：`rewrite_chapter` 已落地**；**已被 v1.6 覆盖：`write_continue` 已落地**；**已被 v1.7 覆盖：`adapt_pack` 已落地**；`generateChapterForGroup` cutover 仍未做。画布 `prompt` 仍否（B）。）
@@ -177,7 +185,7 @@ codex app-server     ← 官方内核，不改源码
 |---|---|---|---|
 | `review` | 只出报告 | `reviews`，不改正文 | 是 |
 | `rewrite` | 新正文 | `chapters` + `chapter_versions` | 是 |
-| `outline` | 大纲 / 细纲 / 场景卡 | `outlines`（开书另写 world/characters） | 开书 `open_book` 是；扩纲 `expand_outline` 是（无工作台按钮）。写正文不走本 capability（作者写本章走 `rewrite` / `write_chapter`） |
+| `outline` | 大纲 / 细纲 / 场景卡 | `outlines`（开书另写 world/characters） | 开书 `open_book` 是；扩纲 `expand_outline` 是（规划区 + 「更多 · 扩纲」）。写正文不走本 capability（作者写本章走 `rewrite` / `write_chapter`） |
 | `tracking` | 伏笔 / 逐章记录 | 内核产物 + 可选文件副本；不改正文 | 是（随审稿收回，默认不单独按钮） |
 | `prompt` | 画布提示词 | 画布节点运行结果 | 否 |
 | `media` | 生图 / 视频 | 画布资产 | 否；且通常不是 Codex skill |
@@ -269,7 +277,7 @@ codex app-server     ← 官方内核，不改源码
 - `story-deslop.file`：现网 runner 的「脚本预扫 → 多轮润色 → 归一化」闭环随 skill 自带 `scripts/` 进入沙箱，由 Codex 按 SKILL.md 自跑，网关不再复刻，也不再有 `OH_STORY_CORE_NOT_PROSE` 检查。代价明示：质量闭环从壳层代码移到 skill 约定；`reviews.oh_story_deslop.payload` 不再产生 `rounds` / `script_logs` / `file_mode`，UI 不得依赖这三个字段。
 - `story-apply.surgical`：投影额外挂 `review_report`（`审稿/第{{chapter_pad}}章.md`）。
 
-`story-long-write` 开书实例 `oh-story-core.story-long-write.open` 已作为 `open_book` 落地（`capability=outline`，`subject_type=project`，`commit.mode=manual`）。扩纲实例 `oh-story-core.story-long-write.expand` 已作为 `expand_outline` 落地（`outlines.upsert`，`commit.mode=manual`）。写章实例 `oh-story-core.story-long-write.chapter` 已作为 `write_chapter` 落地（`capability=rewrite`，`subject_type=chapter`，`commit.mode=auto_if_single`）。回炉实例 `oh-story-core.story-long-write.rewrite` 已作为 `rewrite_chapter` 落地（`capability=rewrite`，`subject_type=chapter`，`commit.mode=manual`）。续写实例 `oh-story-core.story-long-write.continue` 已作为 `write_continue` 落地（`capability=rewrite`，`subject_type=project`，`commit.mode=auto_if_single`）。适配元合同 `mangaforge.adapt-pack.meta` 已作为 `adapt_pack` 落地（`subject_type=pack`，`commit.mode=manual`）。`IMPLEMENTED_VERBS` 含 `adapt_pack`。画布 prompt 仍 `CONTRACT_NOT_IMPLEMENTED`。`.outline` 变体保持 `implemented=false`。
+`story-long-write` 开书实例 `oh-story-core.story-long-write.open` 已作为 `open_book` 落地（`capability=outline`，`subject_type=project`，`commit.mode=manual`）。扩纲实例 `oh-story-core.story-long-write.expand` 已作为 `expand_outline` 落地（`outlines.upsert`，`commit.mode=manual`；工作台已接规划区 / 「更多 · 扩纲」）。写章实例 `oh-story-core.story-long-write.chapter` 已作为 `write_chapter` 落地（`capability=rewrite`，`subject_type=chapter`，`commit.mode=auto_if_single`）。回炉实例 `oh-story-core.story-long-write.rewrite` 已作为 `rewrite_chapter` 落地（`capability=rewrite`，`subject_type=chapter`，`commit.mode=manual`）。续写实例 `oh-story-core.story-long-write.continue` 已作为 `write_continue` 落地（`capability=rewrite`，`subject_type=project`，`commit.mode=auto_if_single`）。适配元合同 `mangaforge.adapt-pack.meta` 已作为 `adapt_pack` 落地（`subject_type=pack`，`commit.mode=manual`）。`IMPLEMENTED_VERBS` 含 `adapt_pack`。画布 prompt 仍 `CONTRACT_NOT_IMPLEMENTED`。`.outline` 变体保持 `implemented=false`。
 
 写作 skill 市场里「只编提示词」的包，第一期不自动升成内核合同。要升，必须补 `outputs` 路径和 `capability`，并通过合同校验。
 
@@ -821,7 +829,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 | `POST /api/novel/oh-story/core/{review,deslop,apply}` | 410 `ROUTE_REMOVED`；请改打 `POST /api/kernel/jobs`。GET `/core` 与 POST `/install` 保留 |
 | 写作 skill 市场 | 保留为提示词编译器；不自动变内核合同 |
 | 画布 skill 编译器 | 不动；将来用 `prompt` 合同另开 |
-| `executeNovelAgent` 生成正文 / 大纲向导 | 深度孵化已改走 `open_book`；扩纲已走 `expand_outline`（无工作台按钮）。作者写本章：空章走 `write_chapter`；有正文走 `rewrite_chapter`。作者续写走 `write_continue`（更多 · 续写）；batch / `generateChapterForGroup` 仍旧 API |
+| `executeNovelAgent` 生成正文 / 大纲向导 | 深度孵化已改走 `open_book`；扩纲已走 `expand_outline`（规划区 + 「更多 · 扩纲」）。作者写本章：空章走 `write_chapter`；有正文走 `rewrite_chapter`。作者续写走 `write_continue`（更多 · 续写）；batch / `generateChapterForGroup` 仍旧 API |
 | 导演层 / 冲突合同 | 继续降级为材料与参考分 |
 | restored-src | 继续只服务漫画 Pipeline 脚本，不当代创作内核 |
 
@@ -844,7 +852,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 - 不把 MangaForge UI 嵌进 Codex 官方壳。
 - 不实现 MCP Apps 小卡片版工作台。
-- 不在本文件实现画布切内核、自动改大纲。开书 `open_book`、扩纲 `expand_outline`、写章 `write_chapter`、回炉 `rewrite_chapter`、续写 `write_continue`、适配 `adapt_pack` 已由动词 spec 落地（扩纲无工作台按钮；写章/回炉/续写是作者入口，batch 未切；适配入口是项目设置「内核合同」）。画布 `prompt` 仍否。
+- 不在本文件实现画布切内核、自动改大纲。开书 `open_book`、扩纲 `expand_outline`、写章 `write_chapter`、回炉 `rewrite_chapter`、续写 `write_continue`、适配 `adapt_pack` 已由动词 spec 落地（扩纲已接规划区 / 「更多 · 扩纲」；写章/回炉/续写是作者入口，batch 未切；适配入口是项目设置「内核合同」）。画布 `prompt` 仍否。
 - 不删除写作 skill 市场或指纹库。
 - 不实施方案 C（工作台只当编辑器、推倒合同层）。
 - 不把任意 GitHub 仓库自动登记为内核合同。
@@ -870,7 +878,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 |---|---|---|---|
 | 1 | **A 内核 UI** | **已落地**（`2026-08-18-kernel-job-ui`） | 质检三按钮 `POST /kernel/jobs` + 1s 轮询、同动词多选 ≤8、`awaiting_selection` 对比后 commit |
 | 2 | **D 后置补丁** | **已落地**（`2026-08-18-kernel-d-patches`） | `$HOME` 硬隔离、full 审稿 `NO_SPAWN`、旧三按钮 410 `ROUTE_REMOVED` |
-| 3 | **C 动词 4+** | **扩纲、写章、回炉、续写、适配已落地**（扩纲 `2026-08-18-expand-outline-runtime`，无工作台按钮；写章 `2026-08-19-write-chapter-runtime`，作者入口；回炉 `2026-08-19-rewrite-chapter-runtime`，作者入口；续写 `2026-08-20-write-continue-runtime`，作者「更多 · 续写」；适配 `2026-08-25-adapt-pack-runtime`，项目设置「内核合同」） | 无扩纲按钮、无 batch cutover；`generateChapterForGroup` 未 cutover |
+| 3 | **C 动词 4+** | **扩纲、写章、回炉、续写、适配已落地**（扩纲 `2026-08-18-expand-outline-runtime`，工作台已接规划区 / 「更多 · 扩纲」；写章 `2026-08-19-write-chapter-runtime`，作者入口；回炉 `2026-08-19-rewrite-chapter-runtime`，作者入口；续写 `2026-08-20-write-continue-runtime`，作者「更多 · 续写」；适配 `2026-08-25-adapt-pack-runtime`，项目设置「内核合同」） | 扩纲按钮已接；无 batch cutover；`generateChapterForGroup` 未 cutover |
 | 4 | **B 分期 6** | 须另开 brainstorm | 画布 `prompt` 合同。扩纲运行时归 C，本片只剩画布 |
 
 ### A. 内核操作面（已落地）
@@ -885,7 +893,7 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 
 ### C. 动词分期 4+（见动词 spec 第 16 节）
 
-- 运行时：`expand_outline` **已落地**（无工作台按钮）。`write_chapter` **已按** `2026-08-19-write-chapter-runtime` **落地**（作者入口）。`rewrite_chapter` **已按** `2026-08-19-rewrite-chapter-runtime` **落地**（作者入口）。`write_continue` **已按** `2026-08-20-write-continue-runtime` **落地**（作者「更多 · 续写」）。`adapt_pack` **已按** `2026-08-25-adapt-pack-runtime` **落地**（项目设置「内核合同」）。未做：扩纲工作台按钮
+- 运行时：`expand_outline` **已落地**（规划区 + 「更多 · 扩纲」）。`write_chapter` **已按** `2026-08-19-write-chapter-runtime` **落地**（作者入口）。`rewrite_chapter` **已按** `2026-08-19-rewrite-chapter-runtime` **落地**（作者入口）。`write_continue` **已按** `2026-08-20-write-continue-runtime` **落地**（作者「更多 · 续写」）。`adapt_pack` **已按** `2026-08-25-adapt-pack-runtime` **落地**（项目设置「内核合同」）。未做：batch / `generateChapterForGroup` cutover
 - `verb_defaults` 管理 UI 已有设置页选择器（不含 `adapt_pack`）；`adapt_pack` 元合同与 `ADAPT_NO_VALID_CONTRACT` 已落地
 - 旧 seed API（derive / fill-gaps / finalize）最终下线——向导 deep_draft 已切断，API 暂留
 - 开书后 `选题决策.md` 与扫榜的关系（规范明确不占用该文件名）
@@ -917,4 +925,4 @@ Pack 升级只换 revision 和 skill 文件。合同若依赖新的输出路径�
 - **废止** 分期 3 计划中的 idle 120s / hard 30min、sandbox 驼峰发送、`app-server` 带 `--ignore-user-config`、按 capability 并跑 / `CAPABILITY_MIXED`。
 - **扩展** 由 `2026-08-16-novel-workbench-verb-contracts-design.md`：开书、verb 主键、投影/门补丁。本 v1.2 把已落地内核语义收回本文。
 - **不替代** 画布 skill 编译器，直到另开 prompt 合同实现计划。
-- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；**D 后置补丁已按** `2026-08-18-kernel-d-patches` **落地**；**C 扩纲运行时已按** `2026-08-18-expand-outline-runtime` **落地**；**C 写章运行时已按** `2026-08-19-write-chapter-runtime` **落地**；**C 回炉运行时已按** `2026-08-19-rewrite-chapter-runtime` **落地**；**C 续写运行时已按** `2026-08-20-write-continue-runtime` **落地**；**C 适配运行时已按** `2026-08-25-adapt-pack-runtime` **落地**（项目设置「内核合同」）。扩纲工作台按钮、`generateChapterForGroup` / batch、B（画布 `prompt`）仍须另开。
+- **A 内核 UI 已按** `2026-08-18-kernel-job-ui` **落地**；**D 后置补丁已按** `2026-08-18-kernel-d-patches` **落地**；**C 扩纲运行时已按** `2026-08-18-expand-outline-runtime` **落地**；**C 写章运行时已按** `2026-08-19-write-chapter-runtime` **落地**；**C 回炉运行时已按** `2026-08-19-rewrite-chapter-runtime` **落地**；**C 续写运行时已按** `2026-08-20-write-continue-runtime` **落地**；**C 适配运行时已按** `2026-08-25-adapt-pack-runtime` **落地**（项目设置「内核合同」）；**扩纲工作台按钮已接**规划区 / 「更多 · 扩纲」。`generateChapterForGroup` / batch、B（画布 `prompt`）仍须另开。

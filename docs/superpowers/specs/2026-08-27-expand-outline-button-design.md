@@ -1,7 +1,7 @@
 # 扩纲工作台按钮（expand_outline）
 
 日期：2026-08-27  
-状态：已确认，待实现  
+状态：已落地  
 对照：
 
 - `2026-08-16-novel-workbench-verb-contracts-design.md` v1.6 `expand_outline` 节（运行时已落地；本文件只接工作台按钮）
