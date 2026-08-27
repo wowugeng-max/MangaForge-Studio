@@ -81,7 +81,7 @@ export function ExpandOutlineCard({
   return (
     <Card className="expand-outline-card" title="扩纲" size="small">
       <Space direction="vertical" size={12} style={{ width: '100%' }}>
-        <Text type="secondary">用内核合同扩写大纲。采纳只写大纲账本，不改正文。下面的「大纲扩写流程」仍是旧链路。</Text>
+        <Text type="secondary">用内核合同扩写大纲。采纳只写大纲账本，不改正文。上面的「大纲扩写流程」仍是旧链路。</Text>
         {state.phase === 'failed' ? (
           <Alert type="error" showIcon message={failedText} />
         ) : null}

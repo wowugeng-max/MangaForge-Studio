@@ -14,6 +14,8 @@ describe('expand outline planning card source', () => {
     expect(card).toContain('getArtifactContent')
     expect(card).toContain('采纳')
     expect(card).toContain('丢弃')
+    expect(card).toContain('上面的「大纲扩写流程」')
+    expect(card).not.toContain('下面的「大纲扩写流程」')
     expect(card).not.toContain('future100_generate')
     expect(card).not.toContain('putVerbDefaults')
   })
