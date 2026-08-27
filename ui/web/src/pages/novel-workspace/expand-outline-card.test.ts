@@ -44,6 +44,15 @@ describe('expand outline planning card source', () => {
     expect(panels.indexOf('StoryPlanningExpandFlowCard')).toBeLessThan(panels.indexOf('ExpandOutlineCard'))
   })
 
+  test('failed Alert uses local occupancy helper and tooltip wraps the disabled button', () => {
+    const card = source('expand-outline-card.tsx')
+    expect(card).toContain('expandOutlineFailedAlertText')
+    expect(card).not.toContain('kernelJobUserMessage')
+    const tooltip = card.slice(card.indexOf('<Tooltip title={startTitle}>'), card.indexOf('</Tooltip>'))
+    expect(tooltip).toContain('<span')
+    expect(tooltip.indexOf('<span')).toBeLessThan(tooltip.indexOf('<Button'))
+  })
+
   test('writing 更多 jumps to planning and does not host expand preview', () => {
     const presenter = source('chapter-workflow-presenter.ts')
     const actionBar = source('workspace-center-chapter-action-bar.tsx')

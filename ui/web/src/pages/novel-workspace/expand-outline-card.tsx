@@ -4,12 +4,12 @@ import type { ExpandOutlineJobState } from './shell/use-expand-outline-job'
 import {
   EXPAND_OUTLINE_NEED_LEDGER,
   expandOutlineCancelVisible,
+  expandOutlineFailedAlertText,
   expandOutlineHasLedger,
   expandOutlinePreviewRows,
   loadExpandOutlinePreviews,
   type ExpandOutlinePreview,
 } from './expand-outline-ui'
-import { kernelJobUserMessage } from '../../kernel/jobs/messages'
 
 const { Text, Paragraph } = Typography
 
@@ -75,7 +75,7 @@ export function ExpandOutlineCard({
       ? '请先选择模型'
       : undefined
   const failedText = state.phase === 'failed'
-    ? (kernelJobUserMessage(state.errorCode)?.text || state.errorCode)
+    ? expandOutlineFailedAlertText(state.errorCode)
     : ''
 
   return (
@@ -95,17 +95,19 @@ export function ExpandOutlineCard({
         ) : null}
         <Space wrap>
           <Tooltip title={startTitle}>
-            <Button
-              type="primary"
-              disabled={startDisabled}
-              loading={state.phase === 'running'}
-              onClick={() => {
-                if (state.phase === 'awaiting_selection' || state.phase === 'running') return
-                onStart()
-              }}
-            >
-              {state.phase === 'running' ? '扩纲中' : state.phase === 'awaiting_selection' ? '去预览' : '扩纲'}
-            </Button>
+            <span>
+              <Button
+                type="primary"
+                disabled={startDisabled}
+                loading={state.phase === 'running'}
+                onClick={() => {
+                  if (state.phase === 'awaiting_selection' || state.phase === 'running') return
+                  onStart()
+                }}
+              >
+                {state.phase === 'running' ? '扩纲中' : state.phase === 'awaiting_selection' ? '去预览' : '扩纲'}
+              </Button>
+            </span>
           </Tooltip>
           {expandOutlineCancelVisible(state) ? (
             <Button onClick={onCancel}>取消</Button>

@@ -18,6 +18,10 @@ export function expandOutlineCreateFailureText(code: string): string | null {
   return kernelJobUserMessage(code)?.text || null
 }
 
+export function expandOutlineFailedAlertText(code: string): string {
+  return expandOutlineCreateFailureText(code) || String(code || '')
+}
+
 export function expandOutlineCommitSuccessText() {
   return EXPAND_OUTLINE_COMMIT_OK
 }

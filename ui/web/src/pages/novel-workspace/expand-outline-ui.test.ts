@@ -6,6 +6,7 @@ import {
   expandOutlineCancelVisible,
   expandOutlineCommitSuccessText,
   expandOutlineCreateFailureText,
+  expandOutlineFailedAlertText,
   expandOutlineHasLedger,
   expandOutlinePreviewRows,
   loadExpandOutlinePreviews,
@@ -33,6 +34,14 @@ describe('expand-outline-ui', () => {
       kind: 'warning',
       text: '同项目同动词任务未结束',
     })
+  })
+
+  test('planning failed Alert uses local occupancy copy not the global toast', () => {
+    expect(expandOutlineFailedAlertText('PROJECT_JOB_RUNNING')).toBe('该项目扩纲未结束')
+    expect(expandOutlineFailedAlertText('PROJECT_JOB_RUNNING')).not.toBe(
+      kernelJobUserMessage('PROJECT_JOB_RUNNING')?.text,
+    )
+    expect(expandOutlineFailedAlertText('FOUNDATION_PRECONDITION')).toBe(EXPAND_OUTLINE_NEED_LEDGER)
   })
 
   test('has ledger when outlines array is non-empty', () => {
