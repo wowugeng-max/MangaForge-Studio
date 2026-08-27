@@ -350,6 +350,8 @@ export function useExpandOutlineJob(deps: {
   }, [api, deps.modelId, deps.projectId, state.phase])
 
   const resume = useCallback(async () => {
+    if (runningRef.current) return
+    if (state.phase === 'awaiting_selection') return
     if (!deps.projectId) return
     const { controller, session } = beginSession()
     setState({ phase: 'running', jobId: '', hint: 'queued', elapsedSec: 0 })
@@ -361,7 +363,7 @@ export function useExpandOutlineJob(deps: {
       ...bindProgress(session),
     })
     finishSession(session, result)
-  }, [api, deps.projectId])
+  }, [api, deps.projectId, state.phase])
 
   const session = sessionRef.current
 
@@ -372,13 +374,15 @@ export function useExpandOutlineJob(deps: {
       || (state.phase === 'running' || state.phase === 'awaiting_selection' ? state.jobId : ''),
     )
     const controller = abortRef.current
+    sessionRef.current += 1
+    const cancelSession = sessionRef.current
     await cancelExpandOutlineJob({
       abort: () => controller?.abort(),
       cancelJob: api.cancelJob,
       jobId,
       jobIdRef,
     })
-    if (!isCurrentSession(session)) return
+    if (sessionRef.current !== cancelSession) return
     runningRef.current = false
     setState({ phase: 'idle' })
   }, [api, state, session])

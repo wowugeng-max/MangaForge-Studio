@@ -353,6 +353,14 @@ class ExpandHookHarness<T> {
   }
 }
 
+function deferredExpand<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 async function flushExpand() {
   for (let index = 0; index < 16; index += 1) await Promise.resolve()
 }
@@ -384,5 +392,130 @@ describe('useExpandOutlineJob', () => {
     await harness.value.start()
     await flushExpand()
     expect(createJobByVerb).not.toHaveBeenCalled()
+  })
+
+  test('resume while running does not listJobs', async () => {
+    const created = deferredExpand<{ ok: true; jobId: string }>()
+    const createJobByVerb = mock(async () => created.promise)
+    const listJobs = mock(async () => ({ ok: true as const, jobs: [] }))
+    const api = {
+      createJobByVerb,
+      getJob: async () => jobDetail('awaiting_selection'),
+      cancelJob: async () => ({ ok: true as const }),
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new ExpandHookHarness(() => useExpandOutlineJob({
+      api: api as any,
+      projectId: 6,
+      modelId: 304,
+    }))
+    harness.mount()
+    const started = harness.value.start()
+    await flushExpand()
+    expect(harness.value.state.phase).toBe('running')
+    await harness.value.resume()
+    await flushExpand()
+    expect(listJobs).not.toHaveBeenCalled()
+    created.resolve({ ok: true as const, jobId: 'job-1' })
+    await started
+    await flushExpand()
+    expect(harness.value.state.phase).toBe('awaiting_selection')
+  })
+
+  test('resume while awaiting_selection does not listJobs', async () => {
+    const listJobs = mock(async () => ({ ok: true as const, jobs: [] }))
+    const api = {
+      createJobByVerb: async () => ({ ok: true as const, jobId: 'job-1' }),
+      getJob: async () => jobDetail('awaiting_selection'),
+      cancelJob: async () => ({ ok: true as const }),
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs,
+    }
+    const harness = new ExpandHookHarness(() => useExpandOutlineJob({
+      api: api as any,
+      projectId: 6,
+      modelId: 304,
+    }))
+    harness.mount()
+    await harness.value.start()
+    await flushExpand()
+    expect(harness.value.state.phase).toBe('awaiting_selection')
+    listJobs.mockClear()
+    await harness.value.resume()
+    await flushExpand()
+    expect(listJobs).not.toHaveBeenCalled()
+    expect(harness.value.state.phase).toBe('awaiting_selection')
+  })
+
+  test('cancel calls cancelJob with that job id only', async () => {
+    const cancelJob = mock(async () => ({ ok: true as const }))
+    const api = {
+      createJobByVerb: async () => ({ ok: true as const, jobId: 'job-1' }),
+      getJob: async () => jobDetail('awaiting_selection'),
+      cancelJob,
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs: async () => ({ ok: true as const, jobs: [] }),
+    }
+    const harness = new ExpandHookHarness(() => useExpandOutlineJob({
+      api: api as any,
+      projectId: 6,
+      modelId: 304,
+    }))
+    harness.mount()
+    await harness.value.start()
+    await flushExpand()
+    expect(harness.value.state.phase).toBe('awaiting_selection')
+    await harness.value.cancel()
+    await flushExpand()
+    expect(cancelJob).toHaveBeenCalledWith('job-1')
+    expect(cancelJob.mock.calls.map((call: any[]) => call[0])).toEqual(['job-1'])
+    expect(harness.value.state.phase).toBe('idle')
+  })
+
+  test('cancel bumps session so a late poll cannot restore discarded preview', async () => {
+    const cancelled = deferredExpand<{ ok: true }>()
+    const cancelJob = mock(async () => cancelled.promise)
+    let harness: ExpandHookHarness<ReturnType<typeof useExpandOutlineJob>>
+    let cancelQueued = false
+    const api = {
+      createJobByVerb: async () => ({ ok: true as const, jobId: 'job-1' }),
+      getJob: async () => {
+        const base = jobDetail('awaiting_selection', {
+          job: { id: 'job-1', status: 'awaiting_selection' },
+        })
+        return {
+          ...base,
+          job: new Proxy(base.job as object, {
+            get(target, prop) {
+              if (prop === 'status' && !cancelQueued) {
+                cancelQueued = true
+                queueMicrotask(() => {
+                  queueMicrotask(() => { void harness.value.cancel() })
+                })
+              }
+              return (target as any)[prop]
+            },
+          }),
+        } as KernelJobDetail
+      },
+      cancelJob,
+      commitJob: async () => ({ ok: true as const, commits: [] }),
+      listJobs: async () => ({ ok: true as const, jobs: [] }),
+    }
+    harness = new ExpandHookHarness(() => useExpandOutlineJob({
+      api: api as any,
+      projectId: 6,
+      modelId: 304,
+    }))
+    harness.mount()
+    await harness.value.start()
+    await flushExpand()
+    expect(cancelJob).toHaveBeenCalledWith('job-1')
+    expect(harness.value.state.phase).not.toBe('awaiting_selection')
+
+    cancelled.resolve({ ok: true as const })
+    await flushExpand()
+    expect(harness.value.state.phase).toBe('idle')
   })
 })
