@@ -285,4 +285,7 @@ describe('candidateStatusAfterGate', () => {
     expect(candidateStatusAfterGate('', null)).toBe('succeeded')
     expect(candidateStatusAfterGate('', undefined)).toBe('succeeded')
   })
+  test('TRACKING_MISSING maps to failed, not gated', () => {
+    expect(candidateStatusAfterGate('TRACKING_MISSING', 'failed')).toBe('failed')
+  })
 })

@@ -5,6 +5,7 @@ import { latestOhStoryReviewForChapter, ohStoryReviewMatchesChapterText } from '
 import type { KernelContract } from '../contracts/schema'
 import { resolveContractVerb } from '../verbs/infer'
 import { getVerbTemplate } from '../verbs/registry'
+import { evaluateChapterTrackingGate } from './chapter-tracking'
 import { firstHeadingOf } from './domain-upsert'
 
 export type GateResult = { gate: string; ok: boolean; code?: string; message?: string }
@@ -27,6 +28,7 @@ export async function runPostHarvestGates(input: {
   spawnEvidence?: { subagent_threads: Array<{ thread_id: string; parent_thread_id: string; agent: string }>; agent_hints: string[] }
   readArtifactText: (artifact: GateArtifact) => string
   continueCount?: number
+  trackingChapterNos?: number[]
 }): Promise<{ results: GateResult[]; failedCode: string | null; failedStatus: 'gated' | 'failed' | null }> {
   const results: GateResult[] = []
   for (const warning of input.warnings || []) {
@@ -87,6 +89,20 @@ export async function runPostHarvestGates(input: {
       results.push(n < 1 ? { gate, ok: false, code: 'NO_SPAWN' } : { gate, ok: true })
       continue
     }
+    if (gate === 'require_chapter_tracking') {
+      const verb = resolveContractVerb(input.contract as any) || ''
+      const judged = evaluateChapterTrackingGate({
+        verb,
+        artifacts: input.artifacts,
+        readText: (rel) => {
+          const art = input.artifacts.find(a => a.rel_path === rel)
+          return art ? input.readArtifactText(art) : ''
+        },
+        chapterNos: input.trackingChapterNos || [],
+      })
+      results.push(judged.ok ? { gate, ok: true } : { gate, ok: false, code: judged.code, message: judged.message })
+      continue
+    }
     if (gate === 'require_chapter_file') {
       if (resolveContractVerb(input.contract as any) === 'write_continue') {
         const texts = input.artifacts.filter(a => a.artifact_kind === 'chapter_text')
@@ -143,7 +159,7 @@ export async function runPostHarvestGates(input: {
   const failed = results.find(r => !r.ok)
   const failedCode = failed?.code || null
   const failedStatus: 'gated' | 'failed' | null = failedCode
-    ? (failedCode === 'KIND_COUNT_BELOW_MIN' ? 'failed' : 'gated')
+    ? (failedCode === 'KIND_COUNT_BELOW_MIN' || failedCode === 'TRACKING_MISSING' ? 'failed' : 'gated')
     : null
   return { results, failedCode, failedStatus }
 }

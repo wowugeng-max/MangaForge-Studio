@@ -224,4 +224,28 @@ describe('verb gates', () => {
     expect(gate.failedCode).toBe('REJECT_OUTLINE')
     expect(gate.failedStatus).toBe('gated')
   })
+  test('require_chapter_tracking missing json is failed not gated', async () => {
+    const write: any = {
+      ...baseOpenContract,
+      id: 'oh-story-core.story-long-write.chapter',
+      verb: 'write_chapter',
+      capability: 'rewrite',
+      gates: ['require_chapter_tracking'],
+    }
+    const gate = await runPostHarvestGates({
+      workspace: '/tmp/nowhere', projectId: 1, chapterId: 0, contract: write,
+      artifacts: [
+        art('chapter_text', '正文/第001章_一.md'),
+        art('tracking_doc', '追踪/逐章记录/第001章.md'),
+      ],
+      warnings: [],
+      trackingChapterNos: [1],
+      readArtifactText: textReader({
+        '追踪/逐章记录/第001章.md': '# 第001章\n角色进场',
+      }),
+    })
+    expect(gate.failedCode).toBe('TRACKING_MISSING')
+    expect(gate.failedStatus).toBe('failed')
+  })
 })
+
