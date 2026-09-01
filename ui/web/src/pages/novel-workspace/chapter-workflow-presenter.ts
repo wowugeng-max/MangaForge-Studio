@@ -65,7 +65,9 @@ function phaseLabel(phase: ChapterWorkflowPhase, input: ChapterWorkflowInput = {
 }
 
 function acceptanceOf(input: ChapterWorkflowInput) {
-  return String(input.acceptanceStatus || '')
+  const raw = String(input.acceptanceStatus || '')
+  if (raw === 'needs_state_sync') return 'ready_to_accept'
+  return raw
 }
 
 function qualityChecked(input: ChapterWorkflowInput) {
@@ -85,13 +87,10 @@ function revisionSettled(input: ChapterWorkflowInput) {
 }
 
 function storySynced(input: ChapterWorkflowInput) {
-  return input.storyStateSynced === true
+  return Boolean(input.hasProse)
 }
 
-function remainingClosedLoopPrimary(input: ChapterWorkflowInput): ChapterWorkflowAction {
-  if (!storySynced(input)) {
-    return { key: 'sync_story_state', label: '同步故事状态', kind: 'primary' }
-  }
+function remainingClosedLoopPrimary(_input: ChapterWorkflowInput): ChapterWorkflowAction {
   return { key: 'accept_chapter_and_continue', label: '写下一章', kind: 'primary' }
 }
 
@@ -101,7 +100,7 @@ export function buildWorkflowSteps(input: ChapterWorkflowInput = {}, phase?: Cha
   const proseDone = Boolean(input.hasProse)
   const qualityDone = qualityChecked(input)
   const revisionDone = revisionSettled(input)
-  const syncDone = storySynced(input)
+  const syncDone = Boolean(input.hasProse)
   const nextDone = resolved === 'ready_next'
 
   const stepsDone = [proseDone, qualityDone, revisionDone, syncDone, nextDone]
@@ -137,11 +136,7 @@ export function resolveChapterWorkflowPhase(input: ChapterWorkflowInput = {}): C
   const acceptance = acceptanceOf(input)
   if (['needs_revision', 'needs_recheck'].includes(acceptance)) return 'needs_revision'
   if (acceptance === 'needs_quality_check' || !acceptance || acceptance === 'hidden') return 'written_unchecked'
-  if (acceptance === 'needs_state_sync' || (input.storyStateSynced === false && ['ready_to_accept', 'delivered_with_warnings', 'delivered'].includes(acceptance))) {
-    return 'needs_state_sync'
-  }
   if (['ready_to_accept', 'delivered', 'delivered_with_warnings'].includes(acceptance)) {
-    if (input.storyStateSynced === false) return 'needs_state_sync'
     return 'ready_next'
   }
   return 'writing'
@@ -208,7 +203,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       ...base,
       reasonText: synced
         ? '正文已具备，故事状态已同步。质检修订请用下方 oh-story。'
-        : '正文已具备。先同步故事状态，质检修订请用下方 oh-story。',
+        : '正文已具备。质检修订请用下方 oh-story。',
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
@@ -225,7 +220,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
       ...base,
       reasonText: storySynced(input)
         ? '旧质检仍标了待修订。改稿请用下方 oh-story，或进入下一章。'
-        : '旧质检仍标了待修订。先同步故事状态，改稿请用下方 oh-story。',
+        : '旧质检仍标了待修订。改稿请用下方 oh-story。',
       primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
@@ -241,7 +236,7 @@ export function buildChapterWorkflowPresenter(input: ChapterWorkflowInput = {}):
     return {
       ...base,
       reasonText: '质检已过，但故事状态机尚未同步。现在写下一章可能继续漂移。',
-      primaryAction: { key: 'sync_story_state', label: '同步故事状态', kind: 'primary' },
+      primaryAction: remainingClosedLoopPrimary(input),
       secondaryActions: [
         { key: 'write_continue', label: '续写', kind: 'default' },
         { key: 'expand_outline', label: '扩纲', kind: 'default' },

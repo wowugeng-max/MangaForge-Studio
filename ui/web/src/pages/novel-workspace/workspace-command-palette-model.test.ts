@@ -25,9 +25,9 @@ describe('buildWorkspaceCommands', () => {
     const { ctx, calls } = contextWith()
     const commands = buildWorkspaceCommands(ctx)
     expect(commands[0].hint).toContain('主行动')
-    expect(commands[0].label).toBe('同步故事状态')
+    expect(commands[0].label).toBe('写下一章')
     commands[0].run()
-    expect(calls).toEqual(['workflow:sync_story_state'])
+    expect(calls).toEqual(['workflow:accept_chapter_and_continue'])
   })
 
   test('包含次级动作与面板/编辑器入口', () => {

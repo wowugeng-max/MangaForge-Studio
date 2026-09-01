@@ -55,6 +55,13 @@ describe('kernelJobUserMessage', () => {
     })
   })
 
+  test('maps TRACKING_MISSING to oh-story tracking warning', () => {
+    expect(kernelJobUserMessage('TRACKING_MISSING')).toEqual({
+      kind: 'warning',
+      text: '写章未提交 oh-story 追踪',
+    })
+  })
+
   test('maps FOUNDATION_PRECONDITION to expand ledger copy', () => {
     expect(kernelJobUserMessage('FOUNDATION_PRECONDITION')).toEqual({
       kind: 'warning',

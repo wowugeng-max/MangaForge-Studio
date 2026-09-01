@@ -29,6 +29,9 @@ export function kernelJobUserMessage(code: string): { kind: 'warning' | 'error' 
   }
   if (value === 'ADAPT_TARGET_INVALID') return { kind: 'warning', text: '不能适配内置写作 skill 或 oh-story' }
   if (value === 'SKILL_NOT_FOUND') return { kind: 'warning', text: '还没有安装这份写作 skill' }
+  if (value === 'TRACKING_MISSING') {
+    return { kind: 'warning', text: '写章未提交 oh-story 追踪' }
+  }
   if (value === 'FOUNDATION_PRECONDITION') {
     return { kind: 'warning', text: '扩纲需要账本里已有大纲' }
   }

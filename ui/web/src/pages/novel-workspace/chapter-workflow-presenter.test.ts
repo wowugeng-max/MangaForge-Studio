@@ -27,8 +27,9 @@ describe('chapter workflow presenter', () => {
       acceptanceStatus: 'needs_quality_check',
     })
     expect(model.phase).toBe('written_unchecked')
-    expect(model.primaryAction.key).toBe('sync_story_state')
-    expect(model.primaryAction.label).toBe('同步故事状态')
+    expect(model.primaryAction.key).toBe('accept_chapter_and_continue')
+    expect(model.primaryAction.label).toBe('写下一章')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('sync_story_state')
     expect(model.secondaryActions.map(item => item.key)).not.toContain('refresh_current_quality')
     expect(model.secondaryActions.some(a => a.key === 'generate' && a.label === '回炉')).toBe(true)
     expect(model.panelToOpen).toBe('quality')
@@ -81,7 +82,7 @@ describe('chapter workflow presenter', () => {
     expect(model.stepsDone[3]).toBe(true)
   })
 
-  test('state sync is required before next chapter', () => {
+  test('needs_state_sync acceptance still offers 写下一章 not 同步故事状态', () => {
     const model = buildChapterWorkflowPresenter({
       hasChapter: true,
       hasProse: true,
@@ -89,10 +90,10 @@ describe('chapter workflow presenter', () => {
       storyStateSynced: false,
       canSyncStoryState: true,
     })
-    expect(model.phase).toBe('needs_state_sync')
-    expect(model.primaryAction.key).toBe('sync_story_state')
-    expect(model.reasonText).toContain('故事状态')
-    expect(model.stepsDone[3]).toBe(false)
+    expect(model.phase).not.toBe('needs_state_sync')
+    expect(model.primaryAction.key).toBe('accept_chapter_and_continue')
+    expect(model.secondaryActions.map(item => item.key)).not.toContain('sync_story_state')
+    expect(model.stepsDone[3]).toBe(true)
   })
 
   test('ready next after sync', () => {
