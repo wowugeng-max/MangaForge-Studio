@@ -23,6 +23,7 @@ import { loadVerbDefaults } from '../verbs/defaults'
 import { resolveContractVerb } from '../verbs/infer'
 import { getVerbTemplate } from '../verbs/registry'
 import { commitKernelCandidate } from './commit'
+import { trackingChapterNos as chapterNosForTracking } from './chapter-tracking'
 import { runPostHarvestGates } from './gates'
 import {
   getKernelJobDetail, hasActiveKernelJob, insertKernelCandidate, insertKernelJob, listKernelJobs,
@@ -299,9 +300,11 @@ export async function createAndRunKernelJob(
           const harvestedLast = result.lastMessage ?? ''
           let adaptUnsatisfied: Array<{ rel_path: string; verb: string; errors: string[] }> = []
           let collapsed
+          let trackingNos: number[] = []
           if (validated.verb === 'write_continue') {
             const params = JSON.parse(validated.verbParamsJson || '{}')
             const windowNos = writeContinueWindow(Number(params.from_chapter_no), Number(params.count))
+            trackingNos = windowNos
             const chapters = await listNovelChapters(ws, body.project_id)
             const projectedRel: Record<number, string> = {}
             for (const no of windowNos) {
@@ -324,6 +327,7 @@ export async function createAndRunKernelJob(
             adaptUnsatisfied = collapsedAdapt.unsatisfied
           } else {
             const chapterRow = await getNovelChapter(ws, body.subject_id, body.project_id)
+            trackingNos = chapterNosForTracking(validated.verb, { chapterNo: Number(chapterRow?.chapter_no || 0) })
             const currentRel = chapterRow
               ? chapterRelPath(Number(chapterRow.chapter_no), String(chapterRow.title || ''))
               : ''
@@ -355,6 +359,7 @@ export async function createAndRunKernelJob(
             warnings: harvestedWarnings,
             spawnEvidence: harvestedSpawn,
             continueCount: Number(JSON.parse(validated.verbParamsJson || '{}').count || 0),
+            trackingChapterNos: trackingNos,
             readArtifactText: (artifact) => {
               try { return readFileSync(String(artifact.vault_path || ''), 'utf8') } catch { return '' }
             },

@@ -40,6 +40,17 @@ function stubWrite(files: Record<string, { kind: string; text: string }>, warnin
   }
 }
 
+function trackingFiles(nos: number[]): Record<string, { kind: string; text: string }> {
+  const files: Record<string, { kind: string; text: string }> = {
+    '追踪/_tracking-state.json': { kind: 'tracking_doc', text: `{"last_committed_chapter":${nos[nos.length - 1]}}` },
+  }
+  for (const no of nos) {
+    const pad = String(no).padStart(3, '0')
+    files[`追踪/逐章记录/第${pad}章.md`] = { kind: 'tracking_doc', text: `# 第${pad}章\n角色状态更新` }
+  }
+  return files
+}
+
 function latestVersionSource(ws: string, chapterId: number): string {
   const db = openDb(ws)
   try {
@@ -139,6 +150,7 @@ describe('write_continue jobs', () => {
       candidateRunner: stubWrite({
         [chapterRelPath(2, '二')]: { kind: 'chapter_text', text: '续写章2' },
         [chapterRelPath(3, '三')]: { kind: 'chapter_text', text: '续写章3' },
+        ...trackingFiles([2, 3]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -179,6 +191,7 @@ describe('write_continue jobs', () => {
       candidateRunner: stubWrite({
         [chapterRelPath(2, '二')]: { kind: 'chapter_text', text: '  \n ' },
         [chapterRelPath(3, '三')]: { kind: 'chapter_text', text: '  \n ' },
+        ...trackingFiles([2, 3]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -197,6 +210,7 @@ describe('write_continue jobs', () => {
       candidateRunner: stubWrite({
         [chapterRelPath(2, '二')]: { kind: 'chapter_text', text: '不该入库' },
         [chapterRelPath(3, '三')]: { kind: 'chapter_text', text: '不该入库' },
+        ...trackingFiles([2, 3]),
       }, [{ warning: 'write_outside_scope', rel_path: '大纲/细纲.md' }]) as any,
     })
     expect(created.ok).toBe(true)
@@ -219,6 +233,7 @@ describe('write_continue jobs', () => {
         [chapterRelPath(2, '二')]: { kind: 'chapter_text', text: '续写章2' },
         [chapterRelPath(3, '三')]: { kind: 'chapter_text', text: '续写章3' },
         '正文/第004章_x.md': { kind: 'chapter_text', text: '不该入库章4' },
+        ...trackingFiles([2, 3]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -231,6 +246,25 @@ describe('write_continue jobs', () => {
     expect((await getNovelChapter(ws, ch4.id, project.id))?.chapter_text).toBe('第四章旧正文')
     const extra = (detail.artifacts as any[]).find(a => a.rel_path === '正文/第004章_x.md')
     expect(extra?.artifact_kind).toBe('attachment')
+  })
+
+  test('window prose with only chapter 2 tracking fails TRACKING_MISSING', async () => {
+    const { ws, project, ch2, ch3, body } = await seedContinue()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        [chapterRelPath(2, '二')]: { kind: 'chapter_text', text: '续写章2' },
+        [chapterRelPath(3, '三')]: { kind: 'chapter_text', text: '续写章3' },
+        ...trackingFiles([2]),
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.candidates[0].error_code).toBe('TRACKING_MISSING')
+    expect((await getNovelChapter(ws, ch2.id, project.id))?.chapter_text).toBe('')
+    expect((await getNovelChapter(ws, ch3.id, project.id))?.chapter_text).toBe('')
   })
 
   test('same project write_continue is PROJECT_JOB_RUNNING; write_chapter outside window is ok', async () => {

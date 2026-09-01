@@ -191,9 +191,6 @@ export async function projectKernelSubject(input: ProjectKernelSubjectInput): Pr
     if (!files.some(f => f === '追踪/伏笔.md')) {
       writeProjected(projectDir, '追踪/伏笔.md', '# 伏笔\n\n开放项：无\n', files)
     }
-    if (chapter && !files.some(f => f.startsWith('追踪/逐章记录/'))) {
-      writeProjected(projectDir, `追踪/逐章记录/第${pad}章.md`, `# 第${pad}章 逐章记录\n\n开放项：无\n`, files)
-    }
   }
 
   let reviewPath = ''

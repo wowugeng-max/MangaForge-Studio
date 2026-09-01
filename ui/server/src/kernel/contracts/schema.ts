@@ -13,7 +13,7 @@ export const KERNEL_GATES = [
   'reject_solo_fallback', 'require_reviewer_agents', 'require_chapter_file',
   'require_matching_review', 'paragraph_retention_70', 'write_outside_scope',
   'reject_chapter_text_artifact', 'reject_outline_artifact', 'require_outline_mix',
-  'require_spawn_evidence',
+  'require_spawn_evidence', 'require_chapter_tracking',
 ] as const
 
 export const CONTRACT_ID_PATTERN = /^[a-z0-9][a-z0-9.-]{2,127}$/

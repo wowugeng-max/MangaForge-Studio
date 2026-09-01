@@ -37,6 +37,17 @@ function stubRewrite(files: Record<string, { kind: string; text: string }>) {
   return stubWrite(files)
 }
 
+function trackingFiles(nos: number[]): Record<string, { kind: string; text: string }> {
+  const files: Record<string, { kind: string; text: string }> = {
+    '追踪/_tracking-state.json': { kind: 'tracking_doc', text: `{"last_committed_chapter":${nos[nos.length - 1]}}` },
+  }
+  for (const no of nos) {
+    const pad = String(no).padStart(3, '0')
+    files[`追踪/逐章记录/第${pad}章.md`] = { kind: 'tracking_doc', text: `# 第${pad}章\n角色状态更新` }
+  }
+  return files
+}
+
 function latestVersionSource(ws: string, chapterId: number): string {
   const db = openDb(ws)
   try {
@@ -104,6 +115,7 @@ describe('write_chapter jobs', () => {
       skipRuntimeCheck: true,
       candidateRunner: stubWrite({
         [rel]: { kind: 'chapter_text', text: '初稿正文' },
+        ...trackingFiles([1]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -118,12 +130,31 @@ describe('write_chapter jobs', () => {
     expect(other?.chapter_text).toBe('旧正文')
   })
 
+  test('chapter_text without tracking json fails TRACKING_MISSING and leaves ledger empty', async () => {
+    const { ws, project, empty, body } = await seedWrite()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubWrite({
+        [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '初稿正文' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.candidates[0].error_code).toBe('TRACKING_MISSING')
+    expect(detail.job.status).toBe('failed')
+    const updated = await getNovelChapter(ws, empty.id, project.id)
+    expect(updated?.chapter_text).toBe('')
+  })
+
   test('empty harvest fails CHAPTER_FILE_MISSING and leaves ledger empty', async () => {
     const { ws, project, empty, body } = await seedWrite()
     const created = await createAndRunKernelJob(ws, body, {
       skipRuntimeCheck: true,
       candidateRunner: stubWrite({
         [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '  \n ' },
+        ...trackingFiles([1]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -143,6 +174,7 @@ describe('write_chapter jobs', () => {
       skipRuntimeCheck: true,
       candidateRunner: stubWrite({
         [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '不该入库' },
+        ...trackingFiles([1]),
       }, [{ warning: 'write_outside_scope', rel_path: '大纲/细纲.md' }]) as any,
     })
     expect(created.ok).toBe(true)
@@ -160,6 +192,7 @@ describe('write_chapter jobs', () => {
       skipRuntimeCheck: true,
       candidateRunner: stubWrite({
         '正文/第001章_新标题.md': { kind: 'chapter_text', text: '新标题这份' },
+        ...trackingFiles([1]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -179,6 +212,7 @@ describe('write_chapter jobs', () => {
       candidateRunner: stubWrite({
         [rel]: { kind: 'chapter_text', text: 'A' },
         '正文/第001章_另一标题.md': { kind: 'chapter_text', text: 'B' },
+        ...trackingFiles([1]),
       }) as any,
     })
     expect(created.ok).toBe(true)

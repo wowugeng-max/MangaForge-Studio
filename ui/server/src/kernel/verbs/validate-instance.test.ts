@@ -84,7 +84,7 @@ describe('instance vs template validation', () => {
     expect(validateInstanceAgainstTemplate(write)).toEqual({ ok: true })
     expect(write.commit.mode).toBe('auto_if_single')
     expect(write.commit.source).toBe('oh_story_write')
-    expect(write.gates).toEqual(['require_chapter_file', 'reject_outline_artifact'])
+    expect(write.gates).toEqual(['require_chapter_file', 'reject_outline_artifact', 'require_chapter_tracking'])
     expect(write.projection.mounts.includes('review_report')).toBe(false)
     expect(write.invoke.prompt).toContain('写第')
     expect(write.invoke.prompt).toContain('不要开书')
@@ -97,7 +97,7 @@ describe('instance vs template validation', () => {
     expect(validateInstanceAgainstTemplate(rewrite)).toEqual({ ok: true })
     expect(rewrite.commit.mode).toBe('manual')
     expect(rewrite.commit.source).toBe('oh_story_rewrite')
-    expect(rewrite.gates).toEqual(['require_chapter_file', 'reject_outline_artifact'])
+    expect(rewrite.gates).toEqual(['require_chapter_file', 'reject_outline_artifact', 'require_chapter_tracking'])
     expect(rewrite.gates.includes('paragraph_retention_70')).toBe(false)
     expect(rewrite.gates.includes('require_matching_review')).toBe(false)
     expect(rewrite.invoke.prompt).toContain('重写第')
@@ -111,7 +111,7 @@ describe('instance vs template validation', () => {
     expect(validateInstanceAgainstTemplate(cont)).toEqual({ ok: true })
     expect(cont.commit.mode).toBe('auto_if_single')
     expect(cont.commit.source).toBe('oh_story_continue')
-    expect(cont.gates).toEqual(['require_chapter_file', 'reject_outline_artifact'])
+    expect(cont.gates).toEqual(['require_chapter_file', 'reject_outline_artifact', 'require_chapter_tracking'])
     expect(cont.projection.mounts).toContain('continue_window')
     expect(cont.projection.mounts.includes('current_chapter')).toBe(false)
     expect(cont.outputs[0].glob).toBe('正文/第*.md')
@@ -131,5 +131,11 @@ describe('instance vs template validation', () => {
     if (!result.ok) expect(result.errors.join(' ')).toContain('commit.mode')
     const never = { ...expand, commit: { ...expand.commit, mode: 'never' } }
     expect(validateInstanceAgainstTemplate(never as any).ok).toBe(true)
+  })
+  test('deslop and review do not take require_chapter_tracking', () => {
+    const deslop = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-deslop.file')!
+    const review = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-review.full')!
+    expect(deslop.gates.includes('require_chapter_tracking' as any)).toBe(false)
+    expect(review.gates.includes('require_chapter_tracking' as any)).toBe(false)
   })
 })

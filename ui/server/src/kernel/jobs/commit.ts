@@ -6,6 +6,7 @@ import { openKernelDb } from '../db'
 import {
   ensureEmptyChapterRow, firstHeadingOf, parseChapterNoFromRelPath, upsertCharacterSheet, upsertOutlineDoc, upsertWorldDoc,
 } from './domain-upsert'
+import { trackingChapterNos as chapterNosForTracking } from './chapter-tracking'
 import { runPostHarvestGates } from './gates'
 import { getKernelJobDetail, insertKernelCommit, updateKernelCandidate, updateKernelJob } from './repo'
 
@@ -41,6 +42,9 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
 
   const artifacts = detail.artifacts.filter((a: any) => a.candidate_id === candidateId)
   const chapterId = Number(detail.job.subject_id)
+  const verbParams = JSON.parse(detail.job.verb_params || '{}')
+  const isProjectSubject = detail.job.subject_type === 'project'
+  const chapter = isProjectSubject ? null : await getNovelChapter(ws, chapterId, detail.job.project_id)
   let spawnEvidence = { subagent_threads: [] as Array<{ thread_id: string; parent_thread_id: string; agent: string }>, agent_hints: [] as string[] }
   try {
     const meta = JSON.parse(candidate.metadata || '{}')
@@ -49,7 +53,12 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
   const gate = await runPostHarvestGates({
     workspace: ws, projectId: detail.job.project_id, chapterId, contract,
     artifacts, warnings: [], spawnEvidence, readArtifactText: readVaultText,
-    continueCount: Number(JSON.parse(detail.job.verb_params || '{}').count || 0),
+    continueCount: Number(verbParams.count || 0),
+    trackingChapterNos: chapterNosForTracking(detail.job.verb, {
+      chapterNo: Number(chapter?.chapter_no || 0),
+      fromChapterNo: Number(verbParams.from_chapter_no || 0),
+      count: Number(verbParams.count || 0),
+    }),
   })
   if (gate.failedCode) return { ok: false, status: 409, code: gate.failedCode, message: 'commit-time gate failed' }
 
@@ -100,8 +109,6 @@ export async function commitKernelCandidate(ws: string, jobId: string, candidate
     return { ok: true, commits }
   }
 
-  const isProjectSubject = detail.job.subject_type === 'project'
-  const chapter = isProjectSubject ? null : await getNovelChapter(ws, chapterId, detail.job.project_id)
   const commits: Array<{ domain_table: string; domain_row_id: number }> = []
   const outlineRows: Array<{ outlineId: number; chapterNo: number | null; title: string }> = []
 

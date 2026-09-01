@@ -9,8 +9,8 @@
   "forbidden_required_kinds": ["review_report"],
   "allowed_domain_writes": ["chapters", "chapter_versions"],
   "forbidden_domain_writes": ["outlines", "reviews"],
-  "template_gates": ["require_chapter_file", "reject_outline_artifact"],
-  "allowed_gates": ["require_chapter_file", "reject_outline_artifact", "write_outside_scope"],
+  "template_gates": ["require_chapter_file", "reject_outline_artifact", "require_chapter_tracking"],
+  "allowed_gates": ["require_chapter_file", "reject_outline_artifact", "write_outside_scope", "require_chapter_tracking"],
   "mention_policy": "required",
   "commit_mode": "auto_if_single",
   "allowed_replace_bindings": false

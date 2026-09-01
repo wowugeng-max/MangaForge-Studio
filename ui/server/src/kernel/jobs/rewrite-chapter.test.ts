@@ -33,6 +33,17 @@ function stubRewrite(files: Record<string, { kind: string; text: string }>, warn
   }
 }
 
+function trackingFiles(nos: number[]): Record<string, { kind: string; text: string }> {
+  const files: Record<string, { kind: string; text: string }> = {
+    '追踪/_tracking-state.json': { kind: 'tracking_doc', text: `{"last_committed_chapter":${nos[nos.length - 1]}}` },
+  }
+  for (const no of nos) {
+    const pad = String(no).padStart(3, '0')
+    files[`追踪/逐章记录/第${pad}章.md`] = { kind: 'tracking_doc', text: `# 第${pad}章\n角色状态更新` }
+  }
+  return files
+}
+
 function latestVersionSource(ws: string, chapterId: number): string {
   const db = openDb(ws)
   try {
@@ -90,7 +101,7 @@ describe('rewrite_chapter jobs', () => {
     const rel = chapterRelPath(1, '一')
     const created = await createAndRunKernelJob(ws, body, {
       skipRuntimeCheck: true,
-      candidateRunner: stubRewrite({ [rel]: { kind: 'chapter_text', text: '回炉新稿' } }) as any,
+      candidateRunner: stubRewrite({ [rel]: { kind: 'chapter_text', text: '回炉新稿' }, ...trackingFiles([1]) }) as any,
     })
     expect(created.ok).toBe(true)
     if (!created.ok) return
@@ -116,6 +127,7 @@ describe('rewrite_chapter jobs', () => {
       skipRuntimeCheck: true,
       candidateRunner: stubRewrite({
         [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '  \n ' },
+        ...trackingFiles([1]),
       }) as any,
     })
     expect(created.ok).toBe(true)
@@ -133,6 +145,7 @@ describe('rewrite_chapter jobs', () => {
       skipRuntimeCheck: true,
       candidateRunner: stubRewrite({
         [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '不该入库' },
+        ...trackingFiles([1]),
       }, [{ warning: 'write_outside_scope', rel_path: '大纲/细纲.md' }]) as any,
     })
     expect(created.ok).toBe(true)
@@ -140,6 +153,24 @@ describe('rewrite_chapter jobs', () => {
     await created.done
     const detail = getKernelJobDetail(ws, created.jobId)!
     expect(detail.candidates[0].error_code).toBe('REJECT_OUTLINE')
+    expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('旧稿正文')
+  })
+
+  test('placeholder 逐章记录 fails TRACKING_MISSING and leaves old prose', async () => {
+    const { ws, project, filled, body } = await seedRewrite()
+    const created = await createAndRunKernelJob(ws, body, {
+      skipRuntimeCheck: true,
+      candidateRunner: stubRewrite({
+        [chapterRelPath(1, '一')]: { kind: 'chapter_text', text: '回炉新稿' },
+        '追踪/_tracking-state.json': { kind: 'tracking_doc', text: '{"last_committed_chapter":1}' },
+        '追踪/逐章记录/第001章.md': { kind: 'tracking_doc', text: '# 第001章 逐章记录\n\n开放项：无\n' },
+      }) as any,
+    })
+    expect(created.ok).toBe(true)
+    if (!created.ok) return
+    await created.done
+    const detail = getKernelJobDetail(ws, created.jobId)!
+    expect(detail.candidates[0].error_code).toBe('TRACKING_MISSING')
     expect((await getNovelChapter(ws, filled.id, project.id))?.chapter_text).toBe('旧稿正文')
   })
 

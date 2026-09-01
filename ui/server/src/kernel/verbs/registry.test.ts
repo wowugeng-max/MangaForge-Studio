@@ -37,14 +37,17 @@ describe('verb template registry', () => {
   })
   test('write_continue template is project auto_if_single with reject_outline_artifact', () => {
     expect(getVerbTemplate('write_continue')!.template_gates).toContain('reject_outline_artifact')
+    expect(getVerbTemplate('write_continue')!.template_gates).toContain('require_chapter_tracking')
     expect(getVerbTemplate('write_continue')!.commit_mode).toBe('auto_if_single')
     expect(getVerbTemplate('write_continue')!.subject_type).toBe('project')
   })
   test('write_chapter template gates include reject_outline_artifact', () => {
     expect(getVerbTemplate('write_chapter')!.template_gates).toContain('reject_outline_artifact')
+    expect(getVerbTemplate('write_chapter')!.template_gates).toContain('require_chapter_tracking')
   })
   test('rewrite_chapter template gates include reject_outline_artifact and stay manual', () => {
     expect(getVerbTemplate('rewrite_chapter')!.template_gates).toContain('reject_outline_artifact')
+    expect(getVerbTemplate('rewrite_chapter')!.template_gates).toContain('require_chapter_tracking')
     expect(getVerbTemplate('rewrite_chapter')!.commit_mode).toBe('manual')
   })
   test('unknown verb returns null', () => {

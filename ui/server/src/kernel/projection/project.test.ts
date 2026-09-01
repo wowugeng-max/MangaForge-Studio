@@ -258,6 +258,17 @@ describe('projectKernelSubject', () => {
     expect(vars.chapter_no).toBe('')
   })
 
+  test('write_chapter projection does not stub 逐章记录', async () => {
+    const { ws, project, ch2 } = await seedWorkspace()
+    const write = BUILTIN_KERNEL_CONTRACTS.find(c => c.id === 'oh-story-core.story-long-write.chapter')!
+    const projectDir = mkdtempSync(join(tmpdir(), 'kernel-proj-dir-'))
+    const { files } = await projectKernelSubject({
+      workspace: ws, projectId: project.id, chapterId: ch2.id, contract: write, projectDir,
+    })
+    expect(files.some(f => f.startsWith('追踪/逐章记录/'))).toBe(false)
+    expect(existsSync(join(projectDir, '追踪/逐章记录/第002章.md'))).toBe(false)
+  })
+
   test('omitted subjectType with chapterId 0 throws CHAPTER_NOT_FOUND', async () => {
     const ws = mkdtempSync(join(tmpdir(), 'kernel-proj-'))
     const project = await createNovelProject(ws, { title: '试作' })

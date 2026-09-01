@@ -183,9 +183,10 @@ export async function runKernelCandidate(input: RunKernelCandidateInput): Promis
       missingRequired = missingRequired.filter(glob => glob !== rendered)
     }
     if (missingRequired.length > 0) {
+      const trackingMiss = missingRequired.some(glob => glob.startsWith('追踪/'))
       return {
         ok: false,
-        error_code: 'OUTPUT_MISSING',
+        error_code: trackingMiss ? 'TRACKING_MISSING' : 'OUTPUT_MISSING',
         message: `缺少约定产物：${missingRequired.join(', ')}`,
         jobDir,
         artifacts,
