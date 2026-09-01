@@ -1,11 +1,18 @@
 # 小说工作台动词与合同模板
 
 日期：2026-08-16  
-状态：待用户审阅（v1.7，2026-08-27：扩纲工作台按钮已落地）  
+状态：待用户审阅（v1.8，2026-09-01：写作区追踪闸门已落地）  
 前置：
 
 - `2026-08-15-codex-kernel-vault-design.md`（内核账本、合同、投影、第一批审稿/去AI/改稿合同。本文件是其「另开」的 outline / 开书规范，并补上工作台动词层）
 - oh-story `story-long-write` 开书场景：Phase 1→2→3，默认停在细纲，不自动写正文
+
+### v1.8 修订要点（2026-09-01，写作区追踪闸门落地）
+
+1. 写作区步骤条不再发旧 `POST /novel/chapters/:id/story-state-sync`。写章 / 续写 / 回炉必收 `追踪/_tracking-state.json` 与本章 `追踪/逐章记录/第NNN章.md`，否则 `TRACKING_MISSING`、正文不入库。
+2. 「写下一章」仍只跳章，不发 `write_chapter` / `write_continue`。
+3. 规划区 / 预检 / 命令面板旧同步仍在；旧 API 不下线、不 410。
+4. `generateChapterForGroup` / batch 仍走旧 API，仍另开。`.outline` 仍 `implemented=false`。
 
 ### v1.7 修订要点（2026-08-27，扩纲工作台按钮落地）
 

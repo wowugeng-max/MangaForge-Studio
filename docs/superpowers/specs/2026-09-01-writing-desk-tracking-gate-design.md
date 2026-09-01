@@ -1,11 +1,11 @@
 # 写作区追踪闸门（写章必收 oh-story 追踪）
 
 日期：2026-09-01  
-状态：待用户审阅  
+状态：已落地  
 对照：
 
-- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.7（写作区步骤条后两步仍是旧工作台；规划区旧「同步故事状态」故意不改成 kernel job）
-- `2026-08-15-codex-kernel-vault-design.md` v1.8
+- `2026-08-16-novel-workbench-verb-contracts-design.md` v1.8（写作区步骤条不再发旧同步；写章/续写/回炉必收追踪）
+- `2026-08-15-codex-kernel-vault-design.md` v1.9
 - oh-story `story-long-write`：`references/tracking-transaction.md`、`workflow-chapter.md` 第 12 步（写完必须 `tracking_commit.py commit`）
 - 写章 / 续写 / 回炉运行时已落地；本文件不新开动词
 

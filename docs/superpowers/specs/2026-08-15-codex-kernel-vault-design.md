@@ -1,7 +1,7 @@
 # Codex 内核 + 资产账本（可扩展接口）
 
-日期：2026-08-15（v1.8 修订 2026-08-27）  
-状态：待用户审阅（v1.8，2026-08-27：扩纲工作台按钮已落地）  
+日期：2026-08-15（v1.9 修订 2026-09-01）  
+状态：待用户审阅（v1.9，2026-09-01：写作区追踪闸门已落地）  
 前置：
 
 - `2026-08-14-oh-story-core-skill-shell-design.md`（方案 B：oh-story 出能力，工作台出账本；当时用 solo 一次补全，本 spec 废止该运行时）
@@ -12,6 +12,10 @@
 - `2026-08-09-canvas-prompt-skill-pack-design.md`（画布仍是提示词编译器，本 spec 定义它以后如何升级为内核合同，本期不改画布运行时）
 - `2026-08-16-novel-workbench-verb-contracts-design.md`（工作台动词层；开书 `open_book`、并跑主键改为 verb、投影/门补丁。v1.2 把其中已落地的内核语义收回本文件）
 - 分期计划：`2026-08-15-codex-kernel-app-server-client.md`、`2026-08-15-codex-kernel-jobs-and-bridge.md`、`2026-08-15-codex-kernel-compete.md`（头部「本分期新增决定」表已折入本文；后续代码覆盖计划处，以本文为准）
+
+### v1.9 修订要点（2026-09-01，写作区追踪闸门落地）
+
+写章 / 续写 / 回炉必收 oh-story 追踪（`追踪/_tracking-state.json` + 本章逐章记录），缺则 `TRACKING_MISSING`；写作区步骤条不再发旧同步；「写下一章」仍只跳章；规划区旧同步仍在。`generateChapterForGroup` / batch 仍另开。
 
 ### v1.8 修订要点（2026-08-27，扩纲工作台按钮落地）
 
