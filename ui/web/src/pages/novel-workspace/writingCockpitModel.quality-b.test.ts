@@ -303,10 +303,10 @@ describe('buildWritingCockpitModel quality b', () => {
       reviews: [proseQualityReview()],
     })
 
-    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('ready_to_accept')
     expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
-    expect(model.primaryActionKey).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
   })
 
   test('passing quality with synchronized story state is ready to accept', () => {

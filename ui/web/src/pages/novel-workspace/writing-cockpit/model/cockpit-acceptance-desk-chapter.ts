@@ -422,12 +422,6 @@ export function buildChapterAcceptanceDesk(args: {
     secondaryActions.unshift({ key: 'apply_editor_revision', label: ACTION_LABELS.apply_editor_revision })
   }
   const needsStoryStateSync = Boolean(storyStatePanel && ['pending', 'skipped', 'lagging'].includes(storyStatePanel.status))
-  if (needsStoryStateSync) {
-    secondaryActions.unshift({
-      key: 'sync_story_state',
-      label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state,
-    })
-  }
 
   const admissionCommon = {
     storylineSync, storyUnitSync, assetIntake, ipSceneIntake, signatureSceneSync, readabilityReview,
@@ -455,7 +449,7 @@ export function buildChapterAcceptanceDesk(args: {
       : ''
     return {
       visible: true,
-      acceptanceStatus: needsStoryStateSync ? 'needs_state_sync' : 'delivered_with_warnings',
+      acceptanceStatus: 'delivered_with_warnings',
       ...admissionFields,
       statusLabel: needsStoryStateSync ? '已入库，待同步状态机' : '已入库，建议修订',
       acceptanceReasons: [
@@ -465,9 +459,7 @@ export function buildChapterAcceptanceDesk(args: {
       ].filter(Boolean).slice(0, 4),
       ...admissionCommon,
       approvalBlocker: null,
-      recommendedAcceptanceAction: needsStoryStateSync
-        ? { key: 'sync_story_state', label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state }
-        : { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
       shouldAutoExpandAcceptance: needsStoryStateSync || Boolean(storyStatePanel?.reasons?.length),
     }
   }
@@ -478,15 +470,13 @@ export function buildChapterAcceptanceDesk(args: {
       : '正文已入库，可以继续下一章。'
     return {
       visible: true,
-      acceptanceStatus: needsStoryStateSync ? 'needs_state_sync' : 'delivered',
+      acceptanceStatus: 'delivered',
       ...admissionFields,
       statusLabel: needsStoryStateSync ? '已入库，待同步状态机' : '已入库',
       acceptanceReasons: [storyReason, ...(storyStatePanel?.reasons || [])].filter(Boolean).slice(0, 4),
       ...admissionCommon,
       approvalBlocker: null,
-      recommendedAcceptanceAction: needsStoryStateSync
-        ? { key: 'sync_story_state', label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state }
-        : { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
       shouldAutoExpandAcceptance: needsStoryStateSync,
     }
   }
@@ -555,7 +545,7 @@ export function buildChapterAcceptanceDesk(args: {
   if (!storyStateSynced) {
     return {
       visible: true,
-      acceptanceStatus: 'needs_state_sync',
+      acceptanceStatus: 'ready_to_accept',
       ...admissionFields,
       statusLabel: '需同步故事状态',
       acceptanceReasons: [
@@ -564,10 +554,7 @@ export function buildChapterAcceptanceDesk(args: {
       ].filter(Boolean).slice(0, 4),
       ...admissionCommon,
       approvalBlocker,
-      recommendedAcceptanceAction: {
-        key: 'sync_story_state',
-        label: storyStatePanel?.primaryAction?.label || ACTION_LABELS.sync_story_state,
-      },
+      recommendedAcceptanceAction: { key: 'accept_chapter_and_continue', label: ACTION_LABELS.accept_chapter_and_continue },
       shouldAutoExpandAcceptance: true,
     }
   }

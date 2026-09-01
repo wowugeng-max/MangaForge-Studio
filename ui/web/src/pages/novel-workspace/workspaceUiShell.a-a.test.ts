@@ -654,6 +654,7 @@ describe('commercial writing workspace UI shell a a', () => {
     const acceptBody = actionHandlers.slice(acceptStart, acceptEnd)
     expect(acceptStart).toBeGreaterThan(-1)
     expect(acceptBody).not.toContain('write_continue')
+    expect(acceptBody).not.toContain('createJobByVerb')
     expect(acceptBody).not.toContain('/kernel/jobs')
 
     const emptyBlock = presenter.slice(

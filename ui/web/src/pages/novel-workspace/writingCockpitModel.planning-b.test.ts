@@ -118,8 +118,8 @@ describe('buildWritingCockpitModel planning b', () => {
     expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('pending')
     expect(model.chapterAcceptanceDesk.storyStatePanel?.headline).toContain('尚未写入')
     expect(model.chapterAcceptanceDesk.storyStatePanel?.reasons.join('；')).toContain('character_state_delta_sync')
-    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction?.key).toBe('sync_story_state')
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction).toBeNull()
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
     expect(model.chapterAcceptanceDesk.statusLabel).toContain('待同步状态机')
   })
 
@@ -152,8 +152,8 @@ describe('buildWritingCockpitModel planning b', () => {
 
     expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('skipped')
     expect(model.chapterAcceptanceDesk.storyStatePanel?.summary).toContain('不会自动写状态机')
-    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction?.label).toContain('同步故事状态')
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.storyStatePanel?.primaryAction).toBeNull()
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
   })
 
   test('shows established event preview when present', () => {

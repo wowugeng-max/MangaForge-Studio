@@ -39,3 +39,16 @@ describe('buildNovelDeliverySummary characterPov contract', () => {
     expect((summary.characterPov?.violations || []).some(item => item.includes('未授权视角'))).toBe(true)
   })
 })
+
+describe('buildNovelDeliverySummary story-state contract', () => {
+  test('writing delivery summary never exposes storyStateSyncAction', () => {
+    const summary = buildNovelDeliverySummary({
+      ...baseDesk,
+      storyStateSynced: false,
+      acceptanceStatus: 'needs_state_sync',
+      recommendedAcceptanceAction: { key: 'sync_story_state', label: '立即同步故事状态' },
+    })
+    expect(summary.storyStateSyncAction).toBeNull()
+    expect(summary.actionKey).not.toBe('sync_story_state')
+  })
+})

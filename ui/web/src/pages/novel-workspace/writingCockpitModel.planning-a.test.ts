@@ -493,7 +493,7 @@ describe('buildWritingCockpitModel planning a', () => {
     })
 
     expect(model.chapterAcceptanceDesk.statusLabel).toBe('已入库，待同步状态机')
-    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
     expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
     expect(model.chapterAcceptanceDesk.qualityWarnings).toEqual([
       { code: 'quality_score_below_target', source: 'quality', message: '评分低于建议目标' },
@@ -504,11 +504,12 @@ describe('buildWritingCockpitModel planning a', () => {
     expect(model.chapterAcceptanceDesk.mustFix).toContain('强化章末钩子')
     expect(model.chapterAcceptanceDesk.storyStateSynced).toBe(false)
     expect(model.chapterAcceptanceDesk.storyStatePanel?.status).toBe('pending')
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
-    expect(model.chapterAcceptanceDesk.secondaryActions.map(action => action.key)).toEqual(expect.arrayContaining(['apply_editor_revision', 'sync_story_state']))
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
+    expect(model.chapterAcceptanceDesk.secondaryActions.map(action => action.key)).toEqual(expect.arrayContaining(['apply_editor_revision']))
+    expect(model.chapterAcceptanceDesk.secondaryActions.map(action => action.key)).not.toContain('sync_story_state')
     expect(model.chapterAcceptanceDesk.approvalBlocker).toBeNull()
-    expect(model.chapterHandoffDesk.status).toBe('needs_delivery')
-    expect(model.primaryActionKey).toBe('sync_story_state')
+    expect(model.chapterHandoffDesk.status).toBe('ready')
+    expect(model.primaryActionKey).toBe('accept_chapter_and_continue')
   })
 
   test('accepted admission metadata overrides legacy low score must-fix and failed quality gate', () => {
@@ -696,8 +697,8 @@ describe('buildWritingCockpitModel planning a', () => {
     })
 
     expect(model.chapterAcceptanceDesk.admissionStatus).toBe('accepted_with_warnings')
-    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('needs_state_sync')
-    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('sync_story_state')
+    expect(model.chapterAcceptanceDesk.acceptanceStatus).toBe('delivered_with_warnings')
+    expect(model.chapterAcceptanceDesk.recommendedAcceptanceAction.key).toBe('accept_chapter_and_continue')
     expect(model.chapterAcceptanceDesk.qualityWarnings[0]?.message).toBe('评分低于建议目标')
   })
 

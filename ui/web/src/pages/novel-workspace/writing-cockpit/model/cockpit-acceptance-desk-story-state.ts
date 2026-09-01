@@ -229,9 +229,7 @@ export function buildStoryStatePanel(args: {
     chapterNo,
     lastUpdatedChapter,
     canSync,
-    primaryAction: canSync
-      ? { key: 'sync_story_state', label: status === 'skipped' || status === 'pending' || status === 'lagging' ? '立即同步故事状态' : '重新同步故事状态' }
-      : { key: 'sync_story_state', label: '重新同步故事状态' },
+    primaryAction: null,
     establishedEvents,
   }
 }

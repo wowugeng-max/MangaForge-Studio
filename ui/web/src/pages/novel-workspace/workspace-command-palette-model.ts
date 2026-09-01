@@ -43,6 +43,13 @@ export function buildWorkspaceCommands(ctx: WorkspaceCommandContext): WorkspaceC
         run: () => ctx.runWorkflowAction(action.key),
       })
     }
+    commands.push({
+      key: 'palette:sync_story_state',
+      label: '同步故事状态',
+      section: '章节行动',
+      keywords: ['sync', '状态机', 'story-state'],
+      run: () => ctx.runWorkflowAction('sync_story_state'),
+    })
   }
 
   if (ctx.openFindReplace) {

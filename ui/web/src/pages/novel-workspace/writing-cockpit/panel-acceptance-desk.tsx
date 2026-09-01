@@ -41,19 +41,6 @@ export function StoryStateSyncBanner({
             </ul>
           )}
           <Text type="secondary" style={wrapTextStyle}>{panel.guidance}</Text>
-          {panel.primaryAction && (
-            <div>
-              <Button
-                type="primary"
-                size="small"
-                loading={loading}
-                icon={actionIcon(panel.primaryAction.key, model.modelTeam.recommendedRole)}
-                onClick={() => onAction(panel.primaryAction!.key)}
-              >
-                {panel.primaryAction.label}
-              </Button>
-            </div>
-          )}
         </Space>
       )}
     />
@@ -112,18 +99,6 @@ export function ChapterAcceptanceDesk({
               <Button size="small" onClick={() => setExpanded(value => !value)}>
                 {expanded ? '收起交稿台' : '展开交稿台'}
               </Button>
-              {desk.storyStatePanel?.primaryAction && desk.storyStatePanel.status !== 'synced' && (
-                <Button
-                  type={desk.recommendedAcceptanceAction.key === 'sync_story_state' ? 'primary' : 'default'}
-                  size="small"
-                  loading={loading}
-                  icon={actionIcon('sync_story_state', model.modelTeam.recommendedRole)}
-                  onClick={() => onAction(desk.storyStatePanel!.primaryAction!.key)}
-                  style={{ whiteSpace: 'normal', height: 'auto', lineHeight: 1.25 }}
-                >
-                  {desk.storyStatePanel.primaryAction.label}
-                </Button>
-              )}
               {desk.recommendedAcceptanceAction.key !== 'sync_story_state' && (
                 <Button
                   type={desk.acceptanceStatus === 'ready_to_accept' ? 'primary' : 'default'}
@@ -187,22 +162,6 @@ export function ChapterAcceptanceDesk({
                       </div>
                     )}
                   </div>
-                )}
-                {desk.storyStatePanel.primaryAction && (
-                  <Space wrap>
-                    <Button
-                      type={desk.storyStatePanel.status === 'synced' ? 'default' : 'primary'}
-                      size="small"
-                      loading={loading}
-                      icon={actionIcon('sync_story_state', model.modelTeam.recommendedRole)}
-                      onClick={() => onAction(desk.storyStatePanel!.primaryAction!.key)}
-                    >
-                      {desk.storyStatePanel.primaryAction.label}
-                    </Button>
-                    <Text type="secondary" style={{ fontSize: 12 }}>
-                      正文不用重写；满意当前正文后点这里主动更新状态机。
-                    </Text>
-                  </Space>
                 )}
               </Space>
             )}

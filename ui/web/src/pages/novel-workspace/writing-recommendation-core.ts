@@ -171,6 +171,7 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     if (desk.acceptanceStatus === 'ready_to_accept' || desk.acceptanceStatus === 'delivered') return 'ready'
     return 'check'
   })()
+  const deliveryAction = resolveDeliveryAction(desk)
 
   return {
     visible: true,
@@ -221,9 +222,9 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
     approvalBlocker: desk.approvalBlocker || null,
     deliveryRiskQueue: desk.deliveryRiskQueue || null,
     deliveryRiskConvergence: desk.deliveryRiskConvergence || null,
-    actionKey: desk.recommendedAcceptanceAction.key,
-    actionLabel: desk.recommendedAcceptanceAction.label,
-    compactActionLabel: compactDeliveryActionLabel(desk.recommendedAcceptanceAction.key, desk.recommendedAcceptanceAction.label),
+    actionKey: deliveryAction.key,
+    actionLabel: deliveryAction.label,
+    compactActionLabel: compactDeliveryActionLabel(deliveryAction.key, deliveryAction.label),
     secondaryActions: desk.secondaryActions || [],
     characterPov: (() => {
       // Prefer planning desk POV if present: it already carries the declared UI string shape
@@ -268,18 +269,17 @@ export function buildNovelDeliverySummary(desk?: NovelDeliverySummaryInput | nul
       }
     })(),
     storyStatePanel: desk.storyStatePanel || null,
-    storyStateSyncAction: (() => {
-      const panel = desk.storyStatePanel
-      if (panel?.primaryAction && panel.status && panel.status !== 'synced') {
-        return { key: panel.primaryAction.key, label: panel.primaryAction.label }
-      }
-      const secondary = (desk.secondaryActions || []).find(item => item.key === 'sync_story_state')
-      if (secondary) return secondary
-      if (!desk.storyStateSynced && desk.acceptanceStatus !== 'hidden') {
-        return { key: 'sync_story_state', label: '立即同步故事状态' }
-      }
-      return null
-    })(),
+    storyStateSyncAction: null,
+  }
+}
+
+function resolveDeliveryAction(desk: NovelDeliverySummaryInput): { key: NovelDeliveryActionKey; label: string } {
+  const actionKey = desk.recommendedAcceptanceAction.key
+  const actionLabel = desk.recommendedAcceptanceAction.label
+  if (actionKey !== 'sync_story_state') return { key: actionKey, label: actionLabel }
+  return {
+    key: 'accept_chapter_and_continue',
+    label: actionLabel === '写下一章' ? actionLabel : '写下一章',
   }
 }
 

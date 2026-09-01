@@ -30,6 +30,17 @@ describe('buildWorkspaceCommands', () => {
     expect(calls).toEqual(['workflow:accept_chapter_and_continue'])
   })
 
+  test('keeps 同步故事状态 in the palette after presenter secondaries', () => {
+    const { ctx, calls } = contextWith()
+    const commands = buildWorkspaceCommands(ctx)
+    expect(commands[0].label).toBe('写下一章')
+    expect(commands.some(c => c.label === '同步故事状态')).toBe(true)
+    const sync = commands.find(c => c.key === 'palette:sync_story_state')
+    expect(sync?.section).toBe('章节行动')
+    sync?.run()
+    expect(calls).toContain('workflow:sync_story_state')
+  })
+
   test('包含次级动作与面板/编辑器入口', () => {
     const { ctx } = contextWith()
     const commands = buildWorkspaceCommands(ctx)

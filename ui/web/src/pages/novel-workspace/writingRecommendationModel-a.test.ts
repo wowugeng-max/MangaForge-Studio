@@ -143,7 +143,8 @@ describe('buildNovelDeliverySummary', () => {
     expect(summary.actionKey).toBe('refresh_current_quality')
     expect(summary.actionLabel).toBe('复检当前版本')
     expect(summary.storyStateLabel).toContain('落后于第 15 章')
-    expect(summary.storyStateSyncAction).toEqual({ key: 'sync_story_state', label: '立即同步故事状态' })
+    expect(summary.storyStateSyncAction).toBeNull()
+    expect(summary.actionKey).not.toBe('sync_story_state')
   })
 
   test('summarizes ready state with accept action', () => {
